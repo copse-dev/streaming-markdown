@@ -13,7 +13,7 @@ export interface ConformanceBaseline {
 
 const BASELINE_PATH = resolve(
   process.cwd(),
-  'packages/streaming-markdown/tests/fixtures/commonmark/conformance-baseline.json',
+  'tests/fixtures/commonmark/conformance-baseline.json',
 )
 
 /** Pinned CommonMark conformance baseline (see `conformance-baseline.json`). */

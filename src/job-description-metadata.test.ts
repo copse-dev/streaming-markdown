@@ -7,7 +7,7 @@ import { renderMarkdown } from './renderer.ts'
 
 const FIXTURE_PATH = resolve(
   process.cwd(),
-  'packages/streaming-markdown/tests/fixtures/job-description-metadata.md',
+  'tests/fixtures/job-description-metadata.md',
 )
 const JD = readFileSync(FIXTURE_PATH, 'utf8')
 

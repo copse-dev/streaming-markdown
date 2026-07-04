@@ -12,7 +12,7 @@ import { renderStreamingMarkdown, StreamingMarkdownRenderer } from './streaming.
 
 const TERMS_PATH = resolve(
   process.cwd(),
-  'packages/streaming-markdown/tests/fixtures/terms-of-service-streaming.md',
+  'tests/fixtures/terms-of-service-streaming.md',
 )
 const TERMS = readFileSync(TERMS_PATH, 'utf8')
 

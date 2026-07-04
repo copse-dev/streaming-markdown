@@ -1,11 +1,41 @@
-# Markdown rendering
+# @copse/streaming-markdown
 
-Hand-rolled renderer in `renderer.ts` used by conversation messages, subagent timelines, file
-preview, and streaming (`streaming.ts`). At-rest rendering routes through `tokenizeBlocks()` →
-`renderBlocks()` (`render-blocks.ts`); block/inlined tokenizers in `block-tokenizer.ts`,
-`inline-emphasis.ts`, and `streaming-split.ts` also drive streaming hold decisions (#475). It is
-not a standalone markdown library, but we **do** treat the CommonMark spec as the reference for
-block/inline structure and grow toward it incrementally (see conformance baseline below).
+A streaming-capable CommonMark renderer with two emitters: a pure string→HTML
+function for at-rest rendering, and an incremental DOM renderer that reveals
+partial markdown as tokens arrive without flashing raw syntax. Built for
+LLM/agent chat UIs, but host-independent.
+
+```bash
+npm install @copse/streaming-markdown
+```
+
+```ts
+import { renderMarkdown, sanitizeRenderedMarkdown } from '@copse/streaming-markdown'
+
+// renderMarkdown returns UNTRUSTED HTML — sanitize at every innerHTML sink.
+el.innerHTML = sanitizeRenderedMarkdown(renderMarkdown('# Hi\n\n**bold** and ~~strike~~'))
+```
+
+Streaming, syntax highlighting, Mermaid source preparation, and an injectable
+`LinkDecorator` for host-specific `<a>` routing are also exported — see the
+public surface in [`src/index.ts`](src/index.ts).
+
+## Development
+
+```bash
+npm install
+npm run typecheck   # tsc (strict, exactOptionalPropertyTypes)
+npm test            # node:test via tsx — unit + CommonMark conformance
+npm run build       # emit dist/ (ESM JS + .d.ts)
+```
+
+## Architecture
+
+Hand-rolled renderer in `renderer.ts`. At-rest rendering routes through
+`tokenizeBlocks()` → `renderBlocks()` (`render-blocks.ts`); block/inline tokenizers in
+`block-tokenizer.ts`, `inline-emphasis.ts`, and `streaming-split.ts` also drive streaming
+hold decisions (#475). It treats the CommonMark spec as the reference for block/inline
+structure and grows toward it incrementally (see conformance baseline below).
 
 ## Design invariants
 
@@ -170,18 +200,16 @@ list-style-position: outside`). Bullets should sit clearly inset from headings, 
   specific fixtures. Use shrink-to-fit edge columns (`width: 1%` + `nowrap`), `min-width: 0` on
   cells, and wrapping lone `<code>` slugs. Full rules: [`docs/ui-taste.md`](../../docs/ui-taste.md).
 
-Prefer structural unit tests on HTML output plus WDIO geometry checks over pixel-diff screenshot CI.
-E2e specs live in `tests/e2e/*.e2e.ts` (WebdriverIO) — not Playwright.
+Prefer structural unit tests on HTML output over pixel-diff screenshots. The DOM-level and
+end-to-end specs referenced below (`tests/e2e/*.e2e.ts`, WebdriverIO; CSS class assertions) live
+in the **consuming app** — this package ships the renderer and its unit/conformance suite; the
+host owns the browser-rendering and layout checks.
 
 ## Regression
 
-CI runs `npm run check` + `npm run build` + `npm run test:e2e`. After changing `renderer.ts`,
-`conversation.ts`, or `.message-text ul/ol` styles, also run:
-
-```bash
-npm run build
-npm run test:e2e:markdown
-```
+CI runs `npm run typecheck` + `npm test` + `npm run build`. `npm test` covers the unit suite plus
+the CommonMark conformance baseline. The DOM-glue and layout specs listed below are maintained by
+the downstream host app.
 
 ### Unit tests (`renderer.test.ts`, via `npm test`)
 

@@ -74,7 +74,7 @@ describe('CommonMark conformance (at rest)', () => {
     writeFileSync(
       resolve(
         process.cwd(),
-        'packages/streaming-markdown/tests/fixtures/commonmark/conformance-baseline.json',
+        'tests/fixtures/commonmark/conformance-baseline.json',
       ),
       JSON.stringify(baseline, null, 2) + '\n',
     )

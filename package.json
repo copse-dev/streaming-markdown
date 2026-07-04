@@ -5,11 +5,33 @@
   "description": "Streaming-capable CommonMark markdown renderer (string HTML + incremental DOM emitters)",
   "license": "Apache-2.0",
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonathanKingston/streaming-markdown.git"
   },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
-    "check:normalizer-parity": "node scripts/fetch-reference-normalizer.mts && node scripts/check-normalizer-parity.mts"
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "check:conformance": "node --import tsx --test src/commonmark-conformance.test.ts",
+    "check:normalizer-parity": "tsx scripts/fetch-reference-normalizer.mts && tsx scripts/check-normalizer-parity.mts",
+    "bench": "tsx scripts/bench-streaming.mts",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "entities": "^4.5.0",
@@ -17,7 +39,11 @@
     "highlight.js": "^11.11.1"
   },
   "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.10.0",
     "commonmark-spec": "0.31.2",
-    "jsdom": "^29.1.1"
+    "jsdom": "^29.1.1",
+    "tsx": "^4.19.2",
+    "typescript": "^6.0.3"
   }
 }

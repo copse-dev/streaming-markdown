@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+# fetched at check time by scripts/fetch-reference-normalizer.mts
+scripts/.reference-normalizer/
