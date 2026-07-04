@@ -31,6 +31,7 @@
     "check:conformance": "node --import tsx --test src/commonmark-conformance.test.ts",
     "check:normalizer-parity": "tsx scripts/fetch-reference-normalizer.mts && tsx scripts/check-normalizer-parity.mts",
     "bench": "tsx scripts/bench-streaming.mts",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
