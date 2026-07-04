@@ -7,7 +7,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jonathanKingston/streaming-markdown.git"
+    "url": "git+https://github.com/copse-dev/streaming-markdown.git"
   },
   "sideEffects": false,
   "files": [
