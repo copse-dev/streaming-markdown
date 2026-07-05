@@ -7,9 +7,9 @@ import {
   pendingHoldIndex,
   renderStreamingMarkdown,
   splitAtLastNewline,
-  splitForStreaming,
   StreamingMarkdownRenderer,
 } from './streaming.ts'
+import { splitCore } from '../tests/split-core.ts'
 import { withHostImagePolicy } from '../tests/host-image-test-policy.ts'
 
 describe('splitAtLastNewline', () => {
@@ -151,7 +151,7 @@ describe('pendingHoldIndex (defer unresolved inline markup)', () => {
 
 describe('splitForStreaming (block-granularity emphasis)', () => {
   it('holds an open emphasis span across a soft line break', () => {
-    assert.deepEqual(splitForStreaming('intro **bold\ntext'), {
+    assert.deepEqual(splitCore('intro **bold\ntext'), {
       complete: 'intro ',
       pending: '**bold\ntext',
     })
@@ -165,7 +165,7 @@ describe('splitForStreaming (block-granularity emphasis)', () => {
   })
 
   it('falls back to line split when emphasis is resolved', () => {
-    assert.deepEqual(splitForStreaming('done\nplain tail'), {
+    assert.deepEqual(splitCore('done\nplain tail'), {
       complete: 'done\n',
       pending: 'plain tail',
     })

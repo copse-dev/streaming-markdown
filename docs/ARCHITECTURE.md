@@ -148,6 +148,14 @@ When extending the renderer or its CSS, preserve these rules:
   | Pending table body row  | `tr.stream-pending-row` + `<td>`                                 | pipes = cell boundaries | per cell           |
   | Open fenced code        | `.stream-forming pre.stream-fence-forming`                       | yes                     | highlighted        |
 
+  These class hooks are exercised by the optional reference stylesheets in
+  [`styles/`](../styles) — `core.css` (structural rules the output needs to render
+  correctly: pending-state whitespace, task-list markers, code whitespace, blowout
+  guards) and `default.css` (a themed look on top, `--sm-*`-overridable). Both scope
+  every rule under a `.streaming-markdown` class; the host adds that class to the
+  render sink. The stylesheets are the visible companion to this table — renaming a
+  class here means updating them.
+
 ### Streaming architecture (intentional duplication)
 
 The streaming layer maintains **two parallel emitters** for the same decisions:

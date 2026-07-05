@@ -1,7 +1,6 @@
 {
   "name": "@copse/streaming-markdown",
   "version": "0.2.0",
-  "private": true,
   "description": "Streaming-capable CommonMark markdown renderer (string HTML + incremental DOM emitters)",
   "license": "Apache-2.0",
   "type": "module",
@@ -9,9 +8,12 @@
     "type": "git",
     "url": "git+https://github.com/copse-dev/streaming-markdown.git"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "**/*.css"
+  ],
   "files": [
     "dist",
+    "styles",
     "README.md",
     "LICENSE"
   ],
@@ -27,11 +29,16 @@
     "./sanitizers/browser": {
       "types": "./dist/sanitize-browser.d.ts",
       "import": "./dist/sanitize-browser.js"
-    }
+    },
+    "./styles/core.css": "./styles/core.css",
+    "./styles/default.css": "./styles/default.css"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=21"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "build:demo": "npm run build && esbuild docs/browser-entry.mjs --bundle --format=esm --platform=browser --outfile=docs/streaming-markdown.browser.mjs",

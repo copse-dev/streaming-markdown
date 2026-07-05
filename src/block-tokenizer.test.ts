@@ -12,7 +12,7 @@ import {
   streamingHoldStart,
   tokenizeBlocks,
 } from './block-tokenizer.ts'
-import { splitForStreaming } from './streaming-split.ts'
+import { splitCore } from '../tests/split-core.ts'
 
 describe('scanLines', () => {
   it('marks the final line unterminated when source lacks a trailing newline', () => {
@@ -197,32 +197,32 @@ describe('table streaming helpers', () => {
 
 describe('splitForStreaming (tokenizer #475)', () => {
   it('holds an ambiguous ATX heading until its line ends', () => {
-    assert.deepEqual(splitForStreaming('## Title'), {
+    assert.deepEqual(splitCore('## Title'), {
       complete: '',
       pending: '## Title',
     })
   })
 
   it('holds a table header row until the separator confirms structure', () => {
-    assert.deepEqual(splitForStreaming('| A | B |'), {
+    assert.deepEqual(splitCore('| A | B |'), {
       complete: '',
       pending: '| A | B |',
     })
-    assert.deepEqual(splitForStreaming('| A | B |\n| - |'), {
+    assert.deepEqual(splitCore('| A | B |\n| - |'), {
       complete: '',
       pending: '| A | B |\n| - |',
     })
   })
 
   it('commits a table once header and separator lines are complete', () => {
-    assert.deepEqual(splitForStreaming('| A | B |\n| - | - |\n'), {
+    assert.deepEqual(splitCore('| A | B |\n| - | - |\n'), {
       complete: '| A | B |\n| - | - |\n',
       pending: '',
     })
   })
 
   it('holds an open fence from its opener', () => {
-    assert.deepEqual(splitForStreaming('intro\n```ts\ncode'), {
+    assert.deepEqual(splitCore('intro\n```ts\ncode'), {
       complete: 'intro\n',
       pending: '```ts\ncode',
     })
@@ -234,21 +234,21 @@ describe('splitForStreaming (tokenizer #475)', () => {
   })
 
   it('holds unresolved inline emphasis inside an open paragraph', () => {
-    assert.deepEqual(splitForStreaming('intro **bold\ntext'), {
+    assert.deepEqual(splitCore('intro **bold\ntext'), {
       complete: 'intro ',
       pending: '**bold\ntext',
     })
   })
 
   it('falls back to line split for safe plain text', () => {
-    assert.deepEqual(splitForStreaming('done\nplain tail'), {
+    assert.deepEqual(splitCore('done\nplain tail'), {
       complete: 'done\n',
       pending: 'plain tail',
     })
   })
 
   it('commits finished list items while the next item is still streaming', () => {
-    assert.deepEqual(splitForStreaming('- item one\n- item two'), {
+    assert.deepEqual(splitCore('- item one\n- item two'), {
       complete: '- item one\n',
       pending: '- item two',
       openListItemFirstLine: '- item two',
@@ -257,7 +257,7 @@ describe('splitForStreaming (tokenizer #475)', () => {
 
   it('commits finished table body rows while the next row is still streaming', () => {
     assert.deepEqual(
-      splitForStreaming(
+      splitCore(
         '| Path | Role |\n| - | - |\n| src/ | Application source |\n| tests/e2e/ | WebdriverIO specs |',
       ),
       {

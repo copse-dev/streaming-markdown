@@ -1,0 +1,255 @@
+/*
+ * @copse/streaming-markdown — default theme
+ *
+ * A batteries-included look for rendered markdown. Imports core.css (structural
+ * rules) and layers spacing, typography, colour, tables, and a highlight.js
+ * syntax theme on top. Everything is scoped under `.streaming-markdown`.
+ *
+ *   import '@copse/streaming-markdown/styles/default.css'
+ *   el.classList.add('streaming-markdown')
+ *
+ * Retheme by setting the `--sm-*` custom properties on `.streaming-markdown`
+ * (or any ancestor) — each has a fallback so the sheet also stands alone:
+ *
+ *   --sm-line-height   line-height for prose            (1.55)
+ *   --sm-space-xs/sm/md   spacing scale                 (4px / 8px / 12px)
+ *   --sm-radius        corner radius                    (4px)
+ *   --sm-font-mono     monospace family for code        (system mono stack)
+ *   --sm-font-size-sm  size for code / tables           (0.85em)
+ *   --sm-fg-muted      secondary text (blockquotes …)   (#999)
+ *   --sm-border        borders / rules                  (#3c3c3c)
+ *   --sm-accent        links                            (#007acc)
+ *   --sm-code-bg       inline/block code + quote bg     (#252526)
+ *   --sm-th-stripe     even table-row background        (rgba(255,255,255,.02))
+ *   --sm-error         diagram error glyph              (#f48771)
+ *
+ * The `.hljs-*` rules below are a VS Code Dark+ palette; override by
+ * redeclaring those selectors after this import.
+ */
+
+@import './core.css';
+
+.streaming-markdown {
+  line-height: var(--sm-line-height, 1.55);
+  word-break: break-word;
+
+  & strong {
+    font-weight: 600;
+  }
+
+  & p {
+    margin: 0;
+    white-space: pre-wrap;
+  }
+
+  & h1,
+  & h2,
+  & h3,
+  & h4,
+  & h5,
+  & h6,
+  & .stream-pending-heading {
+    margin: var(--sm-space-md, 12px) 0 var(--sm-space-xs, 4px);
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  & > :first-child,
+  & h1:first-child,
+  & h2:first-child,
+  & h3:first-child,
+  & h4:first-child,
+  & .stream-pending-heading:first-child {
+    margin-top: 0;
+  }
+
+  /* Vertical rhythm between adjacent blocks. */
+  & p + p,
+  & p + ul,
+  & p + ol,
+  & ul + p,
+  & ol + p,
+  & h1 + p,
+  & h2 + p,
+  & h3 + p,
+  & h4 + p,
+  & p + h1,
+  & p + h2,
+  & p + h3,
+  & p + h4 {
+    margin-top: var(--sm-space-sm, 8px);
+  }
+
+  & ul,
+  & ol {
+    margin: var(--sm-space-sm, 8px) 0;
+    padding-inline-start: 1.5em;
+    list-style-position: outside;
+    /* pre-wrap on prose would otherwise render source newlines between items. */
+    white-space: normal;
+  }
+  & li > :first-child {
+    margin-top: 0;
+  }
+
+  /* Pending heading sizes (raw `#` markers are hidden mid-stream). */
+  & .stream-pending-h1,
+  & .stream-pending-h2 {
+    font-size: 1.15em;
+  }
+  & .stream-pending-h3 {
+    font-size: 1.05em;
+  }
+  & .stream-pending-h4,
+  & .stream-pending-h5,
+  & .stream-pending-h6 {
+    font-size: 1em;
+  }
+
+  /* Spacing for the committed-stream wrapper (`stream-complete`) and its pending
+     tail (`stream-pending-block`), both emitted by the DOM streaming renderer. */
+  & .stream-complete > .stream-pending-block:last-child,
+  & .stream-complete > h2 + .stream-pending-block,
+  & .stream-complete > h3 + .stream-pending-block,
+  & .stream-complete > h4 + .stream-pending-block {
+    margin-top: var(--sm-space-sm, 8px);
+  }
+
+  & code {
+    font-family: var(--sm-font-mono, ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace);
+    font-size: var(--sm-font-size-sm, 0.85em);
+    background: var(--sm-code-bg, #252526);
+    padding: 1px 4px;
+    border-radius: 2px;
+  }
+
+  & a {
+    color: var(--sm-accent, #007acc);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  & a:hover {
+    opacity: 0.85;
+  }
+
+  & pre {
+    background: var(--sm-code-bg, #252526);
+    padding: var(--sm-space-sm, 8px);
+    border-radius: var(--sm-radius, 4px);
+  }
+
+  & blockquote {
+    border-left: 3px solid var(--sm-border, #3c3c3c);
+    margin: var(--sm-space-sm, 8px) 0;
+    padding: var(--sm-space-xs, 4px) var(--sm-space-sm, 8px);
+    color: var(--sm-fg-muted, #999);
+    background: var(--sm-code-bg, #252526);
+    border-radius: 0 var(--sm-radius, 4px) var(--sm-radius, 4px) 0;
+  }
+  & blockquote p {
+    margin: 0;
+  }
+  & blockquote p + p {
+    margin-top: var(--sm-space-xs, 4px);
+  }
+  & blockquote.stream-pending-blockquote {
+    margin: var(--sm-space-sm, 8px) 0;
+  }
+
+  & hr {
+    border: none;
+    border-top: 1px solid var(--sm-border, #3c3c3c);
+    margin: var(--sm-space-md, 12px) 0;
+  }
+
+  /* Tables: separated borders + overflow clip so outer corners can round. */
+  & table {
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid var(--sm-border, #3c3c3c);
+    border-radius: var(--sm-radius, 4px);
+    width: 100%;
+    table-layout: auto;
+    margin: var(--sm-space-sm, 8px) 0;
+    font-size: var(--sm-font-size-sm, 0.85em);
+    white-space: normal;
+    /* Scroll only when a cell has an unbreakable run (e.g. a long hash). */
+    overflow-x: auto;
+  }
+  & th,
+  & td {
+    border-right: 1px solid var(--sm-border, #3c3c3c);
+    border-bottom: 1px solid var(--sm-border, #3c3c3c);
+    padding: 4px 10px;
+    text-align: left;
+    vertical-align: top;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: break-word;
+    min-width: 0;
+  }
+  & th:last-child,
+  & td:last-child {
+    border-right: none;
+  }
+  & tr:last-child td {
+    border-bottom: none;
+  }
+  & th {
+    background: var(--sm-code-bg, #252526);
+    font-weight: 600;
+  }
+  & tbody tr:nth-child(even) td {
+    background: var(--sm-th-stripe, rgba(255, 255, 255, 0.02));
+  }
+
+  & .mermaid-diagram {
+    margin: var(--sm-space-sm, 8px) 0;
+  }
+  & .mermaid-diagram .error-icon {
+    fill: var(--sm-error, #f48771);
+  }
+}
+
+/* highlight.js tokens — VS Code Dark+ inspired. Override by redeclaring these
+   selectors after importing this sheet. */
+.streaming-markdown {
+  & .hljs-comment,
+  & .hljs-quote {
+    color: #6a9955;
+    font-style: italic;
+  }
+  & .hljs-keyword,
+  & .hljs-selector-tag,
+  & .hljs-built_in {
+    color: #569cd6;
+  }
+  & .hljs-string,
+  & .hljs-regexp {
+    color: #ce9178;
+  }
+  & .hljs-number,
+  & .hljs-literal {
+    color: #b5cea8;
+  }
+  & .hljs-title,
+  & .hljs-title.function_,
+  & .hljs-function .hljs-title {
+    color: #dcdcaa;
+  }
+  & .hljs-type,
+  & .hljs-class .hljs-title {
+    color: #4ec9b0;
+  }
+  & .hljs-attr,
+  & .hljs-attribute,
+  & .hljs-variable,
+  & .hljs-template-variable {
+    color: #9cdcfe;
+  }
+  & .hljs-meta,
+  & .hljs-symbol {
+    color: #d4d4d4;
+  }
+}

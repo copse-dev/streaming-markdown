@@ -49,17 +49,18 @@ function canReuse(node: Node, next: Node): boolean {
 }
 
 /**
- * Reconcile `parent`'s children in place so they match `template`'s children,
- * reusing existing nodes wherever `canReuse` holds. Nodes taken from `template`
- * are moved into `parent`; `template` is left partially emptied and discarded by
- * the caller.
+ * Reconcile `parent`'s children in place so those from `offset` onward match
+ * `template`'s children, reusing existing nodes wherever `canReuse` holds. Nodes
+ * before `offset` are left untouched (used to protect a frozen prefix, #21).
+ * Nodes taken from `template` are moved into `parent`; `template` is left
+ * partially emptied and discarded by the caller.
  */
-function morphChildren(parent: Node, template: Node): void {
+function morphChildren(parent: Node, template: Node, offset = 0): void {
   const nextChildren = Array.from(template.childNodes)
   for (let i = 0; i < nextChildren.length; i++) {
     const next = nextChildren[i]
     if (!next) continue
-    const current = parent.childNodes[i]
+    const current = parent.childNodes[offset + i]
     if (!current) {
       parent.appendChild(next)
       continue
@@ -76,7 +77,7 @@ function morphChildren(parent: Node, template: Node): void {
       parent.replaceChild(next, current)
     }
   }
-  while (parent.childNodes.length > nextChildren.length) {
+  while (parent.childNodes.length > offset + nextChildren.length) {
     parent.lastChild?.remove()
   }
 }
@@ -87,13 +88,56 @@ function morphChildren(parent: Node, template: Node): void {
  * serialization is identical to `container.innerHTML = html`.
  */
 export function morphInnerHtml(container: HTMLElement, html: string): void {
+  // Reconcile the whole child list. `morphInnerHtmlFrom(_, 0, '')` trims every
+  // child (equivalent to `replaceChildren()`), so the empty case needs no
+  // special-casing here.
+  morphInnerHtmlFrom(container, 0, html)
+}
+
+/**
+ * Like {@link morphInnerHtml} but reconciles only the children from `startIndex`
+ * onward, leaving the first `startIndex` children (a frozen prefix) untouched.
+ * The resulting serialization of the `[startIndex, …)` region is identical to
+ * having assigned that region via `innerHTML` (#21).
+ */
+export function morphInnerHtmlFrom(container: HTMLElement, startIndex: number, html: string): void {
   if (html === '') {
-    container.replaceChildren()
+    while (container.childNodes.length > startIndex) container.lastChild?.remove()
     return
   }
   // Shallow-clone the container so `html` parses in an identical context to
   // `container.innerHTML = html`, guaranteeing byte-identical serialization.
   const template = container.cloneNode(false) as HTMLElement
   template.innerHTML = html
-  morphChildren(container, template)
+  morphChildren(container, template, startIndex)
+}
+
+/**
+ * Reconcile `el`'s children from `offset` onward against `template`'s children,
+ * leaving the first `offset` children untouched. Used for intra-list freezing
+ * (#29): the frozen `<li>` prefix of a still-growing `<ul>` is never touched,
+ * only the items after it are reconciled. Nodes are moved out of `template`.
+ */
+export function morphElementChildrenFrom(el: Element, template: Element, offset: number): void {
+  morphChildren(el, template, offset)
+}
+
+/**
+ * Make `el`'s attribute list byte-identical (names, values, and order) to
+ * `template`'s, without touching children. A shared streaming list element can
+ * legitimately change attributes while its frozen items must not be re-rendered
+ * — e.g. `<ul>` gaining `class="contains-task-list"` when a later item adds a
+ * checkbox (#29).
+ */
+export function syncAttributes(el: Element, template: Element): void {
+  if (attributesEqual(el, template)) return
+  while (el.attributes.length > 0) {
+    const attr = el.attributes[0]
+    if (!attr) break
+    el.removeAttribute(attr.name)
+  }
+  for (let i = 0; i < template.attributes.length; i++) {
+    const attr = template.attributes[i]
+    if (attr) el.setAttribute(attr.name, attr.value)
+  }
 }

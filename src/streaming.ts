@@ -4,6 +4,8 @@ import {
   getIncompleteTableSource,
   isAmbiguousBlockLine,
   pendingLineBelongsInTable,
+  tokenizeBlocks,
+  type BlockToken,
 } from './block-tokenizer.ts'
 import {
   isListContinuationPending,
@@ -14,7 +16,9 @@ import {
   pendingListOrderedMarker,
   renderPendingLine,
 } from './render-pending-line.ts'
-import { splitForStreaming, type StreamingSplit } from './streaming-split.ts'
+import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from './streaming-split.ts'
+import { IncrementalSourceScanner } from './incremental-scan.ts'
+export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import {
@@ -30,7 +34,7 @@ import {
   clearFormingFenceDom,
   syncFormingFenceDom,
 } from './streaming-fence-dom.ts'
-import { morphInnerHtml } from './streaming-dom-morph.ts'
+import { FrozenTailRenderer } from './streaming-frozen-tail.ts'
 
 export { pendingHoldIndex } from './inline-emphasis.ts'
 export { splitAtLastNewline, splitForStreaming } from './streaming-split.ts'
@@ -50,6 +54,29 @@ const BLOCK_PENDING_CLASS = 'stream-pending-block'
 const LIST_CONTINUATION_CLASS = 'stream-pending-list-continuation'
 const TRAILING_OPEN_LI_CLOSE_RE = /(<li(?:\s[^>]*)?>)([\s\S]*?)(<\/li>\s*<\/(?:ul|ol)>)\s*$/
 
+// Pending tail elements always live at the very end of `stream-complete`: a
+// pending block is appended as the last direct child, and a pending list item /
+// continuation span lives inside the trailing list (the last element child).
+// Every clear runs *before* the next pending element is appended, so the target
+// is always within the last element child at query time. Scoping the pending
+// queries there instead of `querySelector`-ing the whole committed subtree turns
+// an O(prefix)-per-frame DOM scan into O(tail) — the dominant residual cost of a
+// long stream once the committed prefix is frozen (#21 follow-up). jsdom's
+// `:scope >`/descendant selectors still walk the full subtree, so this matters.
+
+/** A pending descendant (continuation span, pending `<li>`) inside the trailing list. */
+function tailPendingDescendant(completedEl: HTMLElement, selector: string): Element | null {
+  return completedEl.lastElementChild?.querySelector(selector) ?? null
+}
+
+/** A pending block element attached directly to `completedEl` (always the last child). */
+function tailDirectPendingBlock(completedEl: HTMLElement, excludeLi: boolean): Element | null {
+  const last = completedEl.lastElementChild
+  if (!last || !last.classList.contains(BLOCK_PENDING_CLASS)) return null
+  if (excludeLi && last.tagName === 'LI') return null
+  return last
+}
+
 function insertBeforeTrailingListClose(rendered: string, insertHtml: string): string | null {
   const liClose = rendered.match(TRAILING_OPEN_LI_CLOSE_RE)?.[3]
   if (!liClose) return null
@@ -60,12 +87,14 @@ type BlockPendingCleanup = 'continuation' | 'list-items' | 'direct-blocks' | 'no
 
 function clearBlockPendingDom(completedEl: HTMLElement, parts: BlockPendingCleanup[]): void {
   if (parts.includes('continuation')) clearListContinuationDom(completedEl)
-  if (parts.includes('list-items')) completedEl.querySelector(`li.${BLOCK_PENDING_CLASS}`)?.remove()
+  if (parts.includes('list-items')) {
+    tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)?.remove()
+  }
   if (parts.includes('direct-blocks')) {
-    completedEl.querySelector(`:scope > .${BLOCK_PENDING_CLASS}`)?.remove()
+    tailDirectPendingBlock(completedEl, false)?.remove()
   }
   if (parts.includes('non-list-direct')) {
-    completedEl.querySelector(`:scope > .${BLOCK_PENDING_CLASS}:not(li)`)?.remove()
+    tailDirectPendingBlock(completedEl, true)?.remove()
   }
 }
 
@@ -157,22 +186,21 @@ function syncListPendingDom(
 
   const listTag = pendingListTag(pending)
   const indent = listPendingIndent(pending)
-  const existingPendingLi = completedEl.querySelector(`li.${BLOCK_PENDING_CLASS}`)
+  const existingPendingLi = tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)
 
   if (!active || !pendingInner) {
     existingPendingLi?.remove()
-    const emptyList = completedEl.querySelector(`:scope > ${listTag}:empty`)
-    emptyList?.remove()
+    const last = completedEl.lastElementChild
+    if (last && last.tagName === listTag.toUpperCase() && last.childNodes.length === 0) {
+      last.remove()
+    }
     return
   }
 
-  let list: HTMLElement
+  let list: HTMLElement | null = null
   if (indent > 0) {
     const hostLi = findOpenListItemHost(completedEl)
-    if (!hostLi) {
-      list = document.createElement(listTag)
-      completedEl.append(list)
-    } else {
+    if (hostLi) {
       const existingNested = hostLi.querySelector(`:scope > ${listTag}:last-of-type`)
       if (existingNested instanceof Element && existingNested.tagName === listTag.toUpperCase()) {
         list = existingNested as HTMLElement
@@ -181,7 +209,12 @@ function syncListPendingDom(
         hostLi.append(list)
       }
     }
-  } else {
+    // No committed item to nest under (e.g. the previous block is a paragraph):
+    // fall through to the trailing top-level list, which reuses the wrapper this
+    // pending item created on an earlier frame instead of appending a fresh
+    // empty list every frame.
+  }
+  if (!list) {
     const trailing = findTrailingListHost(completedEl, listTag)
     list =
       trailing ??
@@ -266,14 +299,25 @@ function inlinePendingSpanHtml(pendingInner: string): string {
 }
 
 function findOpenListItemHost(completedEl: HTMLElement): HTMLElement | null {
-  const li = completedEl.querySelector(
-    'ul:last-of-type > li:last-child, ol:last-of-type > li:last-child',
-  )
-  return li instanceof Element && li.tagName === 'LI' ? (li as HTMLElement) : null
+  // The open list item that a pending line continues is the last item of the
+  // trailing list; the callers clear any trailing pending block first, so that
+  // list is the last element child (scoped lookup instead of an O(prefix) scan).
+  const last = completedEl.lastElementChild
+  if (!(last instanceof HTMLElement) || (last.tagName !== 'UL' && last.tagName !== 'OL')) {
+    return null
+  }
+  // The host must be a *committed* item. When the trailing list is the wrapper
+  // holding the pending <li> itself, skip it — returning the pending item here
+  // would make it its own nesting host and detach it (#21 review finding).
+  let li = last.lastElementChild
+  if (li instanceof HTMLElement && li.classList.contains(BLOCK_PENDING_CLASS)) {
+    li = li.previousElementSibling
+  }
+  return li instanceof HTMLElement && li.tagName === 'LI' ? li : null
 }
 
 function clearListContinuationDom(completedEl: HTMLElement): void {
-  completedEl.querySelector(`li .${LIST_CONTINUATION_CLASS}`)?.remove()
+  tailPendingDescendant(completedEl, `li .${LIST_CONTINUATION_CLASS}`)?.remove()
 }
 
 function syncListContinuationDom(
@@ -319,7 +363,7 @@ function syncBlockPendingDom(
   }
 
   clearBlockPendingDom(completedEl, ['continuation', 'list-items'])
-  const existing = completedEl.querySelector(`:scope > .${BLOCK_PENDING_CLASS}`)
+  const existing = tailDirectPendingBlock(completedEl, false)
   if (!active || !pendingInner) {
     existing?.remove()
     return
@@ -356,9 +400,10 @@ function renderPendingTail(
   split: StreamingSplit,
   complete: string,
   formingActive: boolean,
+  completeTokens?: BlockToken[],
 ): { pendingInner: string; pendingVisible: boolean } {
   const { pending, openListItemFirstLine } = split
-  const pendingInTable = pendingLineBelongsInTable(complete, pending)
+  const pendingInTable = pendingLineBelongsInTable(complete, pending, completeTokens)
   const pendingInner =
     pending && !pendingInTable && !formingActive
       ? sanitizeRenderedMarkdown(renderPendingInlineMarkdown(pending, openListItemFirstLine))
@@ -374,10 +419,19 @@ function renderPendingTail(
  */
 export function renderStreamingMarkdown(content: string): string {
   const split = splitForStreaming(content)
-  const { complete, pending, openListItemFirstLine } = split
-  const rendered = complete ? sanitizeRenderedMarkdown(renderMarkdown(complete)) : ''
-  const fenceSource = formingFenceSource(content)
-  const tableSource = fenceSource ? null : formingTableSource(complete, content, pending)
+  const { complete, pending, openListItemFirstLine, blocks } = split
+  // Tokenize `complete` at most once and reuse it for the render and the
+  // table checks (Layer 1, #21). `blocks` is `tokenizeBlocks(content)`.
+  let completeTokensCache: BlockToken[] | null = null
+  const completeTokens = (): BlockToken[] => (completeTokensCache ??= tokenizeBlocks(complete))
+  const completeTokensForPending = pending.includes('|') ? completeTokens() : undefined
+  const rendered = complete
+    ? sanitizeRenderedMarkdown(renderMarkdown(complete, { tokens: completeTokens() }))
+    : ''
+  const fenceSource = formingFenceSource(content, blocks)
+  const tableSource = fenceSource
+    ? null
+    : formingTableSource(complete, content, pending, blocks, completeTokensForPending)
   const formingHtml = fenceSource
     ? buildFormingFenceHtml(fenceSource)
     : tableSource
@@ -388,7 +442,7 @@ export function renderStreamingMarkdown(content: string): string {
     return `${rendered}${formingHtml}`
   }
   if (!pending) return rendered
-  if (pendingLineBelongsInTable(complete, pending)) {
+  if (pendingLineBelongsInTable(complete, pending, completeTokensForPending)) {
     return appendPendingTableRowHtml(rendered, pending)
   }
   const pendingInner = sanitizeRenderedMarkdown(
@@ -424,6 +478,16 @@ export class StreamingMarkdownRenderer {
   private formingEl: HTMLElement | null = null
   private pendingEl: HTMLSpanElement | null = null
   private lastComplete = ''
+  /** `tokenizeBlocks(lastComplete)` — cached so pending-only frames stay O(tail). */
+  private committedTokens: BlockToken[] = []
+  /** Whether `lastComplete` contains `|` — cached for the same reason. */
+  private committedHasPipe = false
+  private readonly frozenTail = new FrozenTailRenderer()
+  // Incremental scanners (#30): re-tokenize / re-scan only past the last safe
+  // boundary instead of the whole string every update. One per source stream —
+  // the raw content and the committed prefix advance differently.
+  private readonly contentScanner = new IncrementalSourceScanner()
+  private readonly completeScanner = new IncrementalSourceScanner()
   private readonly host: HTMLElement
 
   constructor(host: HTMLElement) {
@@ -432,38 +496,58 @@ export class StreamingMarkdownRenderer {
 
   /** Render `content` (the full message text so far) into the host incrementally. */
   update(content: string): void {
-    const split = splitForStreaming(content)
-    const { complete, pending, openListItemFirstLine } = split
+    const split = splitForStreamingFrom(content, this.contentScanner.tokenize(content))
+    const { complete, pending, openListItemFirstLine, blocks } = split
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
 
     if (complete !== this.lastComplete) {
-      // Reconcile in place instead of `innerHTML = …`: already-committed blocks
-      // keep their node identity so a pending→committed promotion patches only
-      // the promoting block, never tearing down the whole committed subtree.
-      morphInnerHtml(completedEl, complete ? sanitizeRenderedMarkdown(renderMarkdown(complete)) : '')
+      // Tokenize `complete` once per COMMIT — incrementally (#30) — and cache
+      // on the instance so pending-only frames (the vast majority) never
+      // re-scan at all (#21). When the split committed everything, `blocks`
+      // already is `tokenizeBlocks(complete)`; still feed the scanner so its
+      // link-ref cache and safe boundary advance with it.
+      this.committedTokens = this.completeScanner.tokenize(complete)
+      this.committedHasPipe = complete.includes('|')
+      // Freeze the settled prefix and re-render only the tail group (#21). Blocks
+      // that can never change again keep their node identity permanently; the
+      // fast path degrades to a full in-place morph on any uncertainty, so output
+      // is byte-identical to re-rendering the whole committed prefix.
+      this.frozenTail.update(
+        completedEl,
+        complete,
+        this.committedTokens,
+        this.completeScanner.linkRefs(complete),
+      )
       this.lastComplete = complete
     }
+    const completeTokensForPending = pending.includes('|') ? this.committedTokens : undefined
 
-    const fenceSource = formingFenceSource(content)
-    const tableSource = formingTableSource(complete, content, pending)
-    if (fenceSource) {
-      syncFormingFenceDom(formingEl, fenceSource)
+    // A committed GFM table always contains `|`; without one there is no table
+    // to sync or clean up, so skip the whole-subtree `querySelectorAll('table')`
+    // scan `findLastCommittedTable` would otherwise run on every update — the
+    // last O(prefix)-per-commit DOM cost after the frozen/tail split (#21).
+    const mayHaveCommittedTable = this.committedHasPipe
+    const fenceSource = formingFenceSource(content, blocks)
+    const tableSource = formingTableSource(complete, content, pending, blocks, completeTokensForPending)
+    if (fenceSource || tableSource) {
+      if (fenceSource) syncFormingFenceDom(formingEl, fenceSource)
+      else if (tableSource) syncFormingTableDom(formingEl, tableSource)
       formingEl.hidden = false
-      const committed = this.findLastCommittedTable()
-      if (committed) removePendingTableRow(committed)
-    } else if (tableSource) {
-      syncFormingTableDom(formingEl, tableSource)
-      formingEl.hidden = false
-      const committed = this.findLastCommittedTable()
+      const committed = mayHaveCommittedTable ? this.findLastCommittedTable() : null
       if (committed) removePendingTableRow(committed)
     } else {
       clearFormingDom(formingEl)
       formingEl.hidden = true
-      this.syncCommittedTableRow(complete, pending)
+      if (mayHaveCommittedTable) this.syncCommittedTableRow(complete, pending, completeTokensForPending)
     }
 
     const formingActive = fenceSource !== null || tableSource !== null
-    const { pendingInner, pendingVisible } = renderPendingTail(split, complete, formingActive)
+    const { pendingInner, pendingVisible } = renderPendingTail(
+      split,
+      complete,
+      formingActive,
+      completeTokensForPending,
+    )
 
     if (pendingVisible && isBlockLevelPending(pending, openListItemFirstLine)) {
       syncBlockPendingDom(completedEl, pending, pendingInner, true, openListItemFirstLine)
@@ -474,11 +558,15 @@ export class StreamingMarkdownRenderer {
     }
   }
 
-  private syncCommittedTableRow(complete: string, pending: string): void {
+  private syncCommittedTableRow(
+    complete: string,
+    pending: string,
+    completeTokens?: BlockToken[],
+  ): void {
     const table = this.findLastCommittedTable()
     if (!table) return
 
-    if (pendingLineBelongsInTable(complete, pending)) {
+    if (pendingLineBelongsInTable(complete, pending, completeTokens)) {
       syncPendingTableRowDom(table, pending)
       return
     }
@@ -525,22 +613,33 @@ export class StreamingMarkdownRenderer {
     this.formingEl = formingEl
     this.pendingEl = pendingEl
     this.lastComplete = ''
+    this.committedTokens = []
+    this.committedHasPipe = false
+    // The committed subtree was just rebuilt, so any frozen bookkeeping now
+    // dangles against a fresh element (gap D) — start it over.
+    this.frozenTail.reset()
     return { completedEl, formingEl, pendingEl }
   }
 }
 
-function formingTableSource(complete: string, content: string, pending: string): string | null {
-  if (getIncompleteFenceSource(content)) return null
-  if (pendingLineBelongsInTable(complete, pending)) return null
-  const fromTokens = getIncompleteTableSource(content)
+function formingTableSource(
+  complete: string,
+  content: string,
+  pending: string,
+  contentTokens?: BlockToken[],
+  completeTokens?: BlockToken[],
+): string | null {
+  if (getIncompleteFenceSource(content, contentTokens)) return null
+  if (pendingLineBelongsInTable(complete, pending, completeTokens)) return null
+  const fromTokens = getIncompleteTableSource(content, contentTokens)
   if (fromTokens) return fromTokens
   const trimmed = pending.trimStart()
   if (trimmed.startsWith('|') && trimmed.includes('|', 1)) return pending
   return null
 }
 
-function formingFenceSource(content: string): string | null {
-  return getIncompleteFenceSource(content)
+function formingFenceSource(content: string, contentTokens?: BlockToken[]): string | null {
+  return getIncompleteFenceSource(content, contentTokens)
 }
 
 function clearFormingDom(container: HTMLElement): void {

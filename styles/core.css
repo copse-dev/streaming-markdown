@@ -1,0 +1,83 @@
+/*
+ * @copse/streaming-markdown — core (structural) styles
+ *
+ * The minimum rules required for the renderer's output to display CORRECTLY,
+ * independent of any theme: streaming pending-state whitespace, task-list
+ * marker suppression, code-block whitespace, and layout-blowout guards. It
+ * carries no colours, spacing, or typography — pair it with your own theme, or
+ * import `default.css` (which imports this file) for a batteries-included look.
+ *
+ * Everything is scoped under `.streaming-markdown`. Put that class on the
+ * element you assign rendered markdown to. Authored with native CSS nesting.
+ *
+ * Class contract: see docs/ARCHITECTURE.md in the source repo.
+ */
+
+.streaming-markdown {
+  /* Pending (mid-stream) blocks hold raw text before a block is committed;
+     preserve the source whitespace so partial lines read correctly. */
+  & .stream-pending {
+    white-space: pre-wrap;
+  }
+  & .stream-pending-paragraph,
+  & p.stream-pending-paragraph {
+    display: block;
+    margin: 0;
+    white-space: pre-wrap;
+  }
+  & li.stream-pending-list-item {
+    white-space: normal;
+  }
+  & .stream-pending-list-continuation,
+  & span.stream-pending-list-continuation {
+    white-space: normal;
+  }
+  & .stream-pending-heading,
+  & div.stream-pending-heading,
+  & p.stream-pending-heading {
+    display: block;
+    white-space: normal;
+  }
+  & blockquote.stream-pending-blockquote p {
+    margin: 0;
+    white-space: pre-wrap;
+  }
+
+  /* GFM task lists: the checkbox is the marker, so drop the bullet and the
+     hanging indent. `li.task-list-item` also covers a task item mixed into an
+     otherwise-bulleted list. */
+  & ul.contains-task-list {
+    padding-inline-start: 0;
+    list-style: none;
+  }
+  & li.task-list-item {
+    list-style: none;
+  }
+  & li.task-list-item input[type='checkbox'] {
+    margin-inline-end: 0.45em;
+    vertical-align: middle;
+    cursor: default;
+  }
+
+  /* Fenced/indented code keeps its own whitespace and never inherits inline
+     `code` chrome; scroll instead of widening the container. */
+  & pre {
+    overflow-x: auto;
+    white-space: pre;
+  }
+  & pre code {
+    white-space: pre;
+    background: none;
+    padding: 0;
+  }
+
+  /* Blowout guards: keep wide tables and rendered diagrams inside the column. */
+  & table {
+    max-width: 100%;
+  }
+  & .mermaid-diagram svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+}

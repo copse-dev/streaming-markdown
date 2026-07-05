@@ -16,6 +16,16 @@ export interface StreamingSplit {
   openListItemFirstLine?: string
 }
 
+/**
+ * A `StreamingSplit` that also carries the `tokenizeBlocks(content)` result
+ * computed while deciding the commit boundary. Callers thread these tokens back
+ * into the block helpers so a single `update()` tokenizes `content` once (#21).
+ */
+export interface StreamingSplitWithTokens extends StreamingSplit {
+  /** `tokenizeBlocks(content)` — the tokens of the *full* streamed content. */
+  blocks: BlockToken[]
+}
+
 /** Split streamed content at the last newline (legacy helper). */
 export function splitAtLastNewline(content: string): StreamingSplit {
   const lastNl = content.lastIndexOf('\n')
@@ -98,9 +108,32 @@ function splitOpenTable(block: BlockToken, content: string): StreamingSplit {
 /**
  * Split streaming content at a tokenizer-safe commit boundary. Completed blocks
  * are committed; open, ambiguous, or partially-resolved inline regions stay pending.
+ *
+ * The result deliberately carries `blocks` — the `tokenizeBlocks(content)` array
+ * computed while deciding the boundary — so per-frame callers tokenize once
+ * (#21). Callers that snapshot/`deepEqual`/serialize the result should compare
+ * the `StreamingSplit` fields and ignore `blocks` (it is derived, O(document),
+ * and fully determined by `content`).
  */
-export function splitForStreaming(content: string): StreamingSplit {
-  const blocks = tokenizeBlocks(content)
+export function splitForStreaming(content: string): StreamingSplitWithTokens {
+  return splitForStreamingFrom(content, tokenizeBlocks(content))
+}
+
+/**
+ * `splitForStreaming` with the tokenization supplied by the caller — the entry
+ * point for incremental tokenization (#30), where `blocks` comes from an
+ * `IncrementalSourceScanner` instead of a fresh full-string scan. `blocks` must
+ * equal `tokenizeBlocks(content)`.
+ */
+export function splitForStreamingFrom(
+  content: string,
+  blocks: BlockToken[],
+): StreamingSplitWithTokens {
+  return { ...splitForStreamingCore(content, blocks), blocks }
+}
+
+/** Commit-boundary decision, given the already-computed `content` tokens (#21). */
+function splitForStreamingCore(content: string, blocks: BlockToken[]): StreamingSplit {
   const firstOpen = blocks.find((b) => b.status !== 'complete')
 
   if (!firstOpen) {
