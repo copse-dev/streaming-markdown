@@ -141,20 +141,92 @@ function dedentListItemContent(slice: string): string {
   return dedented.join('\n')
 }
 
+/**
+ * The dedent + tokenization of one list-item slice, independent of the group's
+ * looseness and link-ref map. Both looseness detection (`scanListGroup`) and
+ * rendering (`renderListItemContent`) need it, so it is computed once here and
+ * reused — the two used to dedent and tokenize the same item separately.
+ */
+interface ListItemAnalysis {
+  /** Dedented, task-marker-stripped content to render (`''` for an empty item). */
+  inner: string
+  /** Parsed leading task-list checkbox, if any. */
+  task: TaskListMarker | null
+  /** `tokenizeBlocks(inner)` — the block structure rendering consumes. */
+  tokens: BlockToken[]
+  /** Two+ blank-separated top-level blocks: loose-list evidence (spec 307/318/319). */
+  multiParagraph: boolean
+  /** The item has no content at all (bare marker). */
+  empty: boolean
+}
+
+/**
+ * Bounded memo keyed by the exact item source slice. `analyzeListItemSlice` is
+ * a pure function of that slice, so identical slices reuse the result; the cap
+ * keeps memory flat across a long streaming session (tail item slices grow, so
+ * old keys go dead and evict FIFO).
+ */
+const LIST_ITEM_ANALYSIS_CACHE = new Map<string, ListItemAnalysis>()
+const LIST_ITEM_ANALYSIS_CACHE_MAX = 1024
+
+function tokensHaveBlankSeparatedBlocks(tokens: BlockToken[]): boolean {
+  let seenBlock = false
+  let blankSince = false
+  for (const token of tokens) {
+    if (token.kind === 'blank') {
+      if (seenBlock) blankSince = true
+      continue
+    }
+    if (seenBlock && blankSince) return true
+    seenBlock = true
+  }
+  return false
+}
+
+function analyzeListItemSlice(slice: string): ListItemAnalysis {
+  const cached = LIST_ITEM_ANALYSIS_CACHE.get(slice)
+  if (cached) return cached
+
+  const dedented = dedentListItemContent(slice)
+  let analysis: ListItemAnalysis
+  if (dedented.trim() === '') {
+    analysis = { inner: '', task: null, tokens: [], multiParagraph: false, empty: true }
+  } else {
+    // A checkbox marker only counts on the item's first content line; strip it
+    // before recursive tokenization so the box never lands inside prose.
+    const task = parseTaskListMarker(dedented)
+    const inner = task ? task.rest : dedented
+    // Item content is a block fragment in its own right: recursive tokenization
+    // handles nested lists, fences, blockquotes, and indented code (#595).
+    const tokens = tokenizeBlocks(inner)
+    // Looseness is measured on the full dedented content (the marker strip only
+    // edits inline text, so for a non-task item this reuses `tokens`).
+    const looseTokens = task ? tokenizeBlocks(dedented) : tokens
+    analysis = {
+      inner,
+      task,
+      tokens,
+      multiParagraph: tokensHaveBlankSeparatedBlocks(looseTokens),
+      empty: false,
+    }
+  }
+
+  if (LIST_ITEM_ANALYSIS_CACHE.size >= LIST_ITEM_ANALYSIS_CACHE_MAX) {
+    const oldest = LIST_ITEM_ANALYSIS_CACHE.keys().next().value
+    if (oldest !== undefined) LIST_ITEM_ANALYSIS_CACHE.delete(oldest)
+  }
+  LIST_ITEM_ANALYSIS_CACHE.set(slice, analysis)
+  return analysis
+}
+
 function renderListItemContent(
   slice: string,
   listLoose: boolean,
   linkRefs: LinkReferenceMap,
 ): RenderedListItem {
-  let inner = dedentListItemContent(slice)
-  if (inner.trim() === '') return { html: '', task: null }
-  // A checkbox marker only counts on the item's first content line; strip it
-  // before recursive tokenization so the box never lands inside prose.
-  const task = parseTaskListMarker(inner)
-  if (task) inner = task.rest
-  // Item content is a block fragment in its own right: recursive tokenization
-  // handles nested lists, fences, blockquotes, and indented code (#595).
-  const html = renderBlocks(inner, tokenizeBlocks(inner), {
+  const { inner, task, tokens, empty } = analyzeListItemSlice(slice)
+  if (empty) return { html: '', task: null }
+  const html = renderBlocks(inner, tokens, {
     linkRefs,
     tightParagraphs: !listLoose,
   })
@@ -307,18 +379,7 @@ export function listSliceContinuesGroup(sig: ListGroupSignature, slice: string):
  * which tokenize as a single token — do not count (spec 307/318/319).
  */
 export function listItemSliceIsMultiParagraph(slice: string): boolean {
-  const tokens = tokenizeBlocks(dedentListItemContent(slice))
-  let seenBlock = false
-  let blankSince = false
-  for (const token of tokens) {
-    if (token.kind === 'blank') {
-      if (seenBlock) blankSince = true
-      continue
-    }
-    if (seenBlock && blankSince) return true
-    seenBlock = true
-  }
-  return false
+  return analyzeListItemSlice(slice).multiParagraph
 }
 
 /**

@@ -349,6 +349,9 @@ function delimitersToSkip(s: string, matches: DelimiterMatch[]): boolean[] {
  * inside a link, and none may pair across a link boundary (spec 474/522/535).
  */
 function maskLinkSpans(s: string, mask: boolean[], linkRefs: LinkReferenceMap): boolean[] {
+  // No `[` means no link/image can start here — skip the whole scan (a link
+  // must open with a bracket). Emphasis-only prose is the common case.
+  if (!s.includes('[')) return mask
   let extended: boolean[] | null = null
   let i = 0
   while (i < s.length) {
