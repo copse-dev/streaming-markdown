@@ -3,8 +3,11 @@ name: Release
 # Manual, one-button release. Pick a version (a semver bump keyword or an exact
 # version), and this workflow: runs the full CI gate, bumps package.json,
 # writes the changelog from the commits since the last tag, commits + tags,
-# publishes to GitHub Packages, and cuts a GitHub Release whose body is that
+# publishes to public npm, and cuts a GitHub Release whose body is that
 # changelog. Run `dry_run: true` first to preview without pushing anything.
+#
+# Requires an NPM_TOKEN repo secret (an npm automation/granular token with
+# publish rights on the @copse scope).
 on:
   workflow_dispatch:
     inputs:
@@ -37,10 +40,10 @@ on:
         default: false
         type: boolean
 
-# Least privilege: write to repo (commit + tag + release) and packages (publish).
+# Least privilege: write to the repo (commit + tag + release). Publishing goes
+# to public npm and authenticates with the NPM_TOKEN secret, not GITHUB_TOKEN.
 permissions:
   contents: write
-  packages: write
 
 concurrency:
   group: release
@@ -59,7 +62,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          registry-url: https://npm.pkg.github.com
+          registry-url: https://registry.npmjs.org
           scope: '@copse'
 
       - run: npm ci
@@ -118,16 +121,16 @@ jobs:
           git push origin HEAD
           git push origin "${{ steps.version.outputs.tag }}"
 
-      - name: Publish to GitHub Packages
+      - name: Publish to npm
         if: ${{ !inputs.dry_run }}
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           # `private: true` in package.json is a safety net against accidental
           # publishes; strip it here (uncommitted) so this deliberate, authed
-          # publish to GitHub Packages can proceed. publishConfig in
-          # package.json pins the registry.
+          # publish can proceed. publishConfig in package.json pins the public
+          # npm registry and `--access public` for the scoped @copse package.
           npm pkg delete private
           npm publish
 
