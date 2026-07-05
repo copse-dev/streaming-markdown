@@ -28,6 +28,18 @@ When extending the renderer or its CSS, preserve these rules:
   native API is missing, `sanitizeRenderedMarkdown` throws rather than return
   unsanitized HTML. DOMPurify is an optional peer dependency; `dompurify` must not be
   imported outside `sanitize-dompurify.ts`, or it re-enters the default bundle.
+- **Pluggable syntax highlighter.** `highlight.ts` holds only cheap string work
+  (language aliases, `KNOWN_LANGUAGES`, `fenceCodeClass`) and a registry
+  (`setCodeHighlighter`); it imports no highlight.js. The highlight.js grammars live
+  in `highlight-hljs.ts`, imported only via the
+  `@copse/streaming-markdown/highlighters/highlightjs` entry (`highlightjsHighlighter`,
+  `installHighlightjs`, `loadHighlightjs`), so they stay out of bundles that don't opt
+  in — the same split as the sanitizer backend. With no backend registered,
+  `highlightFenceCode` returns escaped plain text; a later `setCodeHighlighter` + re-render
+  upgrades fence interiors to token spans while `fenceCodeClass` keeps the element's class
+  stable across the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the backend
+  registers. `highlight.js` must not be imported outside `highlight-hljs.ts`, or it
+  re-enters the default bundle. See [`LAZY-LOADING.md`](LAZY-LOADING.md).
 - **Package boundary.** The core stays app-independent so it can version and ship on
   its own, so host-specific behaviour is **injected, not hard-coded**:
   - `setLinkDecorator` (`inline-links.ts`) — a `LinkDecorator` returns the attributes

@@ -23,6 +23,10 @@
       "types": "./dist/sanitize-dompurify.d.ts",
       "import": "./dist/sanitize-dompurify.js"
     },
+    "./highlighters/highlightjs": {
+      "types": "./dist/highlight-hljs.d.ts",
+      "import": "./dist/highlight-hljs.js"
+    },
     "./sanitizers/browser": {
       "types": "./dist/sanitize-browser.d.ts",
       "import": "./dist/sanitize-browser.js"

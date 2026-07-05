@@ -1,8 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { highlightFenceCode } from './highlight.ts'
+import { installHighlightjs } from './highlight-hljs.ts'
 import { fenceInfoLanguage, parseFenceSlice } from './block-patterns.ts'
 import { renderMarkdown } from './renderer.ts'
+
+installHighlightjs()
 
 describe('fenced-code content fidelity (#598)', () => {
   it('preserves the first line indentation (no leading trim)', () => {

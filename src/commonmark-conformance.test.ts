@@ -22,6 +22,7 @@ import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { renderMarkdown } from './renderer.ts'
 import { stripAppCodeDecorations } from './highlight.ts'
+import { installHighlightjs } from './highlight-hljs.ts'
 import { stripAppImageAttributes, stripAppLinkAttributes } from './inline-links.ts'
 import { normalizeHtml } from '../tests/commonmark/normalize.ts'
 import {
@@ -33,6 +34,10 @@ import {
   loadCommonMarkSpec,
   type SpecExample,
 } from '../tests/commonmark/load-spec.ts'
+
+// The baseline was recorded with highlighting on; register the backend so the
+// conformance render matches it (span decorations are stripped before comparison).
+installHighlightjs()
 
 const SPEC_VERSION = commonMarkSpecVersion()
 const spec = loadCommonMarkSpec()
