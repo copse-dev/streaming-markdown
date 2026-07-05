@@ -1,7 +1,7 @@
 // Incremental block tokenization + link-reference scanning (#30).
 //
 // Streaming re-runs two pure-string scans on every update: `tokenizeBlocks`
-// over the full content, and `parseLinkReferenceDefinitions` over the committed
+// over the full content, and `collectLinkReferenceDefinitions` over the committed
 // prefix on every commit. Both are O(prefix) per call, which keeps total
 // streaming cost Θ(n²) even after the DOM layer became O(tail) per commit
 // (issue #21 limitation K).
@@ -23,20 +23,20 @@
 // Tokenizing the suffix from a safe boundary therefore yields byte-identical
 // tokens to tokenizing the whole string and slicing — verified exhaustively by
 // the equivalence tests. Link-reference definitions cannot span a blank line
-// either (CommonMark), and `parseLinkReferenceDefinitions` treats slice start
-// as a line start, so the definition map is the cached prefix map merged
-// first-definition-wins (#544) with a suffix scan.
+// either (CommonMark), and `collectLinkReferenceDefinitions` tokenizes its
+// input from a line start, so the definition map is the cached prefix map
+// merged first-definition-wins (#544) with a suffix scan.
 //
 // Rewrites (message regeneration/edit) are caught the same way the frozen DOM
 // guards them: the retained safe prefix must remain a byte prefix of the new
 // source (a memcmp), else the cache resets and the scan starts over — correct,
 // just not incremental for that update.
-import { tokenizeBlocks, type BlockToken } from './block-tokenizer.ts'
 import {
-  parseLinkReferenceDefinitions,
-  type LinkReference,
-  type LinkReferenceMap,
-} from './link-references.ts'
+  collectLinkReferenceDefinitions,
+  tokenizeBlocks,
+  type BlockToken,
+} from './block-tokenizer.ts'
+import { type LinkReference, type LinkReferenceMap } from './link-references.ts'
 
 /** Kinds whose token can absorb later lines across a blank run (see header). */
 function canExtendAcrossBlank(kind: BlockToken['kind']): boolean {
@@ -138,7 +138,9 @@ export class IncrementalSourceScanner {
       this.lastNonBlankKind,
     )
     if (advanced.offset > this.safeOffset) {
-      const newlySafe = parseLinkReferenceDefinitions(source.slice(this.safeOffset, advanced.offset))
+      const newlySafe = collectLinkReferenceDefinitions(
+        source.slice(this.safeOffset, advanced.offset),
+      )
       for (const [label, ref] of newlySafe) {
         if (!this.refs.has(label)) this.refs.set(label, ref)
       }
@@ -153,16 +155,16 @@ export class IncrementalSourceScanner {
 
   /**
    * Link-reference definitions of `source`, equal to
-   * `parseLinkReferenceDefinitions(source)`. Must be called with the same
+   * `collectLinkReferenceDefinitions(source)`. Must be called with the same
    * string as the latest {@link tokenize} call (the cache is keyed to it);
    * anything else falls back to a full scan.
    */
   linkRefs(source: string): LinkReferenceMap {
     if (!source.startsWith(this.safePrefix)) {
-      return parseLinkReferenceDefinitions(source)
+      return collectLinkReferenceDefinitions(source)
     }
     const merged = new Map(this.refs)
-    const suffixRefs = parseLinkReferenceDefinitions(source.slice(this.safeOffset))
+    const suffixRefs = collectLinkReferenceDefinitions(source.slice(this.safeOffset))
     for (const [label, ref] of suffixRefs) {
       if (!merged.has(label)) merged.set(label, ref)
     }

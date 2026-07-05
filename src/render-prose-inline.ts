@@ -1,3 +1,4 @@
+import { RAW_TAG_LIKE_RE } from './backslash-escapes.ts'
 import { decodeSafeMarkdownEntities } from './escape.ts'
 import { extractRawImages, restoreRawImages } from './raw-images.ts'
 import { scanCodeSpans } from './inline-code-spans.ts'
@@ -19,8 +20,6 @@ const HARD_BREAK = '\uFFFE'
  * gives soft breaks), and a block-final newline never breaks (hard breaks
  * cannot end a block).
  */
-const RAW_TAG_LIKE_RE = /^<\/?[a-zA-Z][\s\S]*?>/
-
 function markHardBreaks(text: string): string {
   const { mask } = scanCodeSpans(text)
   let out = ''

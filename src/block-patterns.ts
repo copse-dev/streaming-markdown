@@ -40,7 +40,9 @@ export function stripFourColumnIndent(line: string): string {
   return line.slice(i)
 }
 
-export const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})([^\n`]*)\s*$/
+// A backtick fence's info string may not contain backticks, but a tilde
+// fence's may contain anything — even ``` (spec 146).
+export const FENCE_OPEN_RE = /^ {0,3}(?:(`{3,})([^\n`]*)|(~{3,})([^\n]*?))\s*$/
 export const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})\s*$/
 
 /** ATX heading detection (tokenizer): `#` through `######` followed by space, tab, or EOL. */
@@ -52,9 +54,65 @@ export const ATX_HEADING_CAPTURE_RE = /^ {0,3}(#{1,6})(?:[ \t]+(.*)|$)/
 /** Blockquote line detection (CommonMark: up to 3 spaces, `>`, optional space). */
 export const BLOCKQUOTE_DETECT_RE = /^ {0,3}> ?/
 
-/** Strip one blockquote marker level from a line. */
+/** Expand a whitespace run starting at `i`/`col` to spaces at 4-column tab stops. */
+function expandWhitespaceRun(
+  text: string,
+  i: number,
+  col: number,
+): { out: string; i: number; col: number } {
+  let out = ''
+  while (i < text.length) {
+    const ch = text[i]
+    if (ch === ' ') {
+      out += ' '
+      col++
+      i++
+    } else if (ch === '\t') {
+      const advance = 4 - (col % 4)
+      out += ' '.repeat(advance)
+      col += advance
+      i++
+    } else break
+  }
+  return { out, i, col }
+}
+
+/**
+ * Expand tabs in a line's leading whitespace to spaces at 4-column stops
+ * (CommonMark block-structure tab handling, spec 4/5/9). Content past the
+ * first non-whitespace character is untouched — tabs there stay literal.
+ */
+export function expandLeadingTabs(line: string): string {
+  const lead = expandWhitespaceRun(line, 0, 0)
+  return lead.out + line.slice(lead.i)
+}
+
+/**
+ * Like {@link expandLeadingTabs}, but also expands the whitespace straight
+ * after a list marker at its absolute column (`-\t\tfoo`, spec 7), so
+ * character offsets equal columns throughout the marker prefix.
+ */
+export function expandListPrefixTabs(line: string): string {
+  const lead = expandWhitespaceRun(line, 0, 0)
+  const marker = /^(?:\d{1,9}[.)]|[-*+])/.exec(line.slice(lead.i))?.[0]
+  if (!marker) return lead.out + line.slice(lead.i)
+  const after = expandWhitespaceRun(line, lead.i + marker.length, lead.col + marker.length)
+  return lead.out + marker + after.out + line.slice(after.i)
+}
+
+/**
+ * Strip one blockquote marker level from a line. The marker consumes one
+ * optional following space — or one COLUMN of a following tab, whose
+ * remaining columns become spaces (`>\t\tfoo` → six columns of code indent,
+ * spec 6).
+ */
 export function stripBlockquoteMarker(line: string): string {
-  return line.replace(BLOCKQUOTE_DETECT_RE, '')
+  const m = /^ {0,3}>/.exec(line)
+  if (!m) return line
+  const rest = line.slice(m[0].length)
+  if (!/^[\t ]/.test(rest)) return rest
+  const expanded = expandWhitespaceRun(rest, 0, m[0].length)
+  return expanded.out.slice(1) + rest.slice(expanded.i)
 }
 
 /** Drop the block-terminating newline token slices include. */
@@ -71,9 +129,9 @@ export function stripAtxClosingHashes(title: string): string {
 
 export function fenceMarker(line: string): { marker: string; len: number; info: string } | null {
   const m = line.match(FENCE_OPEN_RE)
-  if (!m?.[1]) return null
-  const marker = m[1]
-  return { marker, len: marker.length, info: (m[2] ?? '').trim() }
+  const marker = m?.[1] ?? m?.[3]
+  if (!marker) return null
+  return { marker, len: marker.length, info: ((m?.[1] ? m[2] : m?.[4]) ?? '').trim() }
 }
 
 /** Number of leading spaces on the opening fence line (CommonMark allows 0–3). */
@@ -111,9 +169,9 @@ export function fenceCloses(marker: string, len: number, line: string): boolean 
 export function parseFenceSlice(slice: string): { lang: string; code: string } {
   const lines = dropTrailingNewline(slice).split('\n')
   const open = lines[0] ?? ''
-  const openMatch = open.match(FENCE_OPEN_RE)
-  const marker = openMatch?.[1] ?? '```'
-  const lang = fenceInfoLanguage(openMatch?.[2] ?? '')
+  const openFence = fenceMarker(open)
+  const marker = openFence?.marker ?? '```'
+  const lang = fenceInfoLanguage(openFence?.info ?? '')
   const indent = fenceOpenIndent(open)
   let closeIndex = lines.length - 1
   while (closeIndex > 0) {
@@ -123,26 +181,29 @@ export function parseFenceSlice(slice: string): { lang: string; code: string } {
     }
     closeIndex--
   }
+  // An unclosed fence is closed by the end of the document: everything after
+  // the opener is content (spec 127/137/139).
+  const contentEnd = closeIndex > 0 ? closeIndex : lines.length
   // Content is verbatim between the fences (blank lines and indentation kept);
-  // only the opening fence's own indentation is stripped, per spec.
-  const code = lines
-    .slice(1, closeIndex)
-    .map((line) => stripLeadingSpaces(line, indent))
-    .join('\n')
-  return { lang, code }
+  // only the opening fence's own indentation is stripped, per spec. Every
+  // content line is newline-terminated, including the last — a bare `join`
+  // would silently drop a trailing blank line (spec 318).
+  const contentLines = lines.slice(1, contentEnd)
+  const code = contentLines.map((line) => stripLeadingSpaces(line, indent)).join('\n')
+  return { lang, code: contentLines.length > 0 ? `${code}\n` : code }
 }
 
 /** Parse an open (still streaming) fenced block — body includes all lines after the opener. */
 export function parseOpenFenceContent(source: string): { lang: string; code: string } | null {
   const lines = source.split('\n')
   const open = lines[0] ?? ''
-  const openMatch = open.match(FENCE_OPEN_RE)
-  if (!openMatch?.[1]) return null
-  const lang = fenceInfoLanguage(openMatch[2] ?? '')
+  const openFence = fenceMarker(open)
+  if (!openFence) return null
+  const lang = fenceInfoLanguage(openFence.info)
   const indent = fenceOpenIndent(open)
   let bodyLines = lines.slice(1)
   const last = bodyLines.at(-1) ?? ''
-  if (bodyLines.length > 0 && fenceCloses(openMatch[1], openMatch[1].length, last)) {
+  if (bodyLines.length > 0 && fenceCloses(openFence.marker, openFence.len, last)) {
     bodyLines = bodyLines.slice(0, -1)
   }
   return { lang, code: bodyLines.map((line) => stripLeadingSpaces(line, indent)).join('\n') }

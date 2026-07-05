@@ -1,19 +1,18 @@
 // #30: incremental tokenization + link-ref scanning must be indistinguishable
 // from fresh full-string scans — at every prefix of an append-only stream, and
 // after rewrites/retreats (which reset the cache). The equivalence oracle is
-// exact deep-equality against `tokenizeBlocks` / `parseLinkReferenceDefinitions`.
+// exact deep-equality against `tokenizeBlocks` / `collectLinkReferenceDefinitions`.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { loadBaselinePassingExamples } from '../tests/commonmark/baseline-examples.ts'
 import { IncrementalSourceScanner } from './incremental-scan.ts'
-import { tokenizeBlocks } from './block-tokenizer.ts'
-import { parseLinkReferenceDefinitions } from './link-references.ts'
+import { collectLinkReferenceDefinitions, tokenizeBlocks } from './block-tokenizer.ts'
 
 function assertScannerMatchesFresh(scanner: IncrementalSourceScanner, source: string, ctx: string): void {
   assert.deepEqual(scanner.tokenize(source), tokenizeBlocks(source), `tokens ${ctx}`)
   assert.deepEqual(
     new Map(scanner.linkRefs(source)),
-    new Map(parseLinkReferenceDefinitions(source)),
+    new Map(collectLinkReferenceDefinitions(source)),
     `linkRefs ${ctx}`,
   )
 }

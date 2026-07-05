@@ -492,12 +492,11 @@ describe('renderMarkdown', () => {
     assert.doesNotMatch(html, /&gt;/)
   })
 
-  it('groups consecutive blockquote paragraphs into one blockquote element', () => {
+  it('renders blank-separated quote groups as separate blockquotes (spec 242)', () => {
     const html = renderMarkdown('> First paragraph\n\n> Second paragraph')
-    assert.match(html, /<blockquote>/)
     assert.match(html, /<p>First paragraph<\/p>/)
     assert.match(html, /<p>Second paragraph<\/p>/)
-    assert.doesNotMatch(html, /<\/blockquote>[\s\S]*<blockquote>/)
+    assert.equal((html.match(/<blockquote>/g) ?? []).length, 2)
   })
 
   it('renders inline formatting inside blockquotes', () => {
@@ -528,7 +527,8 @@ describe('renderMarkdown', () => {
   it('keeps a lazy continuation line inside the blockquote (no leaked &gt;)', () => {
     const html = renderMarkdown('> line one\nlazy continuation')
     assert.match(html, /<blockquote>/)
-    assert.match(html, /line one[\n]lazy continuation/)
+    // Lazy lines merge into the paragraph as text (space join, spec 93/238).
+    assert.match(html, /line one lazy continuation/)
     assert.doesNotMatch(html, /&gt;/)
   })
 
@@ -538,9 +538,9 @@ describe('renderMarkdown', () => {
     assert.doesNotMatch(html, /&gt;/)
   })
 
-  it('does not emit an empty blockquote for a bare > line', () => {
+  it('renders a bare > line as an empty blockquote without leaking &gt; (spec 239)', () => {
     const html = renderMarkdown('>')
-    assert.doesNotMatch(html, /<blockquote><\/blockquote>/)
+    assert.match(html, /<blockquote><\/blockquote>/)
     assert.doesNotMatch(html, /&gt;/)
   })
 

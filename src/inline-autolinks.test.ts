@@ -36,6 +36,7 @@ describe('renderAngleAutolinks', () => {
   })
 
   it('rejects email autolinks with a backslash in the local part (spec 606)', () => {
-    assert.equal(renderInlineSpans('<foo\\+@bar.example.com>'), '&lt;foo\\+@bar.example.com&gt;')
+    // Not an autolink, so the text is ordinary prose and the `\+` escape applies.
+    assert.equal(renderInlineSpans('<foo\\+@bar.example.com>'), '&lt;foo+@bar.example.com&gt;')
   })
 })

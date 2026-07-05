@@ -9,9 +9,14 @@ export interface LinkReference {
 
 export type LinkReferenceMap = ReadonlyMap<string, LinkReference>
 
-/** CommonMark reference label normalization (whitespace + case fold). */
+/**
+ * CommonMark reference label normalization (whitespace + Unicode case fold).
+ * The lower→upper round-trip approximates full case folding the way
+ * commonmark.js does: `ẞ`.toLowerCase() is `ß` and `ß`.toUpperCase() is `SS`,
+ * so `[ẞ]` matches a `[SS]` definition (spec 540).
+ */
 export function normalizeReferenceLabel(label: string): string {
-  return label.replace(/\s+/g, ' ').trim().toLocaleLowerCase('und')
+  return label.replace(/\s+/g, ' ').trim().toLowerCase().toUpperCase()
 }
 
 /** True if `[` or `]` appears unescaped in the label content (a backslash escapes the next char). */
@@ -85,38 +90,52 @@ export function encodeHrefForOutput(href: string): string {
   return percentEncodeHref(decodeHtmlCharRefs(href))
 }
 
-function parseLinkTitleAt(source: string, start: number): { title: string; end: number } | null {
-  let i = start
-  while (i < source.length && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n')) i++
-  const slice = source.slice(i)
-  const dquote = slice.match(/^"((?:\\.|[^"\\])*)"/)
-  if (dquote?.[1] !== undefined) {
-    return {
-      title: decodeHtmlCharRefs(decodeDestinationEscapes(dquote[1])),
-      end: i + dquote[0].length,
-    }
-  }
-  const squote = slice.match(/^'((?:\\.|[^'\\])*)'/)
-  if (squote?.[1] !== undefined) {
-    return {
-      title: decodeHtmlCharRefs(decodeDestinationEscapes(squote[1])),
-      end: i + squote[0].length,
-    }
-  }
-  const paren = slice.match(/^\(((?:\\.|[^)\\])*(?:\\[\s\S])?)\)/)
-  if (paren?.[1] !== undefined) {
-    return {
-      title: decodeHtmlCharRefs(decodeDestinationEscapes(paren[1])),
-      end: i + paren[0].length,
+const TITLE_TOKEN_RES = [/^"((?:\\.|[^"\\])*)"/, /^'((?:\\.|[^'\\])*)'/, /^\(((?:\\.|[^()\\])*)\)/]
+
+/** A blank line — the one thing neither a label, a title, nor a whitespace gap may span. */
+const BLANK_LINE_RE = /\n[ \t]*\n/
+
+/**
+ * Parse a link title delimited by `"…"`, `'…'`, or `(…)` starting exactly at
+ * `at`. Titles may span lines but not blank lines (spec 197).
+ */
+function parseTitleToken(source: string, at: number): { title: string; end: number } | null {
+  const slice = source.slice(at)
+  for (const re of TITLE_TOKEN_RES) {
+    const m = re.exec(slice)
+    if (m?.[1] !== undefined) {
+      if (BLANK_LINE_RE.test(m[1])) return null
+      return {
+        title: decodeHtmlCharRefs(decodeDestinationEscapes(m[1])),
+        end: at + m[0].length,
+      }
     }
   }
   return null
 }
 
-function parseDestination(
-  source: string,
-  start: number,
-): { href: string; end: number; title?: string } | null {
+/**
+ * Skip the whitespace that must separate a destination from its title: at
+ * least one space/tab/newline, at most one newline (a blank line ends the
+ * construct). Returns `null` when there is no whitespace at `from` — a title
+ * jammed against the destination is not a title (spec 201).
+ */
+function skipTitleGap(source: string, from: number): number | null {
+  let i = from
+  let sawNewline = false
+  while (i < source.length) {
+    const c = source[i]
+    if (c === ' ' || c === '\t') i++
+    else if (c === '\n' && !sawNewline) {
+      sawNewline = true
+      i++
+    } else break
+  }
+  return i === from ? null : i
+}
+
+/** Parse a link destination (angle-bracketed or bare) with no title attached. */
+function parseBareDestination(source: string, start: number): { href: string; end: number } | null {
   if (source[start] === '<') {
     let i = start + 1
     while (i < source.length) {
@@ -126,14 +145,7 @@ function parseDestination(
         continue
       }
       if (source[i] === '>') {
-        const raw = source.slice(start + 1, i)
-        const href = decodeDestinationEscapes(raw)
-        const end = i + 1
-        const titlePart = parseLinkTitleAt(source, end)
-        if (titlePart) {
-          return { href, end: titlePart.end, title: titlePart.title }
-        }
-        return { href, end }
+        return { href: decodeDestinationEscapes(source.slice(start + 1, i)), end: i + 1 }
       }
       i++
     }
@@ -152,20 +164,17 @@ function parseDestination(
     else if (ch === ')') {
       if (parenDepth > 0) parenDepth--
       else break
-    } else if ((ch === ' ' || ch === '\n' || ch === '\t') && parenDepth === 0) {
+    } else if (ch === ' ' || ch === '\n' || ch === '\t') {
+      // Whitespace ends a bare destination; inside parentheses it means the
+      // parens can never balance, so the destination is invalid.
+      if (parenDepth > 0) return null
       break
     }
     i++
   }
   const raw = source.slice(start, i)
-  if (raw === '' || /[ \n\t]/.test(raw)) return null
-  const end = i
-  const titlePart = parseLinkTitleAt(source, end)
-  const href = decodeDestinationEscapes(raw)
-  if (titlePart) {
-    return { href, end: titlePart.end, title: titlePart.title }
-  }
-  return { href, end }
+  if (raw === '') return null
+  return { href: decodeDestinationEscapes(raw), end: i }
 }
 
 function parseBracketedLabel(source: string, start: number): { label: string; end: number } | null {
@@ -187,87 +196,110 @@ function parseBracketedLabel(source: string, start: number): { label: string; en
   return { label, end: i }
 }
 
-function isLinkReferenceDefStart(source: string, index: number): boolean {
-  if (index > 0 && source[index - 1] !== '\n') return false
-  let col = 0
-  let i = index - 1
-  while (i >= 0 && source[i] !== '\n') {
-    if (source[i] === '\t') return false
-    if (source[i] !== ' ') return false
-    col++
-    if (col > 3) return false
-    i--
-  }
-  return source[index] === '['
+/** One parsed definition plus the offset just past its final line. */
+export interface LinkReferenceDefinitionSpan {
+  label: string
+  href: string
+  title?: string
+  /** Offset just past the definition's final newline (or EOF). */
+  end: number
+}
+
+/** Offset past the line end at `from` when only spaces/tabs remain on it, else null. */
+function cleanLineEnd(source: string, from: number): number | null {
+  let i = from
+  while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i++
+  if (i >= source.length) return i
+  return source[i] === '\n' ? i + 1 : null
 }
 
 /**
- * Scan the document for link reference definitions. First definition wins for a
- * normalized label (#544).
+ * Parse one link reference definition anchored at `start` — the `[` that opens
+ * the label. The caller is responsible for the line-start / up-to-3-spaces
+ * indent rule. Implements the spec construct: label + `:` (immediately),
+ * destination optionally on the next line, optional whitespace-separated title
+ * that may span lines but not blank lines, and nothing but whitespace after
+ * the construct on its final line (#209). A title that fails those rules on
+ * its own line falls back to a destination-only definition (spec 207); on the
+ * destination's line it invalidates the whole definition (spec 197/201).
+ */
+export function parseLinkReferenceDefinitionAt(
+  source: string,
+  start: number,
+): LinkReferenceDefinitionSpan | null {
+  const labelPart = parseBracketedLabel(source, start)
+  if (!labelPart || BLANK_LINE_RE.test(labelPart.label)) return null
+  if (source[labelPart.end] !== ':') return null
+  let j = labelPart.end + 1
+  // Spaces/tabs and at most one line ending separate the colon from the
+  // destination (CommonMark ref-def whitespace).
+  let sawNewline = false
+  while (j < source.length) {
+    const c = source[j]
+    if (c === ' ' || c === '\t') {
+      j++
+    } else if (c === '\n' && !sawNewline) {
+      sawNewline = true
+      j++
+    } else {
+      break
+    }
+  }
+  const dest = parseBareDestination(source, j)
+  if (!dest) return null
+
+  const gap = skipTitleGap(source, dest.end)
+  if (gap !== null) {
+    const title = parseTitleToken(source, gap)
+    if (title) {
+      const end = cleanLineEnd(source, title.end)
+      if (end !== null) {
+        return { label: labelPart.label, href: dest.href, title: title.title, end }
+      }
+      // Dirty tail after the title: when the title began on its own line the
+      // definition still stands without it (spec 207); on the destination's
+      // line the whole definition fails (spec 197).
+      if (!source.slice(dest.end, gap).includes('\n')) return null
+    }
+  }
+  const end = cleanLineEnd(source, dest.end)
+  if (end === null) return null
+  return { label: labelPart.label, href: dest.href, end }
+}
+
+/**
+ * Scan text for link reference definitions. First definition wins for a
+ * normalized label (#544). This is a raw line-anchored scan with no block
+ * context — callers that need fences/paragraph-continuation awareness use
+ * `collectLinkReferenceDefinitions` (block-tokenizer.ts), which applies this
+ * scanner per `link_ref_def` block.
  */
 export function parseLinkReferenceDefinitions(source: string): LinkReferenceMap {
   const refs = new Map<string, LinkReference>()
-  let i = 0
-  while (i < source.length) {
-    if (source[i] === '\n') {
+  let lineStart = 0
+  while (lineStart < source.length) {
+    let i = lineStart
+    let indent = 0
+    while (source[i] === ' ' && indent < 4) {
       i++
-      continue
+      indent++
     }
-    if (!isLinkReferenceDefStart(source, i)) {
-      i++
-      continue
-    }
-    const labelPart = parseBracketedLabel(source, i)
-    if (!labelPart) {
-      i++
-      continue
-    }
-    let j = labelPart.end
-    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++
-    if (source[j] !== ':') {
-      i++
-      continue
-    }
-    j++
-    // The destination may sit on the next line: spaces/tabs and at most one
-    // line ending separate the colon from it (CommonMark ref-def whitespace).
-    let sawNewline = false
-    while (j < source.length) {
-      const c = source[j]
-      if (c === ' ' || c === '\t') {
-        j++
-      } else if (c === '\n' && !sawNewline) {
-        sawNewline = true
-        j++
-      } else {
-        break
+    if (indent <= 3 && source[i] === '[') {
+      const def = parseLinkReferenceDefinitionAt(source, i)
+      if (def && isValidReferenceLabel(def.label)) {
+        const key = normalizeReferenceLabel(decodeEscapes(def.label))
+        if (!refs.has(key)) {
+          const entry: LinkReference = { href: def.href }
+          if (def.title !== undefined) entry.title = def.title
+          refs.set(key, entry)
+        }
+        lineStart = def.end
+        continue
       }
     }
-    const dest = parseDestination(source, j)
-    if (!dest) {
-      i++
-      continue
-    }
-    // A definition owns the rest of its final line — only trailing whitespace
-    // may follow the destination/title, else it is not a definition (#209).
-    let tail = dest.end
-    while (tail < source.length && (source[tail] === ' ' || source[tail] === '\t')) tail++
-    if (tail < source.length && source[tail] !== '\n') {
-      i++
-      continue
-    }
-    if (!isValidReferenceLabel(labelPart.label)) {
-      i++
-      continue
-    }
-    const key = normalizeReferenceLabel(decodeEscapes(labelPart.label))
-    if (!refs.has(key)) {
-      const entry: LinkReference = { href: dest.href }
-      if (dest.title !== undefined) entry.title = dest.title
-      refs.set(key, entry)
-    }
-    i = dest.end
-    while (i < source.length && source[i] !== '\n') i++
+    const nl = source.indexOf('\n', lineStart)
+    if (nl === -1) break
+    lineStart = nl + 1
   }
   return refs
 }
@@ -289,9 +321,18 @@ export function parseInlineLinkDestination(
   let j = openParenIndex + 1
   while (j < source.length && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n')) j++
   if (source[j] === ')') return { href: '', end: j + 1 }
-  const dest = parseDestination(source, j)
+  const dest = parseBareDestination(source, j)
   if (!dest) return null
   let end = dest.end
+  let title: string | undefined
+  const gap = skipTitleGap(source, dest.end)
+  if (gap !== null) {
+    const titlePart = parseTitleToken(source, gap)
+    if (titlePart) {
+      title = titlePart.title
+      end = titlePart.end
+    }
+  }
   while (
     end < source.length &&
     (source[end] === ' ' || source[end] === '\t' || source[end] === '\n')
@@ -302,7 +343,7 @@ export function parseInlineLinkDestination(
   return {
     href: dest.href,
     end: end + 1,
-    ...(dest.title !== undefined ? { title: dest.title } : {}),
+    ...(title !== undefined ? { title } : {}),
   }
 }
 

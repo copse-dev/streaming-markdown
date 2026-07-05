@@ -1,8 +1,12 @@
 import {
   ATX_HEADING_CAPTURE_RE as ATX_HEADING_RE,
+  BLOCKQUOTE_DETECT_RE,
   dropTrailingNewline,
+  expandLeadingTabs,
+  expandListPrefixTabs,
   parseFenceSlice,
   stripAtxClosingHashes,
+  stripBlockquoteMarker,
   stripFourColumnIndent,
 } from './block-patterns.ts'
 import {
@@ -41,7 +45,6 @@ export interface RenderBlocksOptions {
   indentedCode?: boolean
 }
 
-const BLOCKQUOTE_LINE_RE = /^> ?/
 
 function renderFencedBlock(lang: string, code: string): string {
   if (lang === 'mermaid') {
@@ -68,24 +71,9 @@ function stripParagraphIndent(text: string): string {
     .join('\n')
 }
 
-function stripBlockquoteLine(line: string): string {
-  return line.replace(BLOCKQUOTE_LINE_RE, '')
-}
-
-function splitListItemParagraphs(text: string): string[] {
-  const parts: string[] = []
-  let current: string[] = []
-  for (const line of text.split('\n')) {
-    if (line.trim() === '') {
-      if (current.length > 0) parts.push(current.join('\n'))
-      current = []
-      continue
-    }
-    current.push(line)
-  }
-  if (current.length > 0) parts.push(current.join('\n'))
-  return parts
-}
+// One shared marker stripper (block-patterns) keeps the tokenizer's laziness
+// checks and the renderer's unwrapping byte-identical, tab handling included.
+const stripBlockquoteLine = stripBlockquoteMarker
 
 /** A GFM task-list checkbox at the very start of an item's content (#614). */
 const TASK_LIST_MARKER_RE = /^\[([ xX])\](?=\s|$)/
@@ -116,17 +104,16 @@ interface RenderedListItem {
   task: TaskListMarker | null
 }
 
-function renderListItemContent(
-  slice: string,
-  listLoose: boolean,
-  linkRefs: LinkReferenceMap,
-): RenderedListItem {
-  const normalized = dropTrailingNewline(slice)
-  const lines = normalized.split('\n')
+/** Item content with the marker/indent columns removed (lazy lines merged). */
+function dedentListItemContent(slice: string): string {
+  const lines = dropTrailingNewline(slice).split('\n')
   const first = lines.find((l) => l.trim() !== '') ?? ''
   const col = listItemContentColumn(first)
   const dedented: string[] = []
-  lines.forEach((line, index) => {
+  lines.forEach((rawLine, index) => {
+    // Tabs in the marker prefix / leading whitespace expand at absolute
+    // 4-column stops (spec 4/5/7/9), so slicing by column offset is exact.
+    const line = index === 0 ? expandListPrefixTabs(rawLine) : expandLeadingTabs(rawLine)
     if (index === 0) {
       dedented.push(line.slice(Math.min(col, line.length)))
       return
@@ -151,7 +138,15 @@ function renderListItemContent(
     }
     dedented.push(stripped)
   })
-  let inner = dedented.join('\n')
+  return dedented.join('\n')
+}
+
+function renderListItemContent(
+  slice: string,
+  listLoose: boolean,
+  linkRefs: LinkReferenceMap,
+): RenderedListItem {
+  let inner = dedentListItemContent(slice)
   if (inner.trim() === '') return { html: '', task: null }
   // A checkbox marker only counts on the item's first content line; strip it
   // before recursive tokenization so the box never lands inside prose.
@@ -194,8 +189,12 @@ function renderAtxHeading(slice: string, linkRefs: LinkReferenceMap): string {
 
 function renderSetextHeading(slice: string, linkRefs: LinkReferenceMap): string {
   const lines = dropTrailingNewline(slice).split('\n')
-  const text = lines[0] ?? ''
-  const underline = lines[1] ?? ''
+  // All lines above the underline are heading content (spec 81/95).
+  const text = lines
+    .slice(0, -1)
+    .map((l) => l.trim())
+    .join('\n')
+  const underline = lines.at(-1) ?? ''
   const level = underline.trim().startsWith('=') ? 1 : 2
   return `<h${String(level)}>${renderProseBlock(text, linkRefs)}</h${String(level)}>`
 }
@@ -218,9 +217,24 @@ function renderTable(slice: string, linkRefs: LinkReferenceMap): string {
 }
 
 function stripBlockquoteSource(slice: string): string {
-  return slice
-    .split('\n')
-    .map((l) => stripBlockquoteLine(l.trim()))
+  // Lazy (unmarked) continuation lines are paragraph TEXT: merge them into
+  // the previous line so the recursive parse cannot reinterpret them as a
+  // block start — `    - bar` stays prose (spec 238) and a lazy `===` cannot
+  // underline a setext heading (spec 93).
+  const out: string[] = []
+  for (const line of slice.split('\n')) {
+    if (BLOCKQUOTE_DETECT_RE.test(line)) {
+      out.push(stripBlockquoteLine(line))
+      continue
+    }
+    const prev = out.at(-1)
+    if (line.trim() !== '' && prev !== undefined && prev.trim() !== '') {
+      out[out.length - 1] = `${prev} ${line.trim()}`
+      continue
+    }
+    out.push(line)
+  }
+  return out
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/^\n+|\n+$/g, '')
@@ -228,7 +242,8 @@ function stripBlockquoteSource(slice: string): string {
 
 function renderBlockquote(slice: string, linkRefs: LinkReferenceMap): string {
   const innerSource = stripBlockquoteSource(slice)
-  if (innerSource.trim() === '') return ''
+  // A quote with no content still renders (`>` alone, spec 239/240).
+  if (innerSource.trim() === '') return '<blockquote></blockquote>'
   return `<blockquote>${renderBlocksFromSource(innerSource, linkRefs)}</blockquote>`
 }
 
@@ -285,9 +300,25 @@ export function listSliceContinuesGroup(sig: ListGroupSignature, slice: string):
   return sliceUnorderedMarkerChar(slice) === sig.markerChar
 }
 
-/** Loose evidence carried by one item slice: blank-separated inner paragraphs. */
+/**
+ * Loose evidence carried by one item slice: the item DIRECTLY contains two
+ * block-level elements with a blank line between them (CommonMark looseness).
+ * Blank lines inside a nested construct — a fenced block or a deeper list,
+ * which tokenize as a single token — do not count (spec 307/318/319).
+ */
 export function listItemSliceIsMultiParagraph(slice: string): boolean {
-  return splitListItemParagraphs(dropTrailingNewline(slice)).length > 1
+  const tokens = tokenizeBlocks(dedentListItemContent(slice))
+  let seenBlock = false
+  let blankSince = false
+  for (const token of tokens) {
+    if (token.kind === 'blank') {
+      if (seenBlock) blankSince = true
+      continue
+    }
+    if (seenBlock && blankSince) return true
+    seenBlock = true
+  }
+  return false
 }
 
 /**
@@ -335,6 +366,18 @@ export function scanListGroup(source: string, tokens: BlockToken[], start: numbe
     const slice = source.slice(token.start, token.end)
     if (!listSliceContinuesGroup(sig, slice)) break
     if (listItemSliceIsMultiParagraph(slice)) loose = true
+    // Blank lines swallowed into an item's tail still separate it from the
+    // NEXT item (spec 311/313); a trailing blank on the group's last item
+    // does not count.
+    if (/\n[ \t]*\n$/.test(slice)) {
+      const after = tokens[i + 1]
+      if (
+        after?.kind === 'list_item' &&
+        listSliceContinuesGroup(sig, source.slice(after.start, after.end))
+      ) {
+        loose = true
+      }
+    }
     itemTokens.push(token)
     i++
   }
@@ -401,31 +444,13 @@ function collectBlockquoteGroup(
   start: number,
   linkRefs: LinkReferenceMap,
 ): { html: string; next: number } {
-  const parts: string[] = []
-  let i = start
-  while (i < tokens.length) {
-    const token = tokens[i]
-    if (!token) break
-    if (token.kind === 'blank') {
-      const next = tokens[i + 1]
-      if (next?.kind === 'blockquote') {
-        i++
-        continue
-      }
-      break
-    }
-    if (token.kind !== 'blockquote') break
-    parts.push(stripBlockquoteSource(source.slice(token.start, token.end)))
-    i++
-  }
-  const innerSource = parts
-    .join('\n\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/^\n+|\n+$/g, '')
-  if (innerSource.trim() === '') return { html: '', next: i }
+  // A blank line ends a blockquote (spec 242/252), and the tokenizer never
+  // emits two directly-adjacent blockquote tokens, so a group is one token.
+  const token = tokens[start]
+  if (!token || token.kind !== 'blockquote') return { html: '', next: start + 1 }
   return {
-    html: `<blockquote>${renderBlocksFromSource(innerSource, linkRefs)}</blockquote>`,
-    next: i,
+    html: renderBlockquote(source.slice(token.start, token.end), linkRefs),
+    next: start + 1,
   }
 }
 

@@ -37,7 +37,11 @@
 // Every uncertainty falls back to `morphInnerHtml(sanitize(render(complete)))` —
 // today's exact, correct behaviour — so the fast path is a pure optimization: a
 // mishandled case degrades to slower-but-correct output, never to wrong output.
-import { type BlockKind, type BlockToken } from './block-tokenizer.ts'
+import {
+  collectLinkReferenceDefinitions,
+  type BlockKind,
+  type BlockToken,
+} from './block-tokenizer.ts'
 import {
   listGroupCloseTag,
   listGroupOpenTag,
@@ -48,7 +52,7 @@ import {
   scanListGroup,
   type ListGroupSignature,
 } from './render-blocks.ts'
-import { parseLinkReferenceDefinitions, type LinkReferenceMap } from './link-references.ts'
+import { type LinkReferenceMap } from './link-references.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { renderMarkdown, TOP_LEVEL_RENDER_OPTS } from './renderer.ts'
 import {
@@ -309,7 +313,7 @@ export class FrozenTailRenderer {
    * prefix and re-rendering only the tail group. `tokens` must be
    * `tokenizeBlocks(complete)` (threaded from the caller, Layer 1), and
    * `providedLinkRefs`, when given, must equal
-   * `parseLinkReferenceDefinitions(complete)` (threaded from the caller's
+   * `collectLinkReferenceDefinitions(complete)` (threaded from the caller's
    * incremental scanner, #30 — saves the per-commit O(prefix) ref scan).
    */
   update(
@@ -324,7 +328,7 @@ export class FrozenTailRenderer {
       return
     }
 
-    const linkRefs = providedLinkRefs ?? parseLinkReferenceDefinitions(complete)
+    const linkRefs = providedLinkRefs ?? collectLinkReferenceDefinitions(complete, tokens)
     const linkRefKey = serializeLinkRefs(linkRefs)
     const tailStart = settledTailStart(tokens)
     const tailToken = tokens[tailStart]

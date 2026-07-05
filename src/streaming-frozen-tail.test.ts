@@ -288,11 +288,11 @@ describe('frozen-tail settling hazards', () => {
     ])
   })
 
-  it('blockquote continues across blank runs', () => {
+  it('blank-separated quotes stream as separate blockquotes (spec 242)', () => {
     assertCommittedAtRest(['> a\n', '\n', '> b\n', '\npara\n'])
     const { html } = streamCommitted(['> a\n', '\n', '> b\n', '\npara\n'])
     const quotes = html.match(/<blockquote>/g) ?? []
-    assert.equal(quotes.length, 1, 'the two blank-separated quote lines stay one blockquote')
+    assert.equal(quotes.length, 2, 'a blank line ends a blockquote')
   })
 
   it('trailing indented raw-HTML block follows the raw-HTML policy (gap A)', () => {

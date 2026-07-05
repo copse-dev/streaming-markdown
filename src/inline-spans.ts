@@ -7,7 +7,8 @@ import { renderAnchor, renderInlineLinks, safeLinkHref } from './inline-links.ts
 import { renderStrikethrough } from './inline-strikethrough.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 
-function renderNestedInlineSpans(t: string, linkRefs: LinkReferenceMap): string {
+/** The inline passes that run before link rendering, in pipeline order. */
+function renderInlineSpansBeforeLinks(t: string, linkRefs: LinkReferenceMap): string {
   // Backslash-escaped punctuation is encoded to inert PUA characters first so
   // no later pass can interpret it (encoding is idempotent for nested calls).
   t = encodeBackslashEscapes(t)
@@ -17,7 +18,17 @@ function renderNestedInlineSpans(t: string, linkRefs: LinkReferenceMap): string 
   // GFM strikethrough after emphasis (so `~~*x*~~` nests) and before links (so a
   // struck `~~[a](b)~~` still resolves the link inside the <del>).
   t = renderStrikethrough(t)
-  t = renderInlineLinks(t, linkRefs, renderNestedInlineSpans)
+  return t
+}
+
+function renderNestedInlineSpans(t: string, linkRefs: LinkReferenceMap): string {
+  t = renderInlineSpansBeforeLinks(t, linkRefs)
+  // The pre-link pipeline doubles as the label-match renderer: reference labels
+  // in the text have already been through it, so definition labels must be run
+  // through the same passes before comparing (spec 554/558/585).
+  t = renderInlineLinks(t, linkRefs, renderNestedInlineSpans, (label) =>
+    renderInlineSpansBeforeLinks(label, linkRefs),
+  )
   // Strong spans around rendered <code>/<a>/<img> run after links so patterns
   // like `**[#264](url)**` and `**[`path`](path) tail**` resolve to real
   // anchors instead of literal `[label](dest)` inside <strong>.

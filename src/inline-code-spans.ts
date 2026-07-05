@@ -1,5 +1,14 @@
 /** CommonMark inline code spans (`\`…\``). Shared by emphasis masking and HTML render. */
 
+/**
+ * Angle autolink (`<scheme:…>` / `<email@host>`). Autolinks and code spans
+ * bind with equal precedence and the LEFTMOST construct wins (spec 346), so
+ * the code-span renderer copies autolinks verbatim; the backslash-escape
+ * encoder shares the pattern (escapes do not apply inside autolinks).
+ */
+export const ANGLE_AUTOLINK_VERBATIM_RE =
+  /^<(?:[a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\s]*|[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[^<>\s@]+\.[^<>\s@]+)>/
+
 export type CodeSpanBoundary =
   | {
       type: 'closed'
@@ -59,6 +68,14 @@ export function renderInlineCode(text: string): string {
   let out = ''
   let i = 0
   while (i < text.length) {
+    if (text[i] === '<') {
+      const autolink = ANGLE_AUTOLINK_VERBATIM_RE.exec(text.slice(i))?.[0]
+      if (autolink) {
+        out += autolink
+        i += autolink.length
+        continue
+      }
+    }
     if (text[i] !== '`') {
       out += text[i] ?? ''
       i++

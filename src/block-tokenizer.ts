@@ -2,13 +2,21 @@
  * Block-level markdown tokenizer (#475). Identifies block boundaries and whether
  * each block is complete, open (unfinished), or ambiguous (needs more input).
  */
-import { parseLinkReferenceDefinitions } from './link-references.ts'
+import {
+  isValidReferenceLabel,
+  parseLinkReferenceDefinitionAt,
+  parseLinkReferenceDefinitions,
+  type LinkReference,
+  type LinkReferenceMap,
+} from './link-references.ts'
 import {
   ATX_HEADING_DETECT_RE as ATX_HEADING_RE,
+  expandListPrefixTabs,
   FENCE_OPEN_RE,
   fenceCloses,
   fenceMarker,
   leadingIndentWidth,
+  stripBlockquoteMarker,
 } from './block-patterns.ts'
 
 export type BlockKind =
@@ -44,11 +52,13 @@ export interface ScannedLine {
 }
 
 const THEMATIC_BREAK_RE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
-const UNORDERED_LIST_ITEM_RE = /^ {0,3}[-*+](?:\s|$)/
-// A marker may be followed by whitespace or end the line (empty item, #281/#283).
-const ORDERED_LIST_MARKER_RE = /^ {0,3}(\d{1,9})([.)])(?:\s|$)/
-const LIST_ITEM_RE = /^ {0,3}(?:(?:[-*+])(?:\s|$)|(?:\d{1,9}[.)](?:\s|$)))/
-const EMPTY_LIST_ITEM_RE = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)/
+// A list marker must be followed by a space/tab or the line end (empty item,
+// #281/#283). Not `\s`: that matches NBSP, which is NOT marker whitespace —
+// `* a *` is a paragraph, not a list (spec 353).
+const UNORDERED_LIST_ITEM_RE = /^ {0,3}[-*+](?:[ \t]|$)/
+const ORDERED_LIST_MARKER_RE = /^ {0,3}(\d{1,9})([.)])(?:[ \t]|$)/
+const LIST_ITEM_RE = /^ {0,3}(?:(?:[-*+])(?:[ \t]|$)|(?:\d{1,9}[.)](?:[ \t]|$)))/
+const EMPTY_LIST_ITEM_RE = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/
 const BLOCKQUOTE_RE = /^ {0,3}> ?/
 const SETEXT_UNDERLINE_RE = /^ {0,3}(=+|-+)\s*$/
 export const TABLE_SEP_RE = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/
@@ -98,7 +108,7 @@ export function isEmptyListItemLine(line: string): boolean {
  * (#273/#274/#278).
  */
 export function listItemContentColumn(line: string): number {
-  const m = line.match(/^( {0,3})(\d{1,9}[.)]|[-*+])( *)(.*)$/)
+  const m = expandListPrefixTabs(line).match(/^( {0,3})(\d{1,9}[.)]|[-*+])( *)(.*)$/)
   if (!m) return Infinity
   const indent = m[1]?.length ?? 0
   const markerWidth = m[2]?.length ?? 0
@@ -108,8 +118,9 @@ export function listItemContentColumn(line: string): number {
   return indent + markerWidth + n
 }
 
+/** Continuation indent in COLUMNS (tabs expand at 4-column stops, spec 4/5). */
 function lazyContinuationIndent(line: string): number {
-  return line.match(/^ */)?.[0].length ?? 0
+  return leadingIndentWidth(line)
 }
 
 /** Ordered marker mid-paragraph (#304): only `1` may interrupt; other markers continue. */
@@ -211,12 +222,13 @@ function pushBlock(
 function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
   const startLine = lines[i]
   if (!startLine || !/^ {0,3}\[/.test(startLine.text)) return null
-  let j = i
+  // A definition cannot span a blank line and its continuation lines cannot be
+  // block starts, so gather the contiguous run those rules allow.
   let buf = ''
-  while (j < lines.length) {
+  let runLines = 0
+  for (let j = i; j < lines.length; j++) {
     const line = lines[j]
-    if (!line) break
-    if (j > i && line.text.trim() === '') return null
+    if (!line || line.text.trim() === '') break
     if (
       j > i &&
       (ATX_HEADING_RE.test(line.text) ||
@@ -225,17 +237,66 @@ function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
         fenceMarker(line.text) ||
         THEMATIC_BREAK_RE.test(line.text))
     ) {
-      return null
+      break
     }
     buf += line.text
     if (line.terminated) buf += '\n'
-    if (/\]:[ \t]/.test(buf) || /\]:\n/.test(buf)) {
-      const probe = buf.endsWith('\n') ? buf : `${buf}\n`
-      if (parseLinkReferenceDefinitions(probe).size > 0) return j + 1
-    }
-    j++
+    runLines++
   }
-  return null
+  // Consume as many consecutive definitions as parse from the start of the
+  // run — a definition may span several lines (destination and title on their
+  // own lines, spec 193/217) and several definitions may sit back to back.
+  let offset = 0
+  let consumedLines = 0
+  while (offset < buf.length && consumedLines < runLines) {
+    let k = offset
+    let indent = 0
+    while (buf[k] === ' ' && indent < 4) {
+      k++
+      indent++
+    }
+    if (indent > 3 || buf[k] !== '[') break
+    const def = parseLinkReferenceDefinitionAt(buf, k)
+    if (!def || !isValidReferenceLabel(def.label)) break
+    const segment = buf.slice(offset, def.end)
+    consumedLines += (segment.match(/\n/g)?.length ?? 0) + (segment.endsWith('\n') ? 0 : 1)
+    offset = def.end
+  }
+  if (consumedLines === 0) return null
+  return i + consumedLines
+}
+
+/**
+ * Whether a block fragment's last block is a paragraph still open for lazy
+ * continuation, descending through nested blockquotes and list items
+ * (spec 250/251/292).
+ */
+function endsInOpenParagraph(fragment: string): boolean {
+  const last = tokenizeBlocks(fragment).at(-1)
+  if (!last) return false
+  if (last.kind === 'paragraph') return true
+  // The token slices keep their final newline; `split`/`join` round-trips it.
+  if (last.kind === 'blockquote') {
+    const inner = fragment
+      .slice(last.start, last.end)
+      .split('\n')
+      .map((l) => stripBlockquoteMarker(l))
+      .join('\n')
+    return endsInOpenParagraph(inner)
+  }
+  if (last.kind === 'list_item') {
+    const lines = fragment.slice(last.start, last.end).split('\n')
+    const col = listItemContentColumn(lines[0] ?? '')
+    const inner = lines
+      .map((l, idx) => {
+        if (idx === 0) return l.slice(Math.min(col, l.length))
+        const indent = /^ */.exec(l)?.[0].length ?? 0
+        return l.slice(Math.min(col, indent))
+      })
+      .join('\n')
+    return endsInOpenParagraph(inner)
+  }
+  return false
 }
 
 function breaksUnorderedListItem(lines: ScannedLine[], itemStart: number, j: number): boolean {
@@ -243,6 +304,11 @@ function breaksUnorderedListItem(lines: ScannedLine[], itemStart: number, j: num
   const col = listItemContentColumn(itemStartLine)
   const next = lines[j]
   if (!next) return true
+  // An item that begins empty can begin with at most one blank line: a blank
+  // directly after the bare marker ends the item (spec 280).
+  if (next.text.trim() === '' && j === itemStart + 1 && isEmptyListItemLine(itemStartLine)) {
+    return true
+  }
   if (next.text.trim() === '') {
     let k = j + 1
     while (k < lines.length && lines[k]?.text.trim() === '') k++
@@ -381,6 +447,14 @@ export function tokenizeBlocks(source: string): BlockToken[] {
             j++
             continue
           }
+          // After a blank line, a 4-column-indented line under the content
+          // column cannot continue the item — `    3. c` under a content
+          // column of 5 is indented code after the list (spec 313). Unindented
+          // prose after a blank still folds into the item: a deliberate
+          // divergence for LLM-shaped numbered lists (renderer-fixtures).
+          if ((lines[j - 1]?.text.trim() ?? '') === '' && leadingIndentWidth(next.text) >= 4) {
+            break
+          }
           if (
             ATX_HEADING_RE.test(next.text) ||
             THEMATIC_BREAK_RE.test(next.text) ||
@@ -410,23 +484,28 @@ export function tokenizeBlocks(source: string): BlockToken[] {
       while (j < lines.length) {
         const next = lines[j]
         if (!next) break
-        if (next.text.trim() === '') {
-          let k = j + 1
-          while (k < lines.length && lines[k]?.text.trim() === '') k++
-          if (k < lines.length && lines[k] && BLOCKQUOTE_RE.test(lines[k]?.text ?? '')) {
-            j++
-            continue
-          }
-          break
-        }
-        if (
-          !BLOCKQUOTE_RE.test(next.text) &&
-          (ATX_HEADING_RE.test(next.text) ||
+        // A blank line always ends a blockquote (spec 242/252); consecutive
+        // `>` groups separated by blanks are separate blockquotes.
+        if (next.text.trim() === '') break
+        if (!BLOCKQUOTE_RE.test(next.text)) {
+          if (
+            ATX_HEADING_RE.test(next.text) ||
             LIST_ITEM_RE.test(next.text) ||
             fenceMarker(next.text) ||
-            THEMATIC_BREAK_RE.test(next.text))
-        ) {
-          break
+            THEMATIC_BREAK_RE.test(next.text)
+          ) {
+            break
+          }
+          // Laziness: an unmarked line continues the quote only while the
+          // quote's content ends in an open paragraph — never an indented
+          // code block, an open fence, or a closed-by-`>`-blank paragraph
+          // (spec 236/237/249). Nested quotes recurse (spec 250/251).
+          const stripped =
+            lines
+              .slice(i, j)
+              .map((l) => stripBlockquoteMarker(l.text))
+              .join('\n') + '\n'
+          if (!endsInOpenParagraph(stripped)) break
         }
         j++
       }
@@ -512,9 +591,17 @@ export function tokenizeBlocks(source: string): BlockToken[] {
     // Paragraph: collect consecutive non-blank lines until a block boundary.
     const paraStart = line.start
     let j = i + 1
+    let setextUnderline: ScannedLine | null = null
     while (j < lines.length) {
       const next = lines[j]
       if (!next || next.text.trim() === '') break
+      // A setext underline closes the WHOLE collected paragraph into a
+      // heading (spec 81/95) — checked before the thematic-break test so a
+      // `---` after paragraph text reads as an underline, not an <hr>.
+      if (next.terminated && SETEXT_UNDERLINE_RE.test(next.text)) {
+        setextUnderline = next
+        break
+      }
       if (
         ATX_HEADING_RE.test(next.text) ||
         THEMATIC_BREAK_RE.test(next.text) ||
@@ -524,13 +611,18 @@ export function tokenizeBlocks(source: string): BlockToken[] {
           !orderedMarkerContinuesParagraph(lines[j - 1]?.text ?? '', next.text)) ||
         BLOCKQUOTE_RE.test(next.text) ||
         fenceMarker(next.text) ||
-        tryLinkRefDefBlock(lines, j) !== null ||
-        (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? '')) ||
-        (lines[j + 1] && SETEXT_UNDERLINE_RE.test(lines[j + 1]?.text ?? ''))
+        // NOTE: a link reference definition cannot interrupt a paragraph
+        // (spec 213) — a `[label]: dest` line here is a lazy continuation.
+        (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
       ) {
         break
       }
       j++
+    }
+    if (setextUnderline) {
+      pushBlock(blocks, 'setext_heading', 'complete', paraStart, setextUnderline.end)
+      i = j + 1
+      continue
     }
     const last = lines[j - 1] ?? line
     const status: BlockStatus = last.terminated ? 'complete' : 'open'
@@ -539,6 +631,39 @@ export function tokenizeBlocks(source: string): BlockToken[] {
   }
 
   return blocks
+}
+
+/**
+ * Collect link reference definitions with block context: definitions live only
+ * in `link_ref_def` blocks (never inside fenced code, spec 212, or paragraph
+ * continuations, spec 213) and inside blockquotes (spec 218), which are
+ * unwrapped and scanned recursively. First definition wins, in source order.
+ * Pass `tokens` (`tokenizeBlocks(source)`) to reuse an existing tokenization.
+ */
+export function collectLinkReferenceDefinitions(
+  source: string,
+  tokens?: BlockToken[],
+): LinkReferenceMap {
+  const blocks = tokens ?? tokenizeBlocks(source)
+  const refs = new Map<string, LinkReference>()
+  const merge = (found: LinkReferenceMap): void => {
+    for (const [key, ref] of found) {
+      if (!refs.has(key)) refs.set(key, ref)
+    }
+  }
+  for (const token of blocks) {
+    if (token.kind === 'link_ref_def') {
+      merge(parseLinkReferenceDefinitions(source.slice(token.start, token.end)))
+    } else if (token.kind === 'blockquote') {
+      const inner = source
+        .slice(token.start, token.end)
+        .split('\n')
+        .map((line) => stripBlockquoteMarker(line.trim()))
+        .join('\n')
+      merge(collectLinkReferenceDefinitions(inner))
+    }
+  }
+  return refs
 }
 
 /** Index of the first character that must stay in the pending region. */
