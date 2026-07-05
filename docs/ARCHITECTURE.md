@@ -10,12 +10,24 @@ When extending the renderer or its CSS, preserve these rules:
 - **Sanitize at the sink.** `renderMarkdown()` is a pure string→HTML function, but
   its output assembles HTML by concatenation and is treated as untrusted. Every
   `innerHTML` assignment of rendered markdown goes through
-  `sanitizeRenderedMarkdown()` (`sanitize.ts`, DOMPurify) first — see
+  `sanitizeRenderedMarkdown()` (`sanitize.ts`) first — see
   `conversation.ts`, `streaming.ts`, `context-panel.ts`. If you add a new sink or a
   new output tag/attribute, route it through the sanitizer and widen its allowlist
   to match. Mermaid SVG is produced after sanitization and is not re-sanitized.
   The rationale and the survey of streaming-parser alternatives are tracked in the
   consuming app's design docs.
+- **Pluggable sanitizer backend.** `sanitize.ts` holds the narrow tag/attr allowlist
+  and a single per-element gate (task-list `<input>` lockdown + host
+  `SanitizeExtension.onElement`), but delegates the actual sanitize to a
+  `SanitizerBackend` (`setSanitizerBackend`). Two ship: the zero-dependency native
+  Sanitizer API (`sanitize-browser.ts`, `Element.setHTML` + a strict allowlist walk;
+  the default when available) and DOMPurify (`sanitize-dompurify.ts`, imported only
+  via the `@copse/streaming-markdown/sanitizers/dompurify` entry so it stays out of
+  bundles that use the native API). Both enforce the same allowlist and run the same
+  gate, so security posture is backend-independent. When no backend is set and the
+  native API is missing, `sanitizeRenderedMarkdown` throws rather than return
+  unsanitized HTML. DOMPurify is an optional peer dependency; `dompurify` must not be
+  imported outside `sanitize-dompurify.ts`, or it re-enters the default bundle.
 - **Package boundary.** The core stays app-independent so it can version and ship on
   its own, so host-specific behaviour is **injected, not hard-coded**:
   - `setLinkDecorator` (`inline-links.ts`) — a `LinkDecorator` returns the attributes
@@ -25,7 +37,7 @@ When extending the renderer or its CSS, preserve these rules:
     `<img>` becomes (e.g. an app's artifact placeholder). The core escapes every
     `<img>` by default; the renderer's output bypasses escaping via a placeholder and
     is restored afterward.
-  - `setSanitizeExtension` (`sanitize.ts`) — widens the DOMPurify allowlist and adds a
+  - `setSanitizeExtension` (`sanitize.ts`) — widens the sanitizer allowlist and adds a
     per-element gate so a host's injected markup (e.g. its artifact `<img>`) survives
     sanitization. The core allowlist stays the security gate; keep additions narrow.
 
@@ -54,11 +66,11 @@ When extending the renderer or its CSS, preserve these rules:
   the start of an item's first line renders a read-only `<input type="checkbox" disabled>`
   (`parseTaskListMarker`/`renderListItem` in `render-blocks.ts`); the item gets
   `class="task-list-item"` and its list `class="contains-task-list"` for bullet-free styling
-  (#614). `input` + `type`/`checked`/`disabled` are on the DOMPurify allowlist, and a sink hook
-  drops any non-checkbox `<input>` (see `sanitize.ts`).
+  (#614). `input` + `type`/`checked`/`disabled` are on the sanitizer allowlist, and the
+  per-element gate drops any non-checkbox `<input>` (see `sanitize.ts`).
 - **Benign raw inline HTML.** Attribute-less phrasing tags models emit in prose
   (`<b> <i> <u> <s> <del> <ins> <sub> <sup> <kbd> <mark> <br>`) pass through unescaped
-  (`BENIGN_RAW_INLINE_TAG_RE` in `escape.ts`); the DOMPurify sink allowlist mirrors the set.
+  (`BENIGN_RAW_INLINE_TAG_RE` in `escape.ts`); the sanitizer sink allowlist mirrors the set.
   Anything with attributes, and all block/structural raw HTML, stays escaped — see the
   raw-HTML policy discussion in #600 before widening this.
 - **Indented HTML blocks.** CommonMark makes any 4-space-indented line an indented code block,
@@ -224,7 +236,7 @@ Two spec sections are therefore expected to fail by design:
 
 The only raw HTML that passes through is the **benign attribute-less inline
 allowlist** (`b i u s del ins sub sup kbd mark br`, `BENIGN_RAW_INLINE_TAG_RE` in
-`escape.ts`), mirrored by the DOMPurify sink. Everything with attributes, and all
+`escape.ts`), mirrored by the sanitizer sink. Everything with attributes, and all
 block/structural raw HTML, stays escaped.
 
 So the realistic ceiling excludes those **64 HTML examples**: **588 in-scope

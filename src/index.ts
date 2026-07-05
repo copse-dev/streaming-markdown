@@ -14,8 +14,16 @@ export {
 export {
   sanitizeRenderedMarkdown,
   setSanitizeExtension,
+  setSanitizerBackend,
   type SanitizeExtension,
+  type SanitizerBackend,
+  type SanitizerConfig,
 } from './sanitize.ts'
+// The native-Sanitizer backend is zero-dependency, so it is safe to include in
+// the main entry. The DOMPurify backend stays behind the
+// `@copse/streaming-markdown/sanitizers/dompurify` entry so it is only bundled
+// when a host explicitly opts in.
+export { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize-browser.ts'
 export { setRawImageRenderer, type RawImageRenderer, type RawImageTag } from './raw-images.ts'
 export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './escape.ts'
 export { fenceCodeClass, highlightFenceCode, stripAppCodeDecorations } from './highlight.ts'
