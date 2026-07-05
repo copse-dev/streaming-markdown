@@ -6,8 +6,11 @@ name: Release
 # publishes to public npm, and cuts a GitHub Release whose body is that
 # changelog. Run `dry_run: true` first to preview without pushing anything.
 #
-# Requires an NPM_TOKEN repo secret (an npm automation/granular token with
-# publish rights on the @copse scope).
+# Publishing uses npm Trusted Publishing (OIDC) — no NPM_TOKEN secret. Configure
+# a trusted publisher for @copse/streaming-markdown at npmjs.com (Settings ->
+# Trusted Publisher) pointing at this repo + workflow file (release.yml). The
+# package must exist first, so the initial publish is a one-time manual
+# `npm publish` (interactive 2FA); every release after that flows through here.
 on:
   workflow_dispatch:
     inputs:
@@ -40,9 +43,9 @@ on:
         default: false
         type: boolean
 
-# Least privilege: write to the repo (commit + tag + release). Publishing goes
-# to public npm and authenticates with the NPM_TOKEN secret, not GITHUB_TOKEN.
-# id-token: write lets npm mint a provenance attestation via GitHub OIDC.
+# Least privilege: write to the repo (commit + tag + release). id-token: write
+# lets the runner mint the GitHub OIDC token that npm Trusted Publishing uses to
+# authenticate the publish (and to attach provenance automatically).
 permissions:
   contents: write
   id-token: write
@@ -126,19 +129,19 @@ jobs:
       # runner and vanish with it, leaving nothing to clean up before a retry.
       - name: Publish to npm
         if: ${{ !inputs.dry_run }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          # Trusted Publishing authenticates via the GitHub OIDC token (see the
+          # id-token permission above) — no NPM_TOKEN needed. It requires npm
+          # >= 11.5.1; the Node 22 runner ships npm 10, so upgrade first.
+          npm install -g npm@latest
           # `private: true` in package.json is a safety net against accidental
-          # publishes; strip it here (uncommitted) so this deliberate, authed
-          # publish can proceed. publishConfig in package.json pins the public
-          # npm registry and `--access public` for the scoped @copse package.
+          # publishes; strip it here (uncommitted) so this deliberate release
+          # publish can proceed. publishConfig pins the public registry +
+          # `--access public`, and provenance is attached automatically under
+          # trusted publishing.
           npm pkg delete private
-          # --provenance attaches a signed attestation linking this release to
-          # the source commit + build (via GitHub OIDC), shown as a verified
-          # badge on npm.
-          npm publish --provenance
+          npm publish
 
       - name: Push commit and tag
         if: ${{ !inputs.dry_run }}
