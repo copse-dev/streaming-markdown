@@ -18,8 +18,8 @@ jobs:
   # RUNNERS_PAT is never exposed to them).
   #
   # To enable self-hosted routing, add a repo (or org) secret RUNNERS_PAT with
-  # org runner read (classic `admin:org`, or fine-grained organization
-  # "Self-hosted runners: Read"). Without it, this stays on hosted.
+  # org admin read (classic `admin:org`, or fine-grained organization
+  # "Administration: Read"). Without it, this stays on hosted.
   pick-runner:
     runs-on: ubuntu-latest
     outputs:
