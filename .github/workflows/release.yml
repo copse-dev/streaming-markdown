@@ -3,15 +3,31 @@ name: Release
 # Manual, one-button release. Pick a version (a semver bump keyword or an exact
 # version), and this workflow: runs the full CI gate, bumps package.json,
 # writes the changelog from the commits since the last tag, commits + tags,
-# publishes to GitHub Packages, and cuts a GitHub Release whose body is that
+# publishes to public npm, and cuts a GitHub Release whose body is that
 # changelog. Run `dry_run: true` first to preview without pushing anything.
+#
+# Requires an NPM_TOKEN repo secret (an npm automation/granular token with
+# publish rights on the @copse scope).
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version: a bump keyword (patch | minor | major | prepatch | preminor | premajor | prerelease) or an exact version (e.g. 1.2.0)'
+      bump:
+        description: 'Semver bump to apply (ignored when "exact version" is set below)'
         required: true
         default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+      exact_version:
+        description: 'Optional: exact version to release (e.g. 1.2.0). Overrides the bump dropdown when set.'
+        required: false
+        default: ''
         type: string
       prerelease:
         description: 'Mark the GitHub Release as a pre-release'
@@ -24,10 +40,12 @@ on:
         default: false
         type: boolean
 
-# Least privilege: write to repo (commit + tag + release) and packages (publish).
+# Least privilege: write to the repo (commit + tag + release). Publishing goes
+# to public npm and authenticates with the NPM_TOKEN secret, not GITHUB_TOKEN.
+# id-token: write lets npm mint a provenance attestation via GitHub OIDC.
 permissions:
   contents: write
-  packages: write
+  id-token: write
 
 concurrency:
   group: release
@@ -46,7 +64,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          registry-url: https://npm.pkg.github.com
+          registry-url: https://registry.npmjs.org
           scope: '@copse'
 
       - run: npm ci
@@ -65,10 +83,12 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          # `npm version` accepts both bump keywords and exact versions, and
+          # Prefer the free-text exact version when provided; otherwise use the
+          # bump keyword from the dropdown. `npm version` accepts both forms and
           # prints the resulting `vX.Y.Z`. --no-git-tag-version edits
           # package.json + package-lock.json without tagging (we tag ourselves).
-          TAG=$(npm version "${{ inputs.version }}" --no-git-tag-version)
+          TARGET="${{ inputs.exact_version || inputs.bump }}"
+          TAG=$(npm version "$TARGET" --no-git-tag-version)
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -103,18 +123,21 @@ jobs:
           git push origin HEAD
           git push origin "${{ steps.version.outputs.tag }}"
 
-      - name: Publish to GitHub Packages
+      - name: Publish to npm
         if: ${{ !inputs.dry_run }}
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           # `private: true` in package.json is a safety net against accidental
           # publishes; strip it here (uncommitted) so this deliberate, authed
-          # publish to GitHub Packages can proceed. publishConfig in
-          # package.json pins the registry.
+          # publish can proceed. publishConfig in package.json pins the public
+          # npm registry and `--access public` for the scoped @copse package.
           npm pkg delete private
-          npm publish
+          # --provenance attaches a signed attestation linking this release to
+          # the source commit + build (via GitHub OIDC), shown as a verified
+          # badge on npm.
+          npm publish --provenance
 
       - name: Create GitHub Release
         if: ${{ !inputs.dry_run }}
