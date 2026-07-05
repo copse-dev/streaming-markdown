@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderMarkdown } from './renderer.ts'
+import { withHostImagePolicy } from '../tests/host-image-test-policy.ts'
 
 describe('renderMarkdown', () => {
   it('renders headings on their own lines', () => {
@@ -365,7 +366,7 @@ describe('renderMarkdown', () => {
         '## Architecture Notes',
         '',
         '- **Shell permissions**: `src/main/services/permission-policy.ts` — sandbox policy',
-        '- **MCP host**: connects via `.cursor/mcp.json` or `~/.cursor/mcp.json`',
+        '- **MCP host**: connects via `.mcp.json` or `~/.mcp.json`',
       ].join('\n'),
     )
     assert.match(html, /<strong><code>src\/\*\*\/\*\.test\.ts<\/code><\/strong>/)
@@ -418,10 +419,10 @@ describe('renderMarkdown', () => {
     // delimiter across the code span (which would bold the wrong half and leave
     // `**MCP support` literal).
     const html = renderMarkdown(
-      '- **MCP support** — Can host servers (configured via `.cursor/mcp.json`).**',
+      '- **MCP support** — Can host servers (configured via `.mcp.json`).**',
     )
     assert.match(html, /<li><strong>MCP support<\/strong> — Can host servers/)
-    assert.match(html, /<code>\.cursor\/mcp\.json<\/code>/)
+    assert.match(html, /<code>\.mcp\.json<\/code>/)
     assert.doesNotMatch(html, /\*\*MCP support/)
     assert.doesNotMatch(html, /<strong> — Can host/)
   })
@@ -509,27 +510,36 @@ describe('renderMarkdown sanitization (#115)', () => {
     assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/)
   })
 
-  it('allows only remote artifact image tags as inert image placeholders', () => {
+  it('escapes raw <img> tags by default (image handling is host-injected)', () => {
     const html = renderMarkdown(
-      '<img alt="C-S-S New Tab Page rendered" src="/opt/cursor/artifacts/screenshots/css-new-tab.png" />',
+      '<img alt="C-S-S New Tab Page rendered" src="artifacts/screenshots/css-new-tab.png" />',
     )
+    assert.doesNotMatch(html, /<img\b/)
+    assert.match(html, /&lt;img/)
+  })
 
-    assert.match(html, /<img class="remote-artifact-image"/)
-    assert.match(html, /data-remote-artifact-path="artifacts\/screenshots\/css-new-tab\.png"/)
-    assert.match(html, /alt="C-S-S New Tab Page rendered"/)
-    assert.doesNotMatch(html, /src="/)
+  it('routes raw <img> tags through an injected RawImageRenderer', () => {
+    withHostImagePolicy(() => {
+      const html = renderMarkdown(
+        '<img alt="C-S-S New Tab Page rendered" src="artifacts/screenshots/css-new-tab.png" />',
+      )
+      assert.match(html, /<img class="host-image"/)
+      assert.match(html, /data-host-image-path="artifacts\/screenshots\/css-new-tab\.png"/)
+      assert.match(html, /alt="C-S-S New Tab Page rendered"/)
+      assert.doesNotMatch(html, /src="/)
+    })
   })
 
   it('wraps a block that contains but cannot be split around a block element without infinite recursion', () => {
-    // The rendered artifact <img> makes CONTAINS_BLOCK_RE match, but the block
-    // does not start with a block element, so splitBlockElements returns the
-    // single unchanged block. wrapParagraphBlock must wrap it as a paragraph and
-    // stop rather than recurse on the identical block forever (the guard in
-    // wrapParagraphBlock). Reaching this assertion at all proves no infinite loop.
-    const html = renderMarkdown(
-      'Inline <img src="/opt/cursor/artifacts/screenshots/x.png"> trailing text',
-    )
-    assert.match(html, /^<p>Inline <img class="remote-artifact-image"[^>]*> trailing text<\/p>$/)
+    // The injected image renderer emits an <img>, so CONTAINS_BLOCK_RE matches,
+    // but the block does not start with a block element, so splitBlockElements
+    // returns the single unchanged block. wrapParagraphBlock must wrap it as a
+    // paragraph and stop rather than recurse on the identical block forever (the
+    // guard in wrapParagraphBlock). Reaching this assertion at all proves no loop.
+    withHostImagePolicy(() => {
+      const html = renderMarkdown('Inline <img src="artifacts/screenshots/x.png"> trailing text')
+      assert.match(html, /^<p>Inline <img class="host-image"[^>]*> trailing text<\/p>$/)
+    })
   })
 
   it('escapes script tags rather than executing them', () => {

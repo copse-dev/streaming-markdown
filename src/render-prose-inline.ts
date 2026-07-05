@@ -1,5 +1,5 @@
 import { decodeSafeMarkdownEntities } from './escape.ts'
-import { renderArtifactImageTags } from './artifact-images.ts'
+import { extractRawImages, restoreRawImages } from './raw-images.ts'
 import { scanCodeSpans } from './inline-code-spans.ts'
 import { renderInlineSpans } from './inline-spans.ts'
 import { type LinkReferenceMap } from './link-references.ts'
@@ -111,8 +111,9 @@ export interface RenderProseInlineOptions {
 export function renderProseInline(text: string, options: RenderProseInlineOptions = {}): string {
   const { softBreak = 'newline', linkRefs = new Map() } = options
   const body = markHardBreaks(decodeSafeMarkdownEntities(stripHtmlComments(text)))
-  const rendered = renderInlineSpans(renderArtifactImageTags(body), linkRefs)
-  return applyLineBreaks(rendered, softBreak)
+  const { text: withoutImages, images } = extractRawImages(body)
+  const rendered = renderInlineSpans(withoutImages, linkRefs)
+  return restoreRawImages(applyLineBreaks(rendered, softBreak), images)
 }
 
 /** Like {@link renderProseInline} but skips empty comment-stripped bodies. */
