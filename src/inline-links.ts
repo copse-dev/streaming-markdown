@@ -2,20 +2,44 @@ import { decodeEscapedPunctuationRaw } from './backslash-escapes.ts'
 import { decodeEscapedHref, escapeHtml } from './escape.ts'
 import { isWorkspaceMarkdownLinkHref } from './workspace-link-href.ts'
 import {
-  encodeHrefForOutput,
+  decodeHtmlCharRefs,
   lookupLinkReference,
   type LinkReferenceMap,
   parseInlineLinkDestination,
   parseReferenceLabel,
+  percentEncodeHref,
 } from './link-references.ts'
 
 export type LinkLabelRenderer = (label: string, refs: LinkReferenceMap) => string
 
+/**
+ * URL schemes permitted on a link/image destination. Anything carrying a scheme
+ * outside this set — `javascript:`, `data:`, `vbscript:`, `file:`, and every
+ * unknown scheme — is rejected. An allowlist fails *closed*: a new dangerous
+ * scheme is blocked by default, unlike a denylist that only knows the three it
+ * was told about. Relative/absolute paths, fragments, and query-only
+ * destinations carry no scheme and are always allowed.
+ */
+const SAFE_HREF_SCHEMES = new Set(['http', 'https', 'mailto', 'tel', 'sms', 'ftp', 'ftps'])
+const HREF_SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):/
+
+/** True when `href` is a relative destination or carries an allowlisted scheme. */
+function isAllowedHref(href: string): boolean {
+  const scheme = HREF_SCHEME_RE.exec(href)?.[1]
+  return scheme === undefined || SAFE_HREF_SCHEMES.has(scheme.toLowerCase())
+}
+
 /** Allowed link destinations: http(s), mailto, and relative/path forms. Rejects dangerous schemes. */
 export function safeLinkHref(raw: string): string | null {
-  const href = decodeEscapedPunctuationRaw(decodeEscapedHref(raw)).trim()
-  if (/^(javascript|data|vbscript):/i.test(href)) return null
-  return encodeHrefForOutput(href)
+  // Resolve to the exact string the browser will act on *before* validating:
+  // undo source HTML-escaping and PUA-escaped punctuation, then decode HTML
+  // character references. Checking the raw string first let `&#x6a;avascript:`
+  // slip past the scheme test and only decode to a live `javascript:` URL when
+  // percent-encoding ran afterwards. Validate the decoded form, then encode it
+  // directly (no second entity-decode pass) so nothing re-hides a scheme.
+  const href = decodeHtmlCharRefs(decodeEscapedPunctuationRaw(decodeEscapedHref(raw))).trim()
+  if (!isAllowedHref(href)) return null
+  return percentEncodeHref(href)
 }
 
 /** Resolved link the {@link LinkDecorator} decorates. `href` is already safe/encoded. */

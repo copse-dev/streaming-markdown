@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseLinkReferenceDefinitions } from './link-references.ts'
-import { renderInlineLinks } from './inline-links.ts'
+import { renderInlineLinks, safeLinkHref } from './inline-links.ts'
 import { renderInlineSpans } from './inline-spans.ts'
 
 describe('renderInlineLinks', () => {
@@ -81,5 +81,41 @@ describe('renderInlineLinks', () => {
     assert.equal(refs.size, 0)
     assert.equal(renderInlineSpans('[]', refs), '[]')
     assert.equal(renderInlineSpans('![[foo]]', refs), '![[foo]]')
+  })
+})
+
+describe('safeLinkHref scheme validation', () => {
+  it('allows relative destinations and allowlisted schemes', () => {
+    assert.equal(safeLinkHref('/some/path.ts'), '/some/path.ts')
+    assert.equal(safeLinkHref('#section'), '#section')
+    assert.equal(safeLinkHref('foo/bar'), 'foo/bar')
+    assert.equal(safeLinkHref('https://example.com'), 'https://example.com')
+    assert.equal(safeLinkHref('HTTPS://example.com'), 'HTTPS://example.com')
+    assert.equal(safeLinkHref('mailto:a@b.com'), 'mailto:a@b.com')
+    assert.equal(safeLinkHref('tel:+15551234'), 'tel:+15551234')
+  })
+
+  it('rejects dangerous and unknown schemes (allowlist fails closed)', () => {
+    assert.equal(safeLinkHref('javascript:alert(1)'), null)
+    assert.equal(safeLinkHref('vbscript:msgbox(1)'), null)
+    assert.equal(safeLinkHref('data:text/html,<script>'), null)
+    assert.equal(safeLinkHref('file:///etc/passwd'), null)
+    // An unknown scheme is blocked by default rather than allowed.
+    assert.equal(safeLinkHref('made-up-scheme://x'), null)
+  })
+
+  it('decodes character references before validating the scheme (#SECURITY)', () => {
+    // The scheme check must run on the decoded href, not the raw string: an
+    // entity-encoded `j` would otherwise slip a live `javascript:` URL past it.
+    assert.equal(safeLinkHref('&#x6a;avascript:alert(1)'), null)
+    assert.equal(safeLinkHref('java&#x73;cript:alert(1)'), null)
+    // ...including a double-encoded entity, since output re-decodes source escapes.
+    assert.equal(safeLinkHref('&amp;#x6a;avascript:alert(1)'), null)
+    assert.equal(safeLinkHref('&#100;ata:text/html,x'), null)
+  })
+
+  it('does not link an entity-encoded javascript: reference definition (#SECURITY)', () => {
+    const refs = parseLinkReferenceDefinitions('[r]: &#x6a;avascript:alert(1)\n')
+    assert.equal(renderInlineSpans('[click][r]', refs), '[click][r]')
   })
 })

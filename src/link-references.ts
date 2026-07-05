@@ -47,15 +47,20 @@ function decodeDestinationEscapes(text: string): string {
   return text.replace(/\\([!"#$%&'()*+,-./:;<=>?@[\\\]^_`{|}~])/g, '$1')
 }
 
-function decodeHtmlCharRefs(text: string): string {
+export function decodeHtmlCharRefs(text: string): string {
   // Full HTML5 named + numeric character references, semicolon required
   // (CommonMark). Escaped-at-source markup is re-encoded by the caller.
   return decodeHTMLStrict(text)
 }
 
-/** Percent-encode href values for HTML output (preserves existing %XX sequences). */
-export function encodeHrefForOutput(href: string): string {
-  const decoded = decodeHtmlCharRefs(href)
+/**
+ * Percent-encode an already-decoded href for HTML output (preserves existing
+ * %XX sequences). Split out from {@link encodeHrefForOutput} so callers that
+ * validate an href's scheme can decode once, check the decoded form, then
+ * encode — without a second {@link decodeHtmlCharRefs} pass re-hiding a
+ * dangerous scheme behind double-encoded entities (`&amp;#x6a;avascript:`).
+ */
+export function percentEncodeHref(decoded: string): string {
   let out = ''
   for (let i = 0; i < decoded.length; i++) {
     const ch = decoded.charAt(i)
@@ -73,6 +78,11 @@ export function encodeHrefForOutput(href: string): string {
     }
   }
   return out
+}
+
+/** Decode HTML character references then percent-encode an href for output. */
+export function encodeHrefForOutput(href: string): string {
+  return percentEncodeHref(decodeHtmlCharRefs(href))
 }
 
 function parseLinkTitleAt(source: string, start: number): { title: string; end: number } | null {
