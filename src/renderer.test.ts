@@ -72,6 +72,52 @@ describe('renderMarkdown', () => {
     assert.match(html, /<ul><li>foo<\/li><li>bar<\/li><\/ul>\s*<ul><li>baz<\/li><\/ul>/)
   })
 
+  it('groups empty unordered list items into one list (#281)', () => {
+    const html = renderMarkdown('- foo\n-\n- bar\n')
+    assert.match(html, /<ul><li>foo<\/li><li><\/li><li>bar<\/li><\/ul>/)
+  })
+
+  it('groups empty ordered list items into one list (#283)', () => {
+    const html = renderMarkdown('1. foo\n2.\n3. bar\n')
+    assert.match(html, /<ol><li>foo<\/li><li><\/li><li>bar<\/li><\/ol>/)
+  })
+
+  it('keeps an empty item mid-list loose across a blank (#315)', () => {
+    const html = renderMarkdown('* a\n*\n\n* c\n')
+    assert.match(html, /<ul><li><p>a<\/p><\/li><li><\/li><li><p>c<\/p><\/li><\/ul>/)
+  })
+
+  it('does not let an empty list marker interrupt a paragraph (#285)', () => {
+    const htmlStar = renderMarkdown('foo\n*\n')
+    assert.match(htmlStar, /<p>foo\s+\*<\/p>/)
+    assert.doesNotMatch(htmlStar, /<ul/)
+    const htmlOrdered = renderMarkdown('foo\n1.\n')
+    assert.match(htmlOrdered, /<p>foo\s+1\.<\/p>/)
+    assert.doesNotMatch(htmlOrdered, /<ol/)
+  })
+
+  it('treats 5+ spaces after a list marker as indented code (#273, #274)', () => {
+    const html = renderMarkdown('1.     indented code\n\n   paragraph\n\n       more code\n')
+    assert.match(
+      html,
+      /<ol><li><pre><code>indented code\n<\/code><\/pre>\s*<p>paragraph<\/p>\s*<pre><code>more code\n<\/code><\/pre><\/li><\/ol>/,
+    )
+  })
+
+  it('measures the content column from an empty marker for indented code (#278)', () => {
+    const html = renderMarkdown('-\n      baz\n')
+    assert.match(html, /<ul><li><pre><code>baz\n<\/code><\/pre><\/li><\/ul>/)
+  })
+
+  it('keeps a list intact across multiple blank lines between items (#306)', () => {
+    const html = renderMarkdown('- foo\n\n- bar\n\n\n- baz\n')
+    assert.match(
+      html,
+      /<ul><li><p>foo<\/p><\/li><li><p>bar<\/p><\/li><li><p>baz<\/p><\/li><\/ul>/,
+    )
+    assert.doesNotMatch(html, /<\/ul>\s*<ul>/)
+  })
+
   it('emits ordered list start attributes (#265, #268)', () => {
     const html265 = renderMarkdown('123456789. ok\n')
     assert.match(html265, /<ol start="123456789"><li>ok<\/li><\/ol>/)
