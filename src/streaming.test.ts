@@ -7,9 +7,9 @@ import {
   pendingHoldIndex,
   renderStreamingMarkdown,
   splitAtLastNewline,
-  splitForStreaming,
   StreamingMarkdownRenderer,
 } from './streaming.ts'
+import { splitCore } from '../tests/split-core.ts'
 import { withHostImagePolicy } from '../tests/host-image-test-policy.ts'
 
 describe('splitAtLastNewline', () => {
@@ -150,17 +150,6 @@ describe('pendingHoldIndex (defer unresolved inline markup)', () => {
 })
 
 describe('splitForStreaming (block-granularity emphasis)', () => {
-  // Drop the deterministic `blocks` token array so these assertions stay
-  // focused on the commit boundary (#21).
-  const splitCore = (
-    content: string,
-  ): { complete: string; pending: string; openListItemFirstLine?: string } => {
-    const s = splitForStreaming(content)
-    return s.openListItemFirstLine === undefined
-      ? { complete: s.complete, pending: s.pending }
-      : { complete: s.complete, pending: s.pending, openListItemFirstLine: s.openListItemFirstLine }
-  }
-
   it('holds an open emphasis span across a soft line break', () => {
     assert.deepEqual(splitCore('intro **bold\ntext'), {
       complete: 'intro ',

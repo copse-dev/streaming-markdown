@@ -34,7 +34,7 @@
 // Every uncertainty falls back to `morphInnerHtml(sanitize(render(complete)))` —
 // today's exact, correct behaviour — so the fast path is a pure optimization: a
 // mishandled case degrades to slower-but-correct output, never to wrong output.
-import { type BlockToken } from './block-tokenizer.ts'
+import { type BlockKind, type BlockToken } from './block-tokenizer.ts'
 import { renderBlocks } from './render-blocks.ts'
 import { parseLinkReferenceDefinitions, type LinkReferenceMap } from './link-references.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
@@ -46,9 +46,47 @@ import { morphInnerHtml, morphInnerHtmlFrom } from './streaming-dom-morph.ts'
 // (gap A: top-level indented raw HTML follows the raw-HTML policy, not <pre>).
 const RENDER_OPTS = TOP_LEVEL_RENDER_OPTS
 
-/** Kinds whose top-level group can span earlier same-kind tokens + internal blanks. */
-function isMultiTokenGroupKind(kind: BlockToken['kind']): boolean {
-  return kind === 'list_item' || kind === 'blockquote' || kind === 'indented_code'
+/**
+ * How a block kind behaves at the settled/tail boundary:
+ *
+ *  - `immutable` — a complete token of this kind can never be changed by later
+ *    input (closed fence, ATX/setext heading, thematic break).
+ *  - `settled-after-blank` — complete and immutable only once a complete blank
+ *    follows (a paragraph can retro-convert to a setext heading; a table can
+ *    still grow body rows).
+ *  - `grouping` — consecutive same-kind tokens (with interleaved blanks) render
+ *    as ONE top-level group that later input can still extend or restructure
+ *    (lists: loose/tight; blockquotes: blank-run continuation; indented code:
+ *    blank-run merging), so a trailing run stays wholly in the tail.
+ *  - `separator` — renders nothing itself; a *complete* token of this kind is a
+ *    stable boundary between groups.
+ *
+ * The switch is exhaustive over `BlockKind` with no default: adding a new block
+ * kind is a COMPILE ERROR here until it is classified, so the frozen/tail
+ * boundary can never silently mis-handle a kind it has not met (#32). When
+ * unsure, classify a new kind as `grouping` — the walk-back only ever *grows*
+ * the tail, which is conservative (more re-render, never wrong output).
+ */
+type SettleClass = 'immutable' | 'settled-after-blank' | 'grouping' | 'separator'
+
+function settleClassOf(kind: BlockKind): SettleClass {
+  switch (kind) {
+    case 'fence':
+    case 'atx_heading':
+    case 'setext_heading':
+    case 'thematic_break':
+      return 'immutable'
+    case 'paragraph':
+    case 'table':
+      return 'settled-after-blank'
+    case 'list_item':
+    case 'blockquote':
+    case 'indented_code':
+      return 'grouping'
+    case 'blank':
+    case 'link_ref_def':
+      return 'separator'
+  }
 }
 
 /**
@@ -76,11 +114,11 @@ export function settledTailStart(tokens: BlockToken[]): number {
   while (i >= 0) {
     const token = tokens[i]
     if (!token) return tokens.length
-    // Only *complete* blanks/refs are stable separators. An open trailing blank
+    // Only *complete* separators are stable boundaries. An open trailing blank
     // (e.g. `" "` — spaces with no newline) can be re-absorbed into the next
     // block (`" " + "***"` → a leading-space thematic break), so it is unsettled
     // and must stay in the tail; never advance the frozen region past it.
-    if ((token.kind === 'blank' || token.kind === 'link_ref_def') && token.status === 'complete') {
+    if (settleClassOf(token.kind) === 'separator' && token.status === 'complete') {
       blankFollows = true
       i--
       continue
@@ -92,19 +130,16 @@ export function settledTailStart(tokens: BlockToken[]): number {
   const last = tokens[i]
   if (!last) return tokens.length
 
+  const cls = settleClassOf(last.kind)
   const settled =
     last.status === 'complete' &&
-    (last.kind === 'fence' ||
-      last.kind === 'atx_heading' ||
-      last.kind === 'setext_heading' ||
-      last.kind === 'thematic_break' ||
-      ((last.kind === 'paragraph' || last.kind === 'table') && blankFollows))
+    (cls === 'immutable' || (cls === 'settled-after-blank' && blankFollows))
   if (settled) return i + 1
 
-  // Unsettled last group. Single-token kinds (paragraph, table, open/ambiguous
-  // singletons) start at `i`; list/blockquote/indented-code groups can span an
-  // earlier run of same-kind tokens and internal blanks.
-  if (!isMultiTokenGroupKind(last.kind)) return i
+  // Unsettled last group. Non-grouping kinds (paragraph, table, open/ambiguous
+  // singletons) start at `i`; grouping kinds can span an earlier run of
+  // same-kind tokens and internal blanks.
+  if (cls !== 'grouping') return i
 
   let s = i
   while (s - 1 >= 0) {

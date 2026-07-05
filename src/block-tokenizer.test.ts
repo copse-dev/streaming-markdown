@@ -12,22 +12,7 @@ import {
   streamingHoldStart,
   tokenizeBlocks,
 } from './block-tokenizer.ts'
-import { splitForStreaming } from './streaming-split.ts'
-
-/**
- * `splitForStreaming` result without the (deterministic) `blocks` token array,
- * so these contract assertions stay focused on the commit boundary (#21).
- */
-function splitCore(content: string): {
-  complete: string
-  pending: string
-  openListItemFirstLine?: string
-} {
-  const s = splitForStreaming(content)
-  return s.openListItemFirstLine === undefined
-    ? { complete: s.complete, pending: s.pending }
-    : { complete: s.complete, pending: s.pending, openListItemFirstLine: s.openListItemFirstLine }
-}
+import { splitCore } from '../tests/split-core.ts'
 
 describe('scanLines', () => {
   it('marks the final line unterminated when source lacks a trailing newline', () => {

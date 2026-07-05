@@ -88,15 +88,10 @@ function morphChildren(parent: Node, template: Node, offset = 0): void {
  * serialization is identical to `container.innerHTML = html`.
  */
 export function morphInnerHtml(container: HTMLElement, html: string): void {
-  if (html === '') {
-    container.replaceChildren()
-    return
-  }
-  // Shallow-clone the container so `html` parses in an identical context to
-  // `container.innerHTML = html`, guaranteeing byte-identical serialization.
-  const template = container.cloneNode(false) as HTMLElement
-  template.innerHTML = html
-  morphChildren(container, template)
+  // Reconcile the whole child list. `morphInnerHtmlFrom(_, 0, '')` trims every
+  // child (equivalent to `replaceChildren()`), so the empty case needs no
+  // special-casing here.
+  morphInnerHtmlFrom(container, 0, html)
 }
 
 /**
@@ -110,6 +105,8 @@ export function morphInnerHtmlFrom(container: HTMLElement, startIndex: number, h
     while (container.childNodes.length > startIndex) container.lastChild?.remove()
     return
   }
+  // Shallow-clone the container so `html` parses in an identical context to
+  // `container.innerHTML = html`, guaranteeing byte-identical serialization.
   const template = container.cloneNode(false) as HTMLElement
   template.innerHTML = html
   morphChildren(container, template, startIndex)

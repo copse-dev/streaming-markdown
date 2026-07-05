@@ -108,6 +108,12 @@ function splitOpenTable(block: BlockToken, content: string): StreamingSplit {
 /**
  * Split streaming content at a tokenizer-safe commit boundary. Completed blocks
  * are committed; open, ambiguous, or partially-resolved inline regions stay pending.
+ *
+ * The result deliberately carries `blocks` — the `tokenizeBlocks(content)` array
+ * computed while deciding the boundary — so per-frame callers tokenize once
+ * (#21). Callers that snapshot/`deepEqual`/serialize the result should compare
+ * the `StreamingSplit` fields and ignore `blocks` (it is derived, O(document),
+ * and fully determined by `content`).
  */
 export function splitForStreaming(content: string): StreamingSplitWithTokens {
   const blocks = tokenizeBlocks(content)
