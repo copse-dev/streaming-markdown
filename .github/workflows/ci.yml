@@ -6,8 +6,68 @@ on:
   pull_request:
 
 jobs:
-  build:
+  # Runner router: use the shared org-level self-hosted `copse-checks` pool when
+  # one is online, else GitHub-hosted. The pool is the unified runner image in
+  # copse-dev/agent-pane's ci-runners/ (registered at org scope), shared across
+  # org repos — this repo only needs the light check tier, which those runners
+  # carry. Same fail-open contract as agent-pane's pick-runner (see that repo's
+  # ci.yml for the full rationale): ANY uncertainty (fork PR, no PAT, API error,
+  # none online) falls back to hosted, so CI never queues on a runner that isn't
+  # there. Fork PRs always take hosted so untrusted code never lands on a
+  # self-hosted box (and GitHub withholds secrets from fork runs anyway, so the
+  # RUNNERS_PAT is never exposed to them).
+  #
+  # To enable self-hosted routing, add a repo (or org) secret RUNNERS_PAT with
+  # org runner read (classic `admin:org`, or fine-grained organization
+  # "Self-hosted runners: Read"). Without it, this stays on hosted.
+  pick-runner:
     runs-on: ubuntu-latest
+    outputs:
+      runs_on: ${{ steps.pick.outputs.runs_on }}
+    steps:
+      - id: pick
+        env:
+          RUNNERS_PAT: ${{ secrets.RUNNERS_PAT }}
+          GH_ORG: ${{ github.repository_owner }}
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          # Fail OPEN to hosted on any problem, so errexit must be off (a curl
+          # 4xx must not abort the step). Guard each fallible command instead.
+          set +e
+          set -uo pipefail
+          hosted='["ubuntu-latest"]'
+          selfhosted='["self-hosted","copse-checks"]'
+          choice="$hosted"
+          if [ "$IS_FORK_PR" = "true" ]; then
+            echo "Fork PR — using GitHub-hosted runners (never self-hosted for untrusted code)."
+          elif [ -z "${RUNNERS_PAT:-}" ]; then
+            echo "No RUNNERS_PAT — deferring to GitHub-hosted runners."
+          else
+            runners="$(curl -fsSL \
+              -H "Authorization: Bearer ${RUNNERS_PAT}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/orgs/${GH_ORG}/actions/runners?per_page=100" 2>/dev/null)"
+            rc=$?
+            if [ $rc -ne 0 ] || [ -z "$runners" ]; then
+              echo "Runner query failed (curl exit $rc — token may lack org runner read) — deferring to GitHub-hosted runners."
+            elif printf '%s' "$runners" | jq -e \
+                '[.runners[]? | select(.status=="online") | select(any((.labels // [])[]; .name=="copse-checks"))] | length > 0' \
+                >/dev/null 2>&1; then
+              echo "An online copse-checks runner is available — using the shared self-hosted pool."
+              choice="$selfhosted"
+            else
+              echo "No online copse-checks runner — deferring to GitHub-hosted runners."
+            fi
+          fi
+          echo "runs_on=$choice" >> "$GITHUB_OUTPUT"
+          echo "Selected runner: $choice"
+
+  build:
+    needs: pick-runner
+    # Shared self-hosted copse-checks pool when one is online, else
+    # GitHub-hosted — decided by the pick-runner router above.
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runs_on) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -30,6 +90,6 @@ jobs:
       # Differentially validate the JS CommonMark normalizer against the
       # reference normalize.py. The script fetches normalize.py from a pinned,
       # hash-verified upstream commit (not checked in) and runs the diff with
-      # python3 (preinstalled on the runner).
+      # python3 (preinstalled on the runner; also present in the ci-runners image).
       - name: Normalizer parity
         run: npm run check:normalizer-parity
