@@ -93,7 +93,7 @@
       color: var(--text-muted);
       cursor: pointer;
       transition: border-color 0.15s, color 0.15s;
-      user-select: all;
+      user-select: none;
     }
 
     .npm-badge:hover {
@@ -101,7 +101,19 @@
       color: var(--text-bright);
     }
 
-    .npm-badge .npm-icon { color: var(--danger); }
+    .npm-badge.copied {
+      border-color: var(--success);
+      color: var(--success);
+    }
+
+    /* The command text is the only selectable part — a click selects it as a
+       unit; the leading glyph stays out of the selection so copies are clean. */
+    .npm-badge .npm-cmd { user-select: all; }
+
+    .npm-badge .npm-icon {
+      color: var(--danger);
+      user-select: none;
+    }
 
     /* ── Hero ────────────────────────────────────────────── */
     .hero {
@@ -184,7 +196,8 @@
 
     .hero-output {
       padding: 1.5rem;
-      min-height: 260px;
+      height: 360px;
+      overflow-y: auto;
       font-size: 0.95rem;
     }
 
@@ -612,9 +625,10 @@
     <span class="site-tagline">CommonMark streaming renderer</span>
   </div>
   <div class="header-links">
-    <span class="npm-badge" title="npm install @copse/streaming-markdown">
-      <span class="npm-icon">▲</span>
-      npm install @copse/streaming-markdown
+    <span class="npm-badge" id="npm-badge" role="button" tabindex="0"
+          title="Click to copy install command">
+      <span class="npm-icon" aria-hidden="true">▲</span>
+      <span class="npm-cmd">npm install @copse/streaming-markdown</span>
     </span>
     <a href="https://github.com/copse-dev/streaming-markdown" target="_blank">GitHub</a>
     <a href="https://www.npmjs.com/package/@copse/streaming-markdown" target="_blank">npm</a>
@@ -641,7 +655,7 @@
         <span class="stream-dot active" id="hero-dot"></span>
       </div>
     </div>
-    <div class="hero-output compare-panel-body" id="hero-output" style="min-height:280px;max-height:400px"></div>
+    <div class="hero-output compare-panel-body" id="hero-output"></div>
   </div>
 </div>
 
@@ -780,6 +794,34 @@ import {
 if (!isBrowserSanitizerSupported()) {
   setSanitizerBackend(dompurifyBackend);
 }
+
+// ── Install badge: click to select the command (and copy it) ────────────────
+const npmBadge = document.getElementById('npm-badge');
+const npmCmd = npmBadge.querySelector('.npm-cmd');
+
+function selectInstallCommand() {
+  const range = document.createRange();
+  range.selectNodeContents(npmCmd);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+npmBadge.addEventListener('click', () => {
+  selectInstallCommand();
+  navigator.clipboard?.writeText(npmCmd.textContent.trim()).then(() => {
+    npmBadge.classList.add('copied');
+    setTimeout(() => npmBadge.classList.remove('copied'), 1200);
+  }).catch(() => {});
+});
+
+// Keyboard affordance for the role="button".
+npmBadge.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    npmBadge.click();
+  }
+});
 
 // ── Presets ────────────────────────────────────────────────────────────────
 const PRESETS = {
@@ -972,6 +1014,7 @@ function heroReset() {
   heroUpdates = 0;
   heroStart = performance.now();
   heroDot.classList.add('active');
+  heroOutput.scrollTop = 0;
 }
 
 function heroTick(text) {
@@ -988,6 +1031,9 @@ function heroTick(text) {
   }
   heroPos = Math.min(heroPos + 6, text.length);
   heroRenderer.update(text.slice(0, heroPos));
+  // Keep the newest content in view as the stream grows. The pane is its own
+  // scroll container (overflow-y:auto), so this never moves the page.
+  heroOutput.scrollTop = heroOutput.scrollHeight;
   heroUpdates++;
   const elapsed = (performance.now() - heroStart) / 1000 || 0.001;
   heroCps.textContent = `${Math.round(heroPos / elapsed).toLocaleString()} chars/s`;
@@ -1091,18 +1137,38 @@ function startCompare() {
   }, interval);
 }
 
+// The DOM emitter wraps committed blocks in structural containers
+// (.stream-complete / .stream-forming) and leaves empty scaffold nodes behind,
+// while the string emitter emits blocks directly. Strip that scaffolding so the
+// two are compared on rendered content alone — otherwise identical-looking
+// output always reports as "differ".
+function normalizeStreamOutput(html) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  tmp.querySelectorAll('.stream-complete, .stream-forming').forEach((el) => {
+    if (el.hasChildNodes()) el.replaceWith(...el.childNodes);
+    else el.remove();
+  });
+  // Drop empty/hidden pending placeholders; keep pending tails that carry content.
+  tmp.querySelectorAll('.stream-pending').forEach((el) => {
+    if (el.hidden || !el.textContent.trim()) el.remove();
+  });
+  return tmp.innerHTML.trim();
+}
+
 function checkFidelity(text) {
-  // Compare the final innerHTML of both panels.
-  // They should produce identical output at the end of a complete document.
-  const stringHtml = stringOutput.innerHTML;
-  const domHtml = domOutput.innerHTML;
+  // Compare the rendered content of both panels once the document is complete.
+  // The two emitters converge on identical output; only their DOM scaffolding
+  // differs, which normalizeStreamOutput() removes before comparing.
+  const stringHtml = normalizeStreamOutput(stringOutput.innerHTML);
+  const domHtml = normalizeStreamOutput(domOutput.innerHTML);
   fidelityBadge.style.display = 'inline-flex';
   if (stringHtml === domHtml) {
     fidelityBadge.className = 'fidelity-badge';
     fidelityBadge.textContent = '✓ outputs match';
   } else {
     fidelityBadge.className = 'fidelity-badge checking';
-    fidelityBadge.textContent = '≠ outputs differ (pending tail)';
+    fidelityBadge.textContent = '≠ outputs differ';
   }
 }
 
