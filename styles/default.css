@@ -106,6 +106,15 @@
     font-size: 1em;
   }
 
+  /* Spacing for the committed-stream wrapper (`stream-complete`) and its pending
+     tail (`stream-pending-block`), both emitted by the DOM streaming renderer. */
+  & .stream-complete > .stream-pending-block:last-child,
+  & .stream-complete > h2 + .stream-pending-block,
+  & .stream-complete > h3 + .stream-pending-block,
+  & .stream-complete > h4 + .stream-pending-block {
+    margin-top: var(--sm-space-sm, 8px);
+  }
+
   & code {
     font-family: var(--sm-font-mono, ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace);
     font-size: var(--sm-font-size-sm, 0.85em);
