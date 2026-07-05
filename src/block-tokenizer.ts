@@ -264,6 +264,39 @@ function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
   return i + consumedLines
 }
 
+/**
+ * Whether a block fragment's last block is a paragraph still open for lazy
+ * continuation, descending through nested blockquotes and list items
+ * (spec 250/251/292).
+ */
+function endsInOpenParagraph(fragment: string): boolean {
+  const last = tokenizeBlocks(fragment).at(-1)
+  if (!last) return false
+  if (last.kind === 'paragraph') return true
+  // The token slices keep their final newline; `split`/`join` round-trips it.
+  if (last.kind === 'blockquote') {
+    const inner = fragment
+      .slice(last.start, last.end)
+      .split('\n')
+      .map((l) => stripBlockquoteMarker(l))
+      .join('\n')
+    return endsInOpenParagraph(inner)
+  }
+  if (last.kind === 'list_item') {
+    const lines = fragment.slice(last.start, last.end).split('\n')
+    const col = listItemContentColumn(lines[0] ?? '')
+    const inner = lines
+      .map((l, idx) => {
+        if (idx === 0) return l.slice(Math.min(col, l.length))
+        const indent = /^ */.exec(l)?.[0].length ?? 0
+        return l.slice(Math.min(col, indent))
+      })
+      .join('\n')
+    return endsInOpenParagraph(inner)
+  }
+  return false
+}
+
 function breaksUnorderedListItem(lines: ScannedLine[], itemStart: number, j: number): boolean {
   const itemStartLine = lines[itemStart]?.text ?? ''
   const col = listItemContentColumn(itemStartLine)
@@ -436,23 +469,28 @@ export function tokenizeBlocks(source: string): BlockToken[] {
       while (j < lines.length) {
         const next = lines[j]
         if (!next) break
-        if (next.text.trim() === '') {
-          let k = j + 1
-          while (k < lines.length && lines[k]?.text.trim() === '') k++
-          if (k < lines.length && lines[k] && BLOCKQUOTE_RE.test(lines[k]?.text ?? '')) {
-            j++
-            continue
-          }
-          break
-        }
-        if (
-          !BLOCKQUOTE_RE.test(next.text) &&
-          (ATX_HEADING_RE.test(next.text) ||
+        // A blank line always ends a blockquote (spec 242/252); consecutive
+        // `>` groups separated by blanks are separate blockquotes.
+        if (next.text.trim() === '') break
+        if (!BLOCKQUOTE_RE.test(next.text)) {
+          if (
+            ATX_HEADING_RE.test(next.text) ||
             LIST_ITEM_RE.test(next.text) ||
             fenceMarker(next.text) ||
-            THEMATIC_BREAK_RE.test(next.text))
-        ) {
-          break
+            THEMATIC_BREAK_RE.test(next.text)
+          ) {
+            break
+          }
+          // Laziness: an unmarked line continues the quote only while the
+          // quote's content ends in an open paragraph — never an indented
+          // code block, an open fence, or a closed-by-`>`-blank paragraph
+          // (spec 236/237/249). Nested quotes recurse (spec 250/251).
+          const stripped =
+            lines
+              .slice(i, j)
+              .map((l) => stripBlockquoteMarker(l.text))
+              .join('\n') + '\n'
+          if (!endsInOpenParagraph(stripped)) break
         }
         j++
       }

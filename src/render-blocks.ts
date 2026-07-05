@@ -41,7 +41,9 @@ export interface RenderBlocksOptions {
   indentedCode?: boolean
 }
 
-const BLOCKQUOTE_LINE_RE = /^> ?/
+// Marker may sit after up to three spaces of indent (matches the tokenizer's
+// BLOCKQUOTE_RE); lines are no longer pre-trimmed before stripping.
+const BLOCKQUOTE_LINE_RE = /^ {0,3}> ?/
 
 function renderFencedBlock(lang: string, code: string): string {
   if (lang === 'mermaid') {
@@ -218,9 +220,12 @@ function renderTable(slice: string, linkRefs: LinkReferenceMap): string {
 }
 
 function stripBlockquoteSource(slice: string): string {
+  // No per-line trim: a lazy continuation keeps its indentation, so
+  // `>foo` + `    - bar` stays paragraph text rather than becoming a
+  // nested list or code block (spec 238).
   return slice
     .split('\n')
-    .map((l) => stripBlockquoteLine(l.trim()))
+    .map((l) => stripBlockquoteLine(l))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/^\n+|\n+$/g, '')
@@ -228,7 +233,8 @@ function stripBlockquoteSource(slice: string): string {
 
 function renderBlockquote(slice: string, linkRefs: LinkReferenceMap): string {
   const innerSource = stripBlockquoteSource(slice)
-  if (innerSource.trim() === '') return ''
+  // A quote with no content still renders (`>` alone, spec 239/240).
+  if (innerSource.trim() === '') return '<blockquote></blockquote>'
   return `<blockquote>${renderBlocksFromSource(innerSource, linkRefs)}</blockquote>`
 }
 
@@ -401,31 +407,13 @@ function collectBlockquoteGroup(
   start: number,
   linkRefs: LinkReferenceMap,
 ): { html: string; next: number } {
-  const parts: string[] = []
-  let i = start
-  while (i < tokens.length) {
-    const token = tokens[i]
-    if (!token) break
-    if (token.kind === 'blank') {
-      const next = tokens[i + 1]
-      if (next?.kind === 'blockquote') {
-        i++
-        continue
-      }
-      break
-    }
-    if (token.kind !== 'blockquote') break
-    parts.push(stripBlockquoteSource(source.slice(token.start, token.end)))
-    i++
-  }
-  const innerSource = parts
-    .join('\n\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/^\n+|\n+$/g, '')
-  if (innerSource.trim() === '') return { html: '', next: i }
+  // A blank line ends a blockquote (spec 242/252), and the tokenizer never
+  // emits two directly-adjacent blockquote tokens, so a group is one token.
+  const token = tokens[start]
+  if (!token || token.kind !== 'blockquote') return { html: '', next: start + 1 }
   return {
-    html: `<blockquote>${renderBlocksFromSource(innerSource, linkRefs)}</blockquote>`,
-    next: i,
+    html: renderBlockquote(source.slice(token.start, token.end), linkRefs),
+    next: start + 1,
   }
 }
 
