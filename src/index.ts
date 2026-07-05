@@ -5,7 +5,7 @@
  * `innerHTML` sinks (`sanitizeRenderedMarkdown` is the reference sanitizer).
  * See README.md for the design invariants and the streaming architecture.
  */
-export { renderMarkdown } from './renderer.ts'
+export { renderMarkdown, type RenderMarkdownOptions } from './renderer.ts'
 export {
   renderStreamingMarkdown,
   splitForStreaming,

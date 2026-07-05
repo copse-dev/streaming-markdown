@@ -650,6 +650,18 @@ describe('renderMarkdown list-item block content (#595)', () => {
     )
   })
 
+  it('renders indented lines as a paragraph when indentedCode is disabled (#9)', () => {
+    const html = renderMarkdown('    code\n', { indentedCode: false })
+    assert.equal(html, '<p>code</p>')
+    assert.doesNotMatch(html, /<pre>/)
+  })
+
+  it('keeps indented code by default and with indentedCode: true (#9)', () => {
+    const expected = '<pre><code>code\n</code></pre>'
+    assert.equal(renderMarkdown('    code\n'), expected)
+    assert.equal(renderMarkdown('    code\n', { indentedCode: true }), expected)
+  })
+
   it('renders indented code inside a list item (spec #270)', () => {
     assert.match(
       renderMarkdown('- foo\n\n      bar\n'),
