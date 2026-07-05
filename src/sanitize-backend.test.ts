@@ -11,6 +11,7 @@ import {
   type SanitizerBackend,
 } from './sanitize.ts'
 import {
+  browserSanitizerBackend,
   enforceSanitizerAllowlist,
   isBrowserSanitizerSupported,
 } from './sanitize-browser.ts'
@@ -106,5 +107,74 @@ describe('enforceSanitizerAllowlist (native backend narrowing)', () => {
       },
     })
     assert.equal(root.innerHTML, '<p class="keep">b</p>')
+  })
+})
+
+// The full native backend calls `Element.setHTML`, which jsdom lacks; stub it to
+// stand in for the native Sanitizer parse. `setHTML`'s *default* config strips
+// `class` (breaking highlight.js/mermaid hooks), so the backend must hand it the
+// allowlist — these assert it does, and that the result survives end to end.
+describe('browserSanitizerBackend (native setHTML path)', () => {
+  type SetHTMLOptions = {
+    sanitizer?: { elements?: readonly string[]; attributes?: readonly string[] }
+  }
+  type SetHTMLFn = (this: Element, html: string, options?: SetHTMLOptions) => void
+
+  function withSetHTML(impl: SetHTMLFn, run: () => void): void {
+    const proto = Element.prototype as unknown as { setHTML?: SetHTMLFn }
+    const had = Object.prototype.hasOwnProperty.call(proto, 'setHTML')
+    const orig = proto.setHTML
+    proto.setHTML = impl
+    try {
+      run()
+    } finally {
+      if (had && orig) proto.setHTML = orig
+      else delete proto.setHTML
+    }
+  }
+
+  const config = { allowedTags: ['pre', 'code', 'span'], allowedAttr: ['class'] }
+  const input =
+    '<pre><code class="hljs lang-ts"><span class="hljs-keyword">const</span></code></pre>'
+
+  it('passes the allowlist (incl. class) to setHTML and keeps hljs class hooks', () => {
+    let passed: SetHTMLOptions | undefined
+    withSetHTML(
+      function (html, options) {
+        passed = options
+        // A config-respecting setHTML keeps `class`; the default config strips it,
+        // which is the regression this guards. The allowlist walk narrows the rest.
+        this.innerHTML = html
+      },
+      () => {
+        const out = browserSanitizerBackend.sanitize(input, config)
+        assert.ok(
+          passed?.sanitizer?.attributes?.includes('class'),
+          'class passed to the setHTML attribute allowlist',
+        )
+        assert.ok(
+          passed?.sanitizer?.elements?.includes('span'),
+          'span passed to the setHTML element allowlist',
+        )
+        assert.match(out, /<span class="hljs-keyword">const<\/span>/)
+      },
+    )
+  })
+
+  it('falls back to plain setHTML when the options argument is rejected', () => {
+    let plainCalls = 0
+    withSetHTML(
+      function (html, options) {
+        if (options) throw new TypeError('options not supported')
+        plainCalls++
+        this.innerHTML = html
+      },
+      () => {
+        const out = browserSanitizerBackend.sanitize(input, config)
+        assert.equal(plainCalls, 1)
+        // Still narrows to the allowlist (class is allowed here, so it survives).
+        assert.match(out, /class="hljs-keyword"/)
+      },
+    )
   })
 })

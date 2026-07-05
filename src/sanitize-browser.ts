@@ -9,8 +9,14 @@ import type { SanitizerBackend, SanitizerConfig } from './sanitize.ts'
 // backend.
 
 // `setHTML` is a recent addition and may be missing from the ambient DOM lib.
+// The options arg carries a Sanitizer config; `elements`/`attributes` are
+// allow-lists (https://developer.mozilla.org/en-US/docs/Web/API/SanitizerConfig).
+type SanitizerConfigDict = {
+  elements?: readonly string[]
+  attributes?: readonly string[]
+}
 type SetHTMLElement = Element & {
-  setHTML: (html: string) => void
+  setHTML: (html: string, options?: { sanitizer?: SanitizerConfigDict }) => void
 }
 
 /**
@@ -68,9 +74,23 @@ export function enforceSanitizerAllowlist(root: ParentNode, config: SanitizerCon
 export const browserSanitizerBackend: SanitizerBackend = {
   sanitize(html: string, config: SanitizerConfig): string {
     const host = document.createElement('div')
-    // Safe by default: the native Sanitizer removes scripts, event handlers, and
-    // unsafe URLs before we narrow to the allowlist below.
-    ;(host as unknown as SetHTMLElement).setHTML(html)
+    const el = host as unknown as SetHTMLElement
+    // Hand the native Sanitizer our allowlist so it keeps exactly the tags and
+    // attributes the renderer emits — notably `class`, which carries highlight.js
+    // (`hljs-*`) and mermaid hooks and which `setHTML`'s *default* config strips
+    // (dropping syntax highlighting). Passing a config never loosens safety:
+    // setHTML still removes XSS-unsafe elements/attributes (scripts, event
+    // handlers, unsafe URLs) regardless of the allowlist.
+    try {
+      el.setHTML(html, {
+        sanitizer: { elements: config.allowedTags, attributes: config.allowedAttr },
+      })
+    } catch {
+      // Older engines may reject the options argument; fall back to the default
+      // safe parse. The allowlist walk below still narrows the result (it just
+      // cannot restore attributes the default config already stripped).
+      el.setHTML(html)
+    }
     enforceSanitizerAllowlist(host, config)
     return host.innerHTML
   },
