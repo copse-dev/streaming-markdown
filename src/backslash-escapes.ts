@@ -25,12 +25,26 @@ function isEscapablePunctuation(ch: string): boolean {
   return /^[!-/:-@[-`{-~]$/.test(ch)
 }
 
-/** Angle autolinks are verbatim regions: backslash escapes do not apply. */
+/**
+ * Angle autolinks are verbatim regions: backslash escapes do not apply. The
+ * email branch mirrors the spec's email grammar closely enough to exclude
+ * backslash from the local part — `<foo\+@bar.example.com>` is NOT an email
+ * autolink, so its `\+` escape must still be processed (spec 606).
+ */
 const ANGLE_AUTOLINK_RE =
-  /^<(?:[a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\s]*|[^<>\s@]+@[^<>\s@]+\.[^<>\s@]+)>/
+  /^<(?:[a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\s]*|[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[^<>\s@]+\.[^<>\s@]+)>/
 
-/** Raw inline `<tag ...>` spans are verbatim too (matches markHardBreaks). */
-const RAW_TAG_LIKE_RE = /^<\/?[a-zA-Z][\s\S]*?>/
+/**
+ * Raw inline `<tag ...>` spans are verbatim regions too (matches
+ * markHardBreaks). This follows the CommonMark open/closing-tag grammar rather
+ * than a lenient `<letter…>` scan: something like `<foo\>` is not a valid tag,
+ * so the `\>` escape inside it stays live (spec 493).
+ */
+const TAG_NAME = '[a-zA-Z][a-zA-Z0-9-]*'
+const TAG_ATTR = `\\s+[a-zA-Z_:][a-zA-Z0-9_.:-]*(?:\\s*=\\s*(?:[^\\s"'=<>\`]+|'[^']*'|"[^"]*"))?`
+export const RAW_TAG_LIKE_RE = new RegExp(
+  `^(?:<${TAG_NAME}(?:${TAG_ATTR})*\\s*/?>|</${TAG_NAME}\\s*>)`,
+)
 
 /** A complete entity/numeric character reference candidate (semicolon required). */
 const ENTITY_CANDIDATE_RE = /^&(?:#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[a-zA-Z][a-zA-Z0-9]{0,31};)/
@@ -137,9 +151,15 @@ export function decodeEscapedPunctuationRaw(text: string): string {
 
 /**
  * Canonicalize backslash escapes for reference-label matching: `foo\!` (raw)
- * and its PUA-encoded form both become `foo!`, so definitions parsed from raw
- * source match labels parsed from encoded inline text.
+ * and its PUA-encoded form both become `foo\!` — the backslash is KEPT, because
+ * label matching treats an escaped character as distinct from the bare one
+ * (`[foo\!]` does not match a `[foo!]` definition, spec 545). Definitions
+ * parsed from raw source and labels parsed from encoded inline text land on the
+ * same canonical form either way.
  */
 export function canonicalizeEscapedPunctuation(text: string): string {
-  return decodeEscapedPunctuationRaw(encodeBackslashEscapes(text))
+  return encodeBackslashEscapes(text).replace(
+    ENCODED_PUNCT_RE,
+    (c) => `\\${String.fromCharCode(c.charCodeAt(0) - ESCAPED_BASE)}`,
+  )
 }

@@ -35,10 +35,12 @@ describe('encodeBackslashEscapes', () => {
     assert.equal(decodeEscapedPunctuation(encodeBackslashEscapes('\\<\\&')), '&lt;&amp;')
   })
 
-  it('canonicalizes raw and encoded label escapes identically', () => {
+  it('canonicalizes raw and encoded label escapes identically, keeping the backslash', () => {
+    // The escape stays significant: `[foo\!]` must not match a `[foo!]`
+    // definition (spec 545), so the canonical form keeps the backslash.
     const raw = 'foo\\!'
-    assert.equal(canonicalizeEscapedPunctuation(raw), 'foo!')
-    assert.equal(canonicalizeEscapedPunctuation(encodeBackslashEscapes(raw)), 'foo!')
+    assert.equal(canonicalizeEscapedPunctuation(raw), 'foo\\!')
+    assert.equal(canonicalizeEscapedPunctuation(encodeBackslashEscapes(raw)), 'foo\\!')
   })
 })
 

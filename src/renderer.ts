@@ -1,5 +1,8 @@
-import { tokenizeBlocks, type BlockToken } from './block-tokenizer.ts'
-import { parseLinkReferenceDefinitions } from './link-references.ts'
+import {
+  collectLinkReferenceDefinitions,
+  tokenizeBlocks,
+  type BlockToken,
+} from './block-tokenizer.ts'
 import { renderBlocks } from './render-blocks.ts'
 
 export { escapeHtml } from './escape.ts'
@@ -36,8 +39,9 @@ export interface RenderMarkdownOptions {
  * HTML comments are stripped from prose blocks only (see render-blocks.ts).
  */
 export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {}): string {
-  const linkRefs = parseLinkReferenceDefinitions(raw)
-  return renderBlocks(raw, options.tokens ?? tokenizeBlocks(raw), {
+  const tokens = options.tokens ?? tokenizeBlocks(raw)
+  const linkRefs = collectLinkReferenceDefinitions(raw, tokens)
+  return renderBlocks(raw, tokens, {
     linkRefs,
     htmlFromIndent: TOP_LEVEL_RENDER_OPTS.htmlFromIndent,
     indentedCode: options.indentedCode ?? TOP_LEVEL_RENDER_OPTS.indentedCode,

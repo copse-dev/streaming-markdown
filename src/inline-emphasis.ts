@@ -4,18 +4,20 @@
  */
 import { trailingEntityHoldStart } from './backslash-escapes.ts'
 import { scanCodeSpans } from './inline-code-spans.ts'
-import { linkOrImageStartsAt } from './inline-links.ts'
+import { linkOrImageEndAt, linkOrImageStartsAt } from './inline-links.ts'
 import { strikethroughHoldStart } from './inline-strikethrough.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 
-const ASCII_PUNCTUATION_RE = /[!-/:-@[-`{-~]/
+// CommonMark 0.30+ flanking uses *Unicode* punctuation: general categories P
+// and S (spec 354 — `£`/`€` count like `$`).
+const UNICODE_PUNCTUATION_RE = /[\p{P}\p{S}]/u
 
 function isFlankingWhitespace(ch: string): boolean {
   return ch === '' || /\s/.test(ch)
 }
 
 function isFlankingPunctuation(ch: string): boolean {
-  return ch !== '' && ASCII_PUNCTUATION_RE.test(ch)
+  return ch !== '' && UNICODE_PUNCTUATION_RE.test(ch)
 }
 
 export function isLeftFlanking(prev: string, next: string): boolean {
@@ -47,6 +49,7 @@ function readDelimiterRun(
   limit: number,
   mask: boolean[],
   linkRefs: LinkReferenceMap,
+  mode: DelimiterWalkMode,
 ): DelimiterRun | null {
   const ch = s[i]
   if (ch === undefined || (ch !== '*' && ch !== '_') || mask[i]) return null
@@ -57,15 +60,30 @@ function readDelimiterRun(
   const next = j < s.length ? (s[j] ?? '') : ''
   const lf = isLeftFlanking(prev, next)
   const rf = isRightFlanking(prev, next)
-  const linkBeatsEmphasis = ch === '*' && lf && next === '[' && linkOrImageStartsAt(s, j, linkRefs)
+  // In render mode whole link spans are masked (maskLinkSpans), so a `*`
+  // before a link can safely open — its closer must sit past the link (spec
+  // 520). The hold path has no mask, so the #521 guard stays to keep a `*`
+  // from pairing into a link label while streaming.
+  const linkBeatsEmphasis =
+    mode === 'hold' && ch === '*' && lf && next === '[' && linkOrImageStartsAt(s, j, linkRefs)
   const canOpen = ch === '*' ? lf && !linkBeatsEmphasis : lf && (!rf || isFlankingPunctuation(prev))
   const canClose = ch === '*' ? rf : rf && (!lf || isFlankingPunctuation(next))
   return { char: ch, start: i, end: j, len, canOpen, canClose }
 }
 
-function findMatchingOpener(stack: OpenDelimiter[], ch: '*' | '_'): number {
+/**
+ * Nearest opener for `ch`, skipping openers the `allowed` predicate rejects —
+ * a closer whose sum-of-lengths rule forbids the nearest opener can still
+ * match a deeper one (`*foo**bar*` → `<em>foo**bar</em>`, spec 412).
+ */
+function findMatchingOpener(
+  stack: OpenDelimiter[],
+  ch: '*' | '_',
+  allowed?: (open: OpenDelimiter) => boolean,
+): number {
   for (let t = stack.length - 1; t >= 0; t--) {
-    if (stack[t]?.char === ch) return t
+    const open = stack[t]
+    if (open?.char === ch && (!allowed || allowed(open))) return t
   }
   return -1
 }
@@ -112,7 +130,6 @@ function handleCloseRemainder(
   closeStart: number,
   used: number,
   closeLen: number,
-  linkRefs: LinkReferenceMap,
 ): void {
   const remainder = closeLen - used
   if (remainder <= 0) return
@@ -121,13 +138,16 @@ function handleCloseRemainder(
   const remNext = remIndex + remainder < s.length ? (s[remIndex + remainder] ?? '') : ''
   const remLf = isLeftFlanking(remPrev, remNext)
   const remRf = isRightFlanking(remPrev, remNext)
+  // Render-mode-only path: link spans are already masked, so no link guard here.
   const remCanOpen =
-    ch === '*'
-      ? remLf && !(remNext === '[' && linkOrImageStartsAt(s, remIndex + remainder, linkRefs))
-      : remLf && (!remRf || isFlankingPunctuation(remPrev))
+    ch === '*' ? remLf : remLf && (!remRf || isFlankingPunctuation(remPrev))
   const remCanClose = ch === '*' ? remRf : remRf && (!remLf || isFlankingPunctuation(remNext))
 
-  const remMatched = remCanClose ? findMatchingOpener(stack, ch) : -1
+  const remMatched = remCanClose
+    ? findMatchingOpener(stack, ch, (open) =>
+        emphasisMatchAllowed(open, remainder, remCanOpen, open.canClose),
+      )
+    : -1
   const remOpen = remMatched >= 0 ? stack[remMatched] : undefined
   if (remOpen) {
     const remOpenRunLen = remOpen.len
@@ -183,26 +203,28 @@ function walkEmphasisDelimiters(
   let i = 0
 
   while (i < limit) {
-    const run = readDelimiterRun(s, i, limit, mask, linkRefs)
+    const run = readDelimiterRun(s, i, limit, mask, linkRefs, mode)
     if (!run) {
       i++
       continue
     }
     const { char: ch, start, end: j, len, canOpen, canClose } = run
 
-    const matched = canClose ? findMatchingOpener(stack, ch) : -1
+    const matched = canClose
+      ? findMatchingOpener(
+          stack,
+          ch,
+          mode === 'render'
+            ? (open) => emphasisMatchAllowed(open, len, canOpen, open.canClose)
+            : undefined,
+        )
+      : -1
     const open = matched >= 0 ? stack[matched] : undefined
 
     if (open) {
       const openRunLen = open.len
       const used = Math.min(open.len, len)
       const remainingPrefixLen = openRunLen - used
-
-      if (mode === 'render' && !emphasisMatchAllowed(open, len, canOpen, open.canClose)) {
-        if (canOpen) stack.push({ index: start, char: ch, len, canClose })
-        i = j
-        continue
-      }
 
       if (mode === 'render') {
         matches.push({
@@ -226,7 +248,7 @@ function walkEmphasisDelimiters(
       }
 
       if (mode === 'render') {
-        handleCloseRemainder(s, stack, matches, ch, start, used, len, linkRefs)
+        handleCloseRemainder(s, stack, matches, ch, start, used, len)
       } else if (j === s.length) {
         trailingConsumed = true
       }
@@ -320,8 +342,36 @@ function delimitersToSkip(s: string, matches: DelimiterMatch[]): boolean[] {
   return skip
 }
 
+/**
+ * Extend `mask` over every complete link/image span. A link's label is its own
+ * inline scope (the label renderer runs emphasis inside it separately), and its
+ * destination is not inline text at all — so no delimiter read here may sit
+ * inside a link, and none may pair across a link boundary (spec 474/522/535).
+ */
+function maskLinkSpans(s: string, mask: boolean[], linkRefs: LinkReferenceMap): boolean[] {
+  let extended: boolean[] | null = null
+  let i = 0
+  while (i < s.length) {
+    if (mask[i]) {
+      i++
+      continue
+    }
+    if (s[i] === '[' || (s[i] === '!' && s[i + 1] === '[')) {
+      const end = linkOrImageEndAt(s, i, linkRefs)
+      if (end !== null) {
+        extended ??= [...mask]
+        for (let k = i; k < end; k++) extended[k] = true
+        i = end
+        continue
+      }
+    }
+    i++
+  }
+  return extended ?? mask
+}
+
 function renderEmphasisSegment(s: string, mask: boolean[], linkRefs: LinkReferenceMap): string {
-  const matches = scanDelimiterMatches(s, mask, linkRefs)
+  const matches = scanDelimiterMatches(s, maskLinkSpans(s, mask, linkRefs), linkRefs)
   if (matches.length === 0) return s
 
   const roots = findRootMatches(matches)

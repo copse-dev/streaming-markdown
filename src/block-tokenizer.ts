@@ -2,13 +2,20 @@
  * Block-level markdown tokenizer (#475). Identifies block boundaries and whether
  * each block is complete, open (unfinished), or ambiguous (needs more input).
  */
-import { parseLinkReferenceDefinitions } from './link-references.ts'
+import {
+  isValidReferenceLabel,
+  parseLinkReferenceDefinitionAt,
+  parseLinkReferenceDefinitions,
+  type LinkReference,
+  type LinkReferenceMap,
+} from './link-references.ts'
 import {
   ATX_HEADING_DETECT_RE as ATX_HEADING_RE,
   FENCE_OPEN_RE,
   fenceCloses,
   fenceMarker,
   leadingIndentWidth,
+  stripBlockquoteMarker,
 } from './block-patterns.ts'
 
 export type BlockKind =
@@ -44,11 +51,13 @@ export interface ScannedLine {
 }
 
 const THEMATIC_BREAK_RE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
-const UNORDERED_LIST_ITEM_RE = /^ {0,3}[-*+](?:\s|$)/
-// A marker may be followed by whitespace or end the line (empty item, #281/#283).
-const ORDERED_LIST_MARKER_RE = /^ {0,3}(\d{1,9})([.)])(?:\s|$)/
-const LIST_ITEM_RE = /^ {0,3}(?:(?:[-*+])(?:\s|$)|(?:\d{1,9}[.)](?:\s|$)))/
-const EMPTY_LIST_ITEM_RE = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)/
+// A list marker must be followed by a space/tab or the line end (empty item,
+// #281/#283). Not `\s`: that matches NBSP, which is NOT marker whitespace —
+// `* a *` is a paragraph, not a list (spec 353).
+const UNORDERED_LIST_ITEM_RE = /^ {0,3}[-*+](?:[ \t]|$)/
+const ORDERED_LIST_MARKER_RE = /^ {0,3}(\d{1,9})([.)])(?:[ \t]|$)/
+const LIST_ITEM_RE = /^ {0,3}(?:(?:[-*+])(?:[ \t]|$)|(?:\d{1,9}[.)](?:[ \t]|$)))/
+const EMPTY_LIST_ITEM_RE = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/
 const BLOCKQUOTE_RE = /^ {0,3}> ?/
 const SETEXT_UNDERLINE_RE = /^ {0,3}(=+|-+)\s*$/
 export const TABLE_SEP_RE = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/
@@ -211,12 +220,13 @@ function pushBlock(
 function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
   const startLine = lines[i]
   if (!startLine || !/^ {0,3}\[/.test(startLine.text)) return null
-  let j = i
+  // A definition cannot span a blank line and its continuation lines cannot be
+  // block starts, so gather the contiguous run those rules allow.
   let buf = ''
-  while (j < lines.length) {
+  let runLines = 0
+  for (let j = i; j < lines.length; j++) {
     const line = lines[j]
-    if (!line) break
-    if (j > i && line.text.trim() === '') return null
+    if (!line || line.text.trim() === '') break
     if (
       j > i &&
       (ATX_HEADING_RE.test(line.text) ||
@@ -225,17 +235,33 @@ function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
         fenceMarker(line.text) ||
         THEMATIC_BREAK_RE.test(line.text))
     ) {
-      return null
+      break
     }
     buf += line.text
     if (line.terminated) buf += '\n'
-    if (/\]:[ \t]/.test(buf) || /\]:\n/.test(buf)) {
-      const probe = buf.endsWith('\n') ? buf : `${buf}\n`
-      if (parseLinkReferenceDefinitions(probe).size > 0) return j + 1
-    }
-    j++
+    runLines++
   }
-  return null
+  // Consume as many consecutive definitions as parse from the start of the
+  // run — a definition may span several lines (destination and title on their
+  // own lines, spec 193/217) and several definitions may sit back to back.
+  let offset = 0
+  let consumedLines = 0
+  while (offset < buf.length && consumedLines < runLines) {
+    let k = offset
+    let indent = 0
+    while (buf[k] === ' ' && indent < 4) {
+      k++
+      indent++
+    }
+    if (indent > 3 || buf[k] !== '[') break
+    const def = parseLinkReferenceDefinitionAt(buf, k)
+    if (!def || !isValidReferenceLabel(def.label)) break
+    const segment = buf.slice(offset, def.end)
+    consumedLines += (segment.match(/\n/g)?.length ?? 0) + (segment.endsWith('\n') ? 0 : 1)
+    offset = def.end
+  }
+  if (consumedLines === 0) return null
+  return i + consumedLines
 }
 
 function breaksUnorderedListItem(lines: ScannedLine[], itemStart: number, j: number): boolean {
@@ -524,7 +550,8 @@ export function tokenizeBlocks(source: string): BlockToken[] {
           !orderedMarkerContinuesParagraph(lines[j - 1]?.text ?? '', next.text)) ||
         BLOCKQUOTE_RE.test(next.text) ||
         fenceMarker(next.text) ||
-        tryLinkRefDefBlock(lines, j) !== null ||
+        // NOTE: a link reference definition cannot interrupt a paragraph
+        // (spec 213) — a `[label]: dest` line here is a lazy continuation.
         (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? '')) ||
         (lines[j + 1] && SETEXT_UNDERLINE_RE.test(lines[j + 1]?.text ?? ''))
       ) {
@@ -539,6 +566,39 @@ export function tokenizeBlocks(source: string): BlockToken[] {
   }
 
   return blocks
+}
+
+/**
+ * Collect link reference definitions with block context: definitions live only
+ * in `link_ref_def` blocks (never inside fenced code, spec 212, or paragraph
+ * continuations, spec 213) and inside blockquotes (spec 218), which are
+ * unwrapped and scanned recursively. First definition wins, in source order.
+ * Pass `tokens` (`tokenizeBlocks(source)`) to reuse an existing tokenization.
+ */
+export function collectLinkReferenceDefinitions(
+  source: string,
+  tokens?: BlockToken[],
+): LinkReferenceMap {
+  const blocks = tokens ?? tokenizeBlocks(source)
+  const refs = new Map<string, LinkReference>()
+  const merge = (found: LinkReferenceMap): void => {
+    for (const [key, ref] of found) {
+      if (!refs.has(key)) refs.set(key, ref)
+    }
+  }
+  for (const token of blocks) {
+    if (token.kind === 'link_ref_def') {
+      merge(parseLinkReferenceDefinitions(source.slice(token.start, token.end)))
+    } else if (token.kind === 'blockquote') {
+      const inner = source
+        .slice(token.start, token.end)
+        .split('\n')
+        .map((line) => stripBlockquoteMarker(line.trim()))
+        .join('\n')
+      merge(collectLinkReferenceDefinitions(inner))
+    }
+  }
+  return refs
 }
 
 /** Index of the first character that must stay in the pending region. */

@@ -2,8 +2,12 @@ import { decodeEscapedPunctuationRaw } from './backslash-escapes.ts'
 import { decodeEscapedHref, escapeHtml } from './escape.ts'
 import { isWorkspaceMarkdownLinkHref } from './workspace-link-href.ts'
 import {
+  decodeEscapes,
   decodeHtmlCharRefs,
+  isValidReferenceLabel,
   lookupLinkReference,
+  normalizeReferenceLabel,
+  type LinkReference,
   type LinkReferenceMap,
   parseInlineLinkDestination,
   parseReferenceLabel,
@@ -11,6 +15,45 @@ import {
 } from './link-references.ts'
 
 export type LinkLabelRenderer = (label: string, refs: LinkReferenceMap) => string
+
+/**
+ * Applies the inline passes that run BEFORE link rendering (escapes, code,
+ * autolinks, emphasis, strikethrough) to a raw string — see
+ * {@link lookupWithRenderedLabels}. Supplied by inline-spans.ts so the pipeline
+ * stays defined in one place.
+ */
+export type LabelMatchRenderer = (label: string) => string
+
+/** Per-reference-map cache of the rendered-label index (maps are per render). */
+const renderedLabelIndexCache = new WeakMap<object, Map<string, LinkReference>>()
+
+/**
+ * Reference lookup that tolerates labels already carrying rendered inline HTML.
+ * Emphasis runs before links in the string pipeline, so `[*foo* bar]` reaches
+ * the link pass as `[<em>foo</em> bar]` and misses the raw-label map (spec
+ * 554/558/585). Fallback: index every definition label through the same
+ * pre-link pipeline and match the observed label against that form.
+ */
+function lookupWithRenderedLabels(
+  refs: LinkReferenceMap,
+  label: string,
+  renderForMatch: LabelMatchRenderer | undefined,
+): LinkReference | undefined {
+  const direct = lookupLinkReference(refs, label)
+  if (direct || !renderForMatch || !label.includes('<') || !isValidReferenceLabel(label)) {
+    return direct
+  }
+  let index = renderedLabelIndexCache.get(refs)
+  if (!index) {
+    index = new Map()
+    for (const [key, ref] of refs) {
+      const renderedKey = normalizeReferenceLabel(decodeEscapes(renderForMatch(key)))
+      if (!index.has(renderedKey)) index.set(renderedKey, ref)
+    }
+    renderedLabelIndexCache.set(refs, index)
+  }
+  return index.get(normalizeReferenceLabel(decodeEscapes(label)))
+}
 
 /**
  * Default URL schemes permitted on a link/image destination. Anything carrying
@@ -163,8 +206,14 @@ function renderLinkLabel(
   return renderLabel(label, refs)
 }
 
+/** A complete rendered anchor — an autolink that already became `<a>…</a>`. */
+const RENDERED_ANCHOR_RE = /<a\b[\s\S]*?<\/a>/i
+
 /** Nested `[` link (not image) inside link label text — forbidden by CommonMark. */
 function labelContainsNestedLink(label: string, refs: LinkReferenceMap): boolean {
+  // Autolinks render before this pass, so an inner autolink shows up as a
+  // rendered `<a>` in the label; the inner link wins over the outer bracket.
+  if (RENDERED_ANCHOR_RE.test(label)) return true
   let i = 0
   while (i < label.length) {
     if (label[i] === '!' && label[i + 1] === '[') {
@@ -192,19 +241,37 @@ export function linkOrImageStartsAt(
   return tryParseLinkOrImage(text, start, refs, (label) => label) !== null
 }
 
-/** Bracketed label parse for post-`renderInlineCode` text: `]` inside `<code>` must not close the label (#342, #525, #537). */
+/**
+ * End offset (exclusive) of the link/image starting at `start`, or null when
+ * none parses there. Used by the emphasis pass to mask whole link spans so
+ * delimiters can never pair across a link boundary (spec 474/522/535).
+ */
+export function linkOrImageEndAt(
+  text: string,
+  start: number,
+  refs: LinkReferenceMap = new Map(),
+): number | null {
+  return tryParseLinkOrImage(text, start, refs, (label) => label)?.end ?? null
+}
+
+/**
+ * Bracketed label parse for post-`renderInlineCode`/autolink text: a `]`
+ * inside rendered `<code>` (#342, #525, #537) or inside a rendered `<a>`/
+ * `<img>` (an autolink whose URL swallowed the `](…)`, spec 526/538) must not
+ * close the label.
+ */
 function parseBracketedLabelOutsideInlineCode(
   text: string,
   start: number,
 ): { label: string; end: number } | null {
   if (text[start] !== '[') return null
-  const codeRanges = inlineCodeTagRanges(text)
+  const shieldRanges = inlineShieldRanges(text)
   let i = start + 1
   let depth = 1
   while (i < text.length && depth > 0) {
-    const codeRange = codeRangeAt(i, codeRanges)
-    if (codeRange) {
-      i = codeRange.end
+    const shieldRange = rangeAt(i, shieldRanges)
+    if (shieldRange) {
+      i = shieldRange.end
       continue
     }
     const ch = text[i]
@@ -225,7 +292,7 @@ function tryParseLinkOrImage(
   start: number,
   refs: LinkReferenceMap,
   renderLabel: LinkLabelRenderer,
-  options: { linksOnly?: boolean } = {},
+  options: { linksOnly?: boolean; renderForMatch?: LabelMatchRenderer | undefined } = {},
 ): { html: string; end: number } | null {
   const image = !options.linksOnly && text[start] === '!' && text[start + 1] === '['
   const bracketStart = image ? start + 1 : start
@@ -255,7 +322,7 @@ function tryParseLinkOrImage(
   if (text[j] === '[') {
     const refLabel = parseReferenceLabel(text, j, labelPart.label)
     if (!refLabel) return null
-    const ref = lookupLinkReference(refs, refLabel.label)
+    const ref = lookupWithRenderedLabels(refs, refLabel.label, options.renderForMatch)
     if (!ref) return null
     const href = safeLinkHref(ref.href)
     if (href === null) return null
@@ -268,7 +335,7 @@ function tryParseLinkOrImage(
   }
 
   // Shortcut reference: `[label]` only when the whole label resolves.
-  const ref = lookupLinkReference(refs, labelPart.label)
+  const ref = lookupWithRenderedLabels(refs, labelPart.label, options.renderForMatch)
   if (!ref) return null
   const href = safeLinkHref(ref.href)
   if (href === null) return null
@@ -278,26 +345,27 @@ function tryParseLinkOrImage(
   return { html, end: labelPart.end }
 }
 
-/** Render markdown inline links and images, respecting code-span boundaries. */
+/** Render markdown inline links and images, respecting code-span/anchor boundaries. */
 export function renderInlineLinks(
   text: string,
   refs: LinkReferenceMap,
   renderLabel: LinkLabelRenderer,
+  renderForMatch?: LabelMatchRenderer,
 ): string {
-  const codeRanges = inlineCodeTagRanges(text)
+  const shieldRanges = inlineShieldRanges(text)
   let out = ''
   let i = 0
   while (i < text.length) {
-    const codeRange = codeRangeAt(i, codeRanges)
-    if (codeRange) {
-      out += text.slice(i, codeRange.end)
-      i = codeRange.end
+    const shieldRange = rangeAt(i, shieldRanges)
+    if (shieldRange) {
+      out += text.slice(i, shieldRange.end)
+      i = shieldRange.end
       continue
     }
     const imageAt = text[i] === '!' && text[i + 1] === '['
     const linkAt = text[i] === '['
     if (imageAt || linkAt) {
-      const parsed = tryParseLinkOrImage(text, i, refs, renderLabel)
+      const parsed = tryParseLinkOrImage(text, i, refs, renderLabel, { renderForMatch })
       if (parsed) {
         out += parsed.html
         i = parsed.end
@@ -310,17 +378,18 @@ export function renderInlineLinks(
   return out
 }
 
-const INLINE_CODE_TAG_RE = /<code>[\s\S]*?<\/code>/g
+/** Rendered inline HTML the link scanner treats as opaque (mirrors INLINE_HTML_SHIELD_RE). */
+const INLINE_SHIELD_RE = /<code>[\s\S]*?<\/code>|<a\b[\s\S]*?<\/a>|<img\b[^>]*>/g
 
-function inlineCodeTagRanges(text: string): { start: number; end: number }[] {
+function inlineShieldRanges(text: string): { start: number; end: number }[] {
   const ranges: { start: number; end: number }[] = []
-  for (const match of text.matchAll(INLINE_CODE_TAG_RE)) {
+  for (const match of text.matchAll(INLINE_SHIELD_RE)) {
     ranges.push({ start: match.index, end: match.index + match[0].length })
   }
   return ranges
 }
 
-function codeRangeAt(
+function rangeAt(
   index: number,
   ranges: { start: number; end: number }[],
 ): { start: number; end: number } | undefined {
