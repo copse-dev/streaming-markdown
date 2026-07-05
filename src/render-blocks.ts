@@ -252,24 +252,67 @@ function orderedListDelimiter(slice: string): '.' | ')' | null {
   return orderedListMarkerDelimiter(first)
 }
 
-function collectListGroup(
-  source: string,
-  tokens: BlockToken[],
-  start: number,
-  linkRefs: LinkReferenceMap,
-): { html: string; next: number } {
+/**
+ * Identity of a top-level list group, fixed by its first item. Two adjacent
+ * items belong to the same rendered `<ul>`/`<ol>` iff their signatures agree
+ * (same ordered-ness, same marker char or delimiter). Exported for the
+ * streaming frozen/tail path (#29), which freezes settled items of a still-open
+ * trailing list and must group items exactly the way rendering does.
+ */
+export interface ListGroupSignature {
+  ordered: boolean
+  markerChar: '-' | '*' | '+' | null
+  delimiter: '.' | ')' | null
+  /** Ordered-list start number (1 for unordered). */
+  start: number
+}
+
+/** Signature of the list group opened by `firstSlice` (its first item). */
+export function listGroupSignature(firstSlice: string): ListGroupSignature {
+  const ordered = isOrderedListSlice(firstSlice)
+  return {
+    ordered,
+    markerChar: ordered ? null : sliceUnorderedMarkerChar(firstSlice),
+    delimiter: ordered ? orderedListDelimiter(firstSlice) : null,
+    start: ordered ? orderedListStart(firstSlice) : 1,
+  }
+}
+
+/** Whether an item slice continues the group identified by `sig`. */
+export function listSliceContinuesGroup(sig: ListGroupSignature, slice: string): boolean {
+  if (isOrderedListSlice(slice) !== sig.ordered) return false
+  if (sig.ordered) return orderedListDelimiter(slice) === sig.delimiter
+  return sliceUnorderedMarkerChar(slice) === sig.markerChar
+}
+
+/** Loose evidence carried by one item slice: blank-separated inner paragraphs. */
+export function listItemSliceIsMultiParagraph(slice: string): boolean {
+  return splitListItemParagraphs(dropTrailingNewline(slice)).length > 1
+}
+
+/**
+ * The `list_item` tokens of one top-level list group, plus the group facts
+ * rendering needs: the signature, whether the group renders loose, and the
+ * token index just past the group.
+ */
+export interface ListGroupScan {
+  sig: ListGroupSignature
+  itemTokens: BlockToken[]
+  loose: boolean
+  /** Token index of the first token NOT in the group. */
+  next: number
+}
+
+/**
+ * Walk the list group starting at `tokens[start]` (must be a `list_item`).
+ * Single source of truth for group membership and looseness — rendering
+ * (`collectListGroup`) and streaming intra-list freezing (#29) both use it.
+ */
+export function scanListGroup(source: string, tokens: BlockToken[], start: number): ListGroupScan {
   const firstToken = tokens[start]
   const firstSlice = firstToken ? source.slice(firstToken.start, firstToken.end) : ''
-  const ordered = isOrderedListSlice(firstSlice)
-  const markerChar = ordered ? null : sliceUnorderedMarkerChar(firstSlice)
-  const orderedDelimiter = ordered ? orderedListDelimiter(firstSlice) : null
-  const listStart = ordered ? orderedListStart(firstSlice) : 1
-  const continuesList = (slice: string): boolean => {
-    if (isOrderedListSlice(slice) !== ordered) return false
-    if (ordered) return orderedListDelimiter(slice) === orderedDelimiter
-    return sliceUnorderedMarkerChar(slice) === markerChar
-  }
-  const itemSlices: string[] = []
+  const sig = listGroupSignature(firstSlice)
+  const itemTokens: BlockToken[] = []
   let loose = false
   let i = start
   while (i < tokens.length) {
@@ -281,7 +324,7 @@ function collectListGroup(
       let k = i + 1
       while (tokens[k]?.kind === 'blank') k++
       const next = tokens[k]
-      if (next?.kind === 'list_item' && continuesList(source.slice(next.start, next.end))) {
+      if (next?.kind === 'list_item' && listSliceContinuesGroup(sig, source.slice(next.start, next.end))) {
         loose = true
         i = k
         continue
@@ -290,22 +333,66 @@ function collectListGroup(
     }
     if (token.kind !== 'list_item') break
     const slice = source.slice(token.start, token.end)
-    if (!continuesList(slice)) break
-    if (splitListItemParagraphs(dropTrailingNewline(slice)).length > 1) {
-      loose = true
-    }
-    itemSlices.push(slice)
+    if (!listSliceContinuesGroup(sig, slice)) break
+    if (listItemSliceIsMultiParagraph(slice)) loose = true
+    itemTokens.push(token)
     i++
   }
-  const items = itemSlices.map((slice) => renderListItemContent(slice, loose, linkRefs))
-  const itemsHtml = items.map(renderListItem).join('')
-  if (ordered) {
-    const startAttr = listStart === 1 ? '' : ` start="${String(listStart)}"`
-    return { html: `<ol${startAttr}>${itemsHtml}</ol>`, next: i }
+  return { sig, itemTokens, loose, next: i }
+}
+
+export interface RenderedListSlice {
+  /** Concatenated `<li>…</li>` HTML — no separators between items. */
+  itemsHtml: string
+  /** Whether any item in the slice is a task-list item (drives the `<ul>` class). */
+  anyTask: boolean
+}
+
+/**
+ * Render a contiguous slice of a list group's items with a FIXED looseness.
+ * Byte-identical to the corresponding items of a whole-group render with the
+ * same `loose` — the property the streaming frozen/tail path relies on (#29).
+ */
+export function renderListItemsSlice(
+  source: string,
+  itemTokens: BlockToken[],
+  loose: boolean,
+  linkRefs: LinkReferenceMap,
+): RenderedListSlice {
+  const items = itemTokens.map((t) =>
+    renderListItemContent(source.slice(t.start, t.end), loose, linkRefs),
+  )
+  return {
+    itemsHtml: items.map(renderListItem).join(''),
+    anyTask: items.some((it) => it.task !== null),
+  }
+}
+
+/** The exact open tag a whole-group render would emit for this group. */
+export function listGroupOpenTag(sig: ListGroupSignature, anyTask: boolean): string {
+  if (sig.ordered) {
+    return `<ol${sig.start === 1 ? '' : ` start="${String(sig.start)}"`}>`
   }
   // GitHub flags lists that hold checkboxes so their bullets can be hidden.
-  const listClass = items.some((it) => it.task) ? ' class="contains-task-list"' : ''
-  return { html: `<ul${listClass}>${itemsHtml}</ul>`, next: i }
+  return `<ul${anyTask ? ' class="contains-task-list"' : ''}>`
+}
+
+export function listGroupCloseTag(sig: ListGroupSignature): string {
+  return sig.ordered ? '</ol>' : '</ul>'
+}
+
+function collectListGroup(
+  source: string,
+  tokens: BlockToken[],
+  start: number,
+  linkRefs: LinkReferenceMap,
+): { html: string; next: number } {
+  const scan = scanListGroup(source, tokens, start)
+  const { itemsHtml, anyTask } = renderListItemsSlice(source, scan.itemTokens, scan.loose, linkRefs)
+  return {
+    html: `${listGroupOpenTag(scan.sig, anyTask)}${itemsHtml}${listGroupCloseTag(scan.sig)}`,
+    next: scan.next,
+  }
 }
 
 function collectBlockquoteGroup(
