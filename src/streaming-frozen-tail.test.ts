@@ -205,6 +205,67 @@ describe('tail-scoped pending queries survive pending-kind transitions', () => {
   })
 })
 
+describe('review regressions (#21 PR review)', () => {
+  it('an indented pending list item after a paragraph stays visible without list churn', () => {
+    // The tail-scoped findOpenListItemHost must never return the pending <li>
+    // itself as the nesting host — that detached the pending subtree and left a
+    // fresh empty wrapper <ul> behind on every frame.
+    const md = '- item\n\npara\n\n  - abcdef ghi'
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    for (let cut = 1; cut <= md.length; cut++) {
+      r.update(md.slice(0, cut))
+      const emptyLists = completeEl(host).querySelectorAll('ul:empty, ol:empty').length
+      assert.ok(emptyLists <= 1, `no empty-list churn (cut=${String(cut)})`)
+    }
+    const pendingLi = completeEl(host).querySelector('li.stream-pending-block')
+    assert.ok(pendingLi?.textContent?.includes('abcdef'), 'pending item text is visible')
+    r.update(`${md}\n\n`)
+    assert.equal(
+      completeEl(host).innerHTML,
+      sanitizeRenderedMarkdown(renderMarkdown(`${md}\n\n`)),
+      'converges to the at-rest render on commit',
+    )
+  })
+
+  it('a non-append-only rewrite replaces stale frozen content', () => {
+    // Rewriting content in place (message regeneration/edit) keeps block
+    // boundaries intact, so only the frozen-source byte check can catch it.
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    r.update('# Alpha\n\npara one\n\n')
+    r.update('# Bravo\n\npara one\n\n')
+    const html = completeEl(host).innerHTML
+    assert.match(html, /Bravo/)
+    assert.doesNotMatch(html, /Alpha/)
+    assert.equal(html, sanitizeRenderedMarkdown(renderMarkdown('# Bravo\n\npara one\n\n')))
+  })
+
+  it('an unclosed benign raw inline tag keeps byte-parity with the at-rest render', () => {
+    // Whole-string sanitization re-opens an unclosed <b> into every later block
+    // (formatting-element reconstruction); freezing such a block must be refused
+    // so the stream falls back to the full morph and stays byte-identical.
+    const md = 'before <b>bold\n\nafter words\n\nmore trailing\n\n'
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    for (let cut = 1; cut <= md.length; cut++) r.update(md.slice(0, cut))
+    assert.equal(completeEl(host).innerHTML, sanitizeRenderedMarkdown(renderMarkdown(md)))
+  })
+
+  it('a block keeps its DOM node instance across its own freeze transition', () => {
+    // Settling must adopt the existing tail nodes (one combined morph), not
+    // parse fresh frozen nodes — otherwise every block is torn down exactly
+    // once at its freeze frame (selection/animation/media reset).
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    r.update('First paragraph.\n')
+    const before = completeEl(host).querySelector('p')
+    assert.ok(before, 'paragraph committed while still in the tail')
+    r.update('First paragraph.\n\nSecond para')
+    assert.equal(completeEl(host).querySelector('p'), before, 'node survives the freeze')
+  })
+})
+
 describe('frozen-tail seam and sweep edges', () => {
   it('a blank-only / link_ref_def-only frozen delta adds no stray text node (gap B)', () => {
     // The delta between two committed paragraphs is a blank plus a bare ref def:

@@ -196,13 +196,10 @@ function syncListPendingDom(
     return
   }
 
-  let list: HTMLElement
+  let list: HTMLElement | null = null
   if (indent > 0) {
     const hostLi = findOpenListItemHost(completedEl)
-    if (!hostLi) {
-      list = document.createElement(listTag)
-      completedEl.append(list)
-    } else {
+    if (hostLi) {
       const existingNested = hostLi.querySelector(`:scope > ${listTag}:last-of-type`)
       if (existingNested instanceof Element && existingNested.tagName === listTag.toUpperCase()) {
         list = existingNested as HTMLElement
@@ -211,7 +208,12 @@ function syncListPendingDom(
         hostLi.append(list)
       }
     }
-  } else {
+    // No committed item to nest under (e.g. the previous block is a paragraph):
+    // fall through to the trailing top-level list, which reuses the wrapper this
+    // pending item created on an earlier frame instead of appending a fresh
+    // empty list every frame.
+  }
+  if (!list) {
     const trailing = findTrailingListHost(completedEl, listTag)
     list =
       trailing ??
@@ -303,7 +305,13 @@ function findOpenListItemHost(completedEl: HTMLElement): HTMLElement | null {
   if (!(last instanceof HTMLElement) || (last.tagName !== 'UL' && last.tagName !== 'OL')) {
     return null
   }
-  const li = last.lastElementChild
+  // The host must be a *committed* item. When the trailing list is the wrapper
+  // holding the pending <li> itself, skip it — returning the pending item here
+  // would make it its own nesting host and detach it (#21 review finding).
+  let li = last.lastElementChild
+  if (li instanceof HTMLElement && li.classList.contains(BLOCK_PENDING_CLASS)) {
+    li = li.previousElementSibling
+  }
   return li instanceof HTMLElement && li.tagName === 'LI' ? li : null
 }
 
@@ -469,6 +477,10 @@ export class StreamingMarkdownRenderer {
   private formingEl: HTMLElement | null = null
   private pendingEl: HTMLSpanElement | null = null
   private lastComplete = ''
+  /** `tokenizeBlocks(lastComplete)` — cached so pending-only frames stay O(tail). */
+  private committedTokens: BlockToken[] = []
+  /** Whether `lastComplete` contains `|` — cached for the same reason. */
+  private committedHasPipe = false
   private readonly frozenTail = new FrozenTailRenderer()
   private readonly host: HTMLElement
 
@@ -482,27 +494,27 @@ export class StreamingMarkdownRenderer {
     const { complete, pending, openListItemFirstLine, blocks } = split
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
 
-    // Tokenize `complete` at most once per update, and only when a consumer
-    // actually needs it — pending-only frames with no table pipe never do, so
-    // Layer 1 stays a pure reduction over today's tokenization count (#21).
-    let completeTokensCache: BlockToken[] | null = null
-    const completeTokens = (): BlockToken[] => (completeTokensCache ??= tokenizeBlocks(complete))
-    const completeTokensForPending = pending.includes('|') ? completeTokens() : undefined
-
     if (complete !== this.lastComplete) {
+      // Tokenize `complete` once per COMMIT and cache on the instance so
+      // pending-only frames (the vast majority) never re-scan the unchanged
+      // prefix (#21). When the split committed everything, `blocks` already is
+      // `tokenizeBlocks(complete)` — reuse it instead of tokenizing again.
+      this.committedTokens = pending === '' ? blocks : tokenizeBlocks(complete)
+      this.committedHasPipe = complete.includes('|')
       // Freeze the settled prefix and re-render only the tail group (#21). Blocks
       // that can never change again keep their node identity permanently; the
       // fast path degrades to a full in-place morph on any uncertainty, so output
       // is byte-identical to re-rendering the whole committed prefix.
-      this.frozenTail.update(completedEl, complete, completeTokens())
+      this.frozenTail.update(completedEl, complete, this.committedTokens)
       this.lastComplete = complete
     }
+    const completeTokensForPending = pending.includes('|') ? this.committedTokens : undefined
 
     // A committed GFM table always contains `|`; without one there is no table
     // to sync or clean up, so skip the whole-subtree `querySelectorAll('table')`
     // scan `findLastCommittedTable` would otherwise run on every update — the
     // last O(prefix)-per-commit DOM cost after the frozen/tail split (#21).
-    const mayHaveCommittedTable = complete.includes('|')
+    const mayHaveCommittedTable = this.committedHasPipe
     const fenceSource = formingFenceSource(content, blocks)
     const tableSource = formingTableSource(complete, content, pending, blocks, completeTokensForPending)
     if (fenceSource || tableSource) {
@@ -589,6 +601,8 @@ export class StreamingMarkdownRenderer {
     this.formingEl = formingEl
     this.pendingEl = pendingEl
     this.lastComplete = ''
+    this.committedTokens = []
+    this.committedHasPipe = false
     // The committed subtree was just rebuilt, so any frozen bookkeeping now
     // dangles against a fresh element (gap D) — start it over.
     this.frozenTail.reset()
