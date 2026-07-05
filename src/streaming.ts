@@ -53,6 +53,29 @@ const BLOCK_PENDING_CLASS = 'stream-pending-block'
 const LIST_CONTINUATION_CLASS = 'stream-pending-list-continuation'
 const TRAILING_OPEN_LI_CLOSE_RE = /(<li(?:\s[^>]*)?>)([\s\S]*?)(<\/li>\s*<\/(?:ul|ol)>)\s*$/
 
+// Pending tail elements always live at the very end of `stream-complete`: a
+// pending block is appended as the last direct child, and a pending list item /
+// continuation span lives inside the trailing list (the last element child).
+// Every clear runs *before* the next pending element is appended, so the target
+// is always within the last element child at query time. Scoping the pending
+// queries there instead of `querySelector`-ing the whole committed subtree turns
+// an O(prefix)-per-frame DOM scan into O(tail) — the dominant residual cost of a
+// long stream once the committed prefix is frozen (#21 follow-up). jsdom's
+// `:scope >`/descendant selectors still walk the full subtree, so this matters.
+
+/** A pending descendant (continuation span, pending `<li>`) inside the trailing list. */
+function tailPendingDescendant(completedEl: HTMLElement, selector: string): Element | null {
+  return completedEl.lastElementChild?.querySelector(selector) ?? null
+}
+
+/** A pending block element attached directly to `completedEl` (always the last child). */
+function tailDirectPendingBlock(completedEl: HTMLElement, excludeLi: boolean): Element | null {
+  const last = completedEl.lastElementChild
+  if (!last || !last.classList.contains(BLOCK_PENDING_CLASS)) return null
+  if (excludeLi && last.tagName === 'LI') return null
+  return last
+}
+
 function insertBeforeTrailingListClose(rendered: string, insertHtml: string): string | null {
   const liClose = rendered.match(TRAILING_OPEN_LI_CLOSE_RE)?.[3]
   if (!liClose) return null
@@ -63,12 +86,14 @@ type BlockPendingCleanup = 'continuation' | 'list-items' | 'direct-blocks' | 'no
 
 function clearBlockPendingDom(completedEl: HTMLElement, parts: BlockPendingCleanup[]): void {
   if (parts.includes('continuation')) clearListContinuationDom(completedEl)
-  if (parts.includes('list-items')) completedEl.querySelector(`li.${BLOCK_PENDING_CLASS}`)?.remove()
+  if (parts.includes('list-items')) {
+    tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)?.remove()
+  }
   if (parts.includes('direct-blocks')) {
-    completedEl.querySelector(`:scope > .${BLOCK_PENDING_CLASS}`)?.remove()
+    tailDirectPendingBlock(completedEl, false)?.remove()
   }
   if (parts.includes('non-list-direct')) {
-    completedEl.querySelector(`:scope > .${BLOCK_PENDING_CLASS}:not(li)`)?.remove()
+    tailDirectPendingBlock(completedEl, true)?.remove()
   }
 }
 
@@ -160,12 +185,14 @@ function syncListPendingDom(
 
   const listTag = pendingListTag(pending)
   const indent = listPendingIndent(pending)
-  const existingPendingLi = completedEl.querySelector(`li.${BLOCK_PENDING_CLASS}`)
+  const existingPendingLi = tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)
 
   if (!active || !pendingInner) {
     existingPendingLi?.remove()
-    const emptyList = completedEl.querySelector(`:scope > ${listTag}:empty`)
-    emptyList?.remove()
+    const last = completedEl.lastElementChild
+    if (last && last.tagName === listTag.toUpperCase() && last.childNodes.length === 0) {
+      last.remove()
+    }
     return
   }
 
@@ -269,14 +296,19 @@ function inlinePendingSpanHtml(pendingInner: string): string {
 }
 
 function findOpenListItemHost(completedEl: HTMLElement): HTMLElement | null {
-  const li = completedEl.querySelector(
-    'ul:last-of-type > li:last-child, ol:last-of-type > li:last-child',
-  )
-  return li instanceof Element && li.tagName === 'LI' ? (li as HTMLElement) : null
+  // The open list item that a pending line continues is the last item of the
+  // trailing list; the callers clear any trailing pending block first, so that
+  // list is the last element child (scoped lookup instead of an O(prefix) scan).
+  const last = completedEl.lastElementChild
+  if (!(last instanceof HTMLElement) || (last.tagName !== 'UL' && last.tagName !== 'OL')) {
+    return null
+  }
+  const li = last.lastElementChild
+  return li instanceof HTMLElement && li.tagName === 'LI' ? li : null
 }
 
 function clearListContinuationDom(completedEl: HTMLElement): void {
-  completedEl.querySelector(`li .${LIST_CONTINUATION_CLASS}`)?.remove()
+  tailPendingDescendant(completedEl, `li .${LIST_CONTINUATION_CLASS}`)?.remove()
 }
 
 function syncListContinuationDom(
@@ -322,7 +354,7 @@ function syncBlockPendingDom(
   }
 
   clearBlockPendingDom(completedEl, ['continuation', 'list-items'])
-  const existing = completedEl.querySelector(`:scope > .${BLOCK_PENDING_CLASS}`)
+  const existing = tailDirectPendingBlock(completedEl, false)
   if (!active || !pendingInner) {
     existing?.remove()
     return

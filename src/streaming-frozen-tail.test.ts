@@ -74,20 +74,34 @@ describe('frozen-tail keeps the committed prefix out of per-commit work', () => 
     // block freezes it is never re-rendered, so its DOM node keeps identity for
     // the rest of the stream. If the committed prefix were re-rendered per
     // commit (the O(n²) this fixes), the node instance would change each time.
+    //
+    // Streamed char-by-char with inline formatting so the split boundary jitters
+    // (an unresolved `**`/backtick retreats the commit point, shrinking
+    // `complete`) — the case that used to force a full-morph fallback and churn
+    // every frozen node. The first paragraph's node must survive all of it.
     const host = document.createElement('div')
     const r = new StreamingMarkdownRenderer(host)
-    let acc = ''
-    const firstParagraphNodes = new Set<Element>()
-    for (let i = 0; i < 10; i++) {
-      acc += `Paragraph number ${String(i)} with **bold** and a [link](https://example.com/${String(i)}).\n\n`
-      r.update(acc)
-      const first = completeEl(host).querySelector('.stream-complete > p, p')
-      if (first) firstParagraphNodes.add(first)
+    let full = ''
+    for (let i = 0; i < 30; i++) {
+      full += `Paragraph ${String(i)} with **bold**, \`code\`, *em* and a [link](https://example.com/${String(i)}).\n\n`
     }
-    assert.equal(firstParagraphNodes.size, 1, 'the first paragraph node is never re-created')
+    // Track the first paragraph's node only once it is frozen — i.e. once a
+    // later paragraph has committed after it (before that it is the live tail,
+    // legitimately re-rendered as it streams).
+    const frozenFirstNodes = new Set<Element>()
+    for (let cut = 1; cut <= full.length; cut++) {
+      r.update(full.slice(0, cut))
+      const paragraphs = completeEl(host).querySelectorAll('p')
+      const first = paragraphs[0]
+      const laterCommitted = paragraphs.length > 1
+      if (first && laterCommitted && first.textContent?.startsWith('Paragraph 0 ')) {
+        frozenFirstNodes.add(first)
+      }
+    }
     assert.equal(
-      [...firstParagraphNodes][0]?.textContent,
-      'Paragraph number 0 with bold and a link.',
+      frozenFirstNodes.size,
+      1,
+      'the frozen first paragraph node is never re-created for the rest of the stream',
     )
   })
 })
@@ -134,6 +148,16 @@ describe('frozen-tail settling hazards', () => {
     assert.doesNotMatch(html, /<pre>/, 'indented raw HTML did not become a code block')
   })
 
+  it('lazy paragraph continuation absorbs a would-be-frozen earlier line', () => {
+    // `"Foo\n"` can commit as a paragraph, then `"    ***"` extends it into a
+    // single paragraph — the earlier line is absorbed, so `frozenEnd` no longer
+    // lands on a block boundary and the fast path must fall back (gap: the
+    // boundary straddle check). Byte-parity must hold through the absorption.
+    assertCommittedAtRest(['Foo\n', '    ***\n', '\nafter\n'])
+    const { html } = streamCommitted(['Foo\n', '    ***\n'])
+    assert.match(html, /<p>Foo\n {4}\*\*\*<\/p>/)
+  })
+
   it('trailing-open re-tokenization of the committed prefix stays in the tail', () => {
     // `"    a\n\n"` re-tokenizes as an *open* indented_code because the closing
     // terminator lies beyond the commit boundary — must not be frozen.
@@ -153,6 +177,31 @@ describe('frozen-tail forward reference (link-ref guard fallback)', () => {
     assertCommittedAtRest(chunks)
     const { html } = streamCommitted(chunks)
     assert.match(html, /<a href="https:\/\/example\.com"[^>]*>x<\/a>/)
+  })
+})
+
+describe('tail-scoped pending queries survive pending-kind transitions', () => {
+  it('never leaves a stale pending element when the pending kind changes', () => {
+    // The pending-sync queries are scoped to the streaming tail (last element
+    // child) instead of the whole committed subtree. Stream through paragraph →
+    // list → continuation → heading → blockquote pending kinds and assert never
+    // more than one block-pending element exists at once (no stale leftovers).
+    const docs = [
+      'Intro paragraph one.\n\n- item a\n- item b\n  continued text\n\n### Heading\n\n> quote line\n> more\n\nFinal.',
+      '1. first\n2. second\n\nplain para\n\n> bq\n\n- x\n- y\n',
+    ]
+    for (const md of docs) {
+      const host = document.createElement('div')
+      const r = new StreamingMarkdownRenderer(host)
+      for (let cut = 1; cut <= md.length; cut++) {
+        r.update(md.slice(0, cut))
+        const pendingBlocks = completeEl(host).querySelectorAll('.stream-pending-block').length
+        assert.ok(
+          pendingBlocks <= 1,
+          `at most one block-pending element (cut=${String(cut)}, saw ${String(pendingBlocks)})`,
+        )
+      }
+    }
   })
 })
 
