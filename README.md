@@ -16,6 +16,11 @@ import { renderMarkdown, sanitizeRenderedMarkdown } from '@copse/streaming-markd
 el.innerHTML = sanitizeRenderedMarkdown(renderMarkdown('# Hi\n\n**bold** and ~~strike~~'))
 ```
 
+Indented code blocks are supported by default (`    code` → `<pre><code>`); pass
+`renderMarkdown(md, { indentedCode: false })` to opt out and render those lines as
+prose paragraphs instead. See the design note in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 Streaming, syntax highlighting, Mermaid source preparation, and an injectable
 `LinkDecorator` for host-specific `<a>` routing are also exported — see the
 public surface in [`src/index.ts`](src/index.ts).

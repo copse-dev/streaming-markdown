@@ -32,6 +32,13 @@ export interface RenderBlocksOptions {
    * list/blockquote rendering leaves nested indented code as CommonMark code.
    */
   htmlFromIndent?: boolean
+  /**
+   * Recognize `indented_code` blocks as code (default `true`). When `false`, the
+   * top-level `renderMarkdown` opt-out renders them as prose paragraphs instead —
+   * an intentional CommonMark divergence (#9). Not threaded into recursive
+   * list/blockquote rendering, which keeps indented code semantics.
+   */
+  indentedCode?: boolean
 }
 
 const BLOCKQUOTE_LINE_RE = /^> ?/
@@ -338,10 +345,15 @@ function renderSingleBlock(
   linkRefs: LinkReferenceMap,
   tightParagraphs: boolean,
   htmlFromIndent: boolean,
+  indentedCode: boolean,
 ): string {
   const slice = source.slice(token.start, token.end)
   switch (token.kind) {
     case 'indented_code':
+      // Opt-out (#9): render indented lines as prose instead of a code block.
+      if (!indentedCode) {
+        return renderParagraph(dedentBlock(dropTrailingNewline(slice)), linkRefs, false)
+      }
       // A top-level indented block that is really raw HTML follows the raw-HTML
       // policy (escaped/benign prose), not a <pre><code> dump (#616).
       if (htmlFromIndent && isIndentedHtmlBlock(dropTrailingNewline(slice))) {
@@ -383,6 +395,7 @@ export function renderBlocks(
   const linkRefs = options.linkRefs ?? new Map()
   const tightParagraphs = options.tightParagraphs ?? false
   const htmlFromIndent = options.htmlFromIndent ?? false
+  const indentedCode = options.indentedCode ?? true
   const parts: string[] = []
   let i = 0
   while (i < tokens.length) {
@@ -404,7 +417,14 @@ export function renderBlocks(
       i = group.next
       continue
     }
-    const html = renderSingleBlock(source, token, linkRefs, tightParagraphs, htmlFromIndent)
+    const html = renderSingleBlock(
+      source,
+      token,
+      linkRefs,
+      tightParagraphs,
+      htmlFromIndent,
+      indentedCode,
+    )
     if (html) parts.push(html)
     i++
   }
