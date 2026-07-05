@@ -35,7 +35,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "entities": "^4.5.0",
+    "entities": "^8.0.0",
     "dompurify": "^3.4.11",
     "highlight.js": "^11.11.1"
   },
