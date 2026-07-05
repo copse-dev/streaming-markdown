@@ -135,12 +135,8 @@ jobs:
           # id-token permission above) — no NPM_TOKEN needed. It requires npm
           # >= 11.5.1; the Node 22 runner ships npm 10, so upgrade first.
           npm install -g npm@latest
-          # `private: true` in package.json is a safety net against accidental
-          # publishes; strip it here (uncommitted) so this deliberate release
-          # publish can proceed. publishConfig pins the public registry +
-          # `--access public`, and provenance is attached automatically under
-          # trusted publishing.
-          npm pkg delete private
+          # publishConfig pins the public registry + `--access public`, and
+          # provenance is attached automatically under trusted publishing.
           npm publish
 
       - name: Push commit and tag
