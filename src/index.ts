@@ -24,7 +24,14 @@ export {
 // `@copse/streaming-markdown/sanitizers/dompurify` entry so it is only bundled
 // when a host explicitly opts in.
 export { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize-browser.ts'
-export { setRawImageRenderer, type RawImageRenderer, type RawImageTag } from './raw-images.ts'
+export {
+  setRawImageRenderer,
+  normalizeHostImagePath,
+  type RawImageRenderer,
+  type RawImageTag,
+  type NormalizedImagePath,
+  type NormalizeImagePathOptions,
+} from './raw-images.ts'
 export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './escape.ts'
 // Syntax highlighting is a pluggable backend. The core (`highlight.ts`) carries
 // no highlight.js code and renders escaped plain text until a backend is
