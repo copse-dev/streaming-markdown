@@ -13,7 +13,7 @@ import { renderMarkdown } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { StreamingMarkdownRenderer, splitForStreaming } from './streaming.ts'
 import { tokenizeBlocks } from './block-tokenizer.ts'
-import { settledTailStart } from './streaming-frozen-tail.ts'
+import { FrozenTailRenderer, settledTailStart } from './streaming-frozen-tail.ts'
 
 function completeEl(host: HTMLElement): HTMLElement {
   const el = host.querySelector('.stream-complete')
@@ -102,6 +102,49 @@ describe('frozen-tail keeps the committed prefix out of per-commit work', () => 
       frozenFirstNodes.size,
       1,
       'the frozen first paragraph node is never re-created for the rest of the stream',
+    )
+  })
+})
+
+describe('frozen-tail committed-prefix render work is sub-quadratic (#21 CI guard)', () => {
+  // Deterministic, timing-free guard: `renderedChars` counts the HTML the
+  // frozen/tail renderer produces per commit. A regression that re-renders the
+  // whole committed prefix each commit (the O(n²) #21 removed — e.g. a fallback
+  // that fires every frame) makes this grow ~4× per input doubling instead of
+  // ~2×. Driving FrozenTailRenderer directly at commit boundaries mirrors what
+  // StreamingMarkdownRenderer.update does.
+  function proseDoc(paras: number): string {
+    return (
+      Array.from(
+        { length: paras },
+        (_, i) =>
+          `Paragraph ${String(i)} has **bold**, \`code\`, *em* and a [link](https://example.com/${String(i)}) plus words.`,
+      ).join('\n\n') + '\n'
+    )
+  }
+
+  function renderedCharsFor(doc: string): number {
+    const host = document.createElement('div')
+    const ft = new FrozenTailRenderer()
+    let last = ''
+    for (let cut = 1; cut <= doc.length; cut++) {
+      const complete = splitForStreaming(doc.slice(0, cut)).complete
+      if (complete !== last) {
+        ft.update(host, complete, tokenizeBlocks(complete))
+        last = complete
+      }
+    }
+    return ft.renderedChars
+  }
+
+  it('doubling the input roughly doubles committed-prefix render work, not quadruples it', () => {
+    const small = renderedCharsFor(proseDoc(25))
+    const large = renderedCharsFor(proseDoc(50))
+    const ratio = large / small
+    assert.ok(
+      ratio < 3,
+      `committed-prefix render work grew ${ratio.toFixed(2)}× when input doubled ` +
+        `(expected ~2×; ~4× signals a return to O(prefix)-per-commit rendering, #21)`,
     )
   })
 })

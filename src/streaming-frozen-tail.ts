@@ -38,13 +38,13 @@ import { type BlockToken } from './block-tokenizer.ts'
 import { renderBlocks } from './render-blocks.ts'
 import { parseLinkReferenceDefinitions, type LinkReferenceMap } from './link-references.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdown, TOP_LEVEL_RENDER_OPTS } from './renderer.ts'
 import { morphInnerHtml, morphInnerHtmlFrom } from './streaming-dom-morph.ts'
 
-// Matches renderer.ts:27-31 so a frozen/tail slice renders byte-identically to
-// the whole-string render (gap A: top-level indented raw HTML must follow the
-// raw-HTML policy, not become <pre><code>).
-const RENDER_OPTS = { htmlFromIndent: true, indentedCode: true } as const
+// Shared with renderMarkdown (the full-morph fallback) so a frozen/tail slice
+// renders byte-identically to the whole-string render — the two must not drift
+// (gap A: top-level indented raw HTML follows the raw-HTML policy, not <pre>).
+const RENDER_OPTS = TOP_LEVEL_RENDER_OPTS
 
 /** Kinds whose top-level group can span earlier same-kind tokens + internal blanks. */
 function isMultiTokenGroupKind(kind: BlockToken['kind']): boolean {
@@ -201,6 +201,14 @@ export class FrozenTailRenderer {
   private frozenNodeCount = 0
   /** Serialized committed link-ref map at the last commit (invalidation guard). */
   private lastLinkRefKey = ''
+  /**
+   * Diagnostic: cumulative count of HTML characters this renderer has produced
+   * (delta + tail per commit, or the whole document on a full-morph fallback).
+   * The invariant #21 protects is that this stays O(n) over a whole stream, not
+   * O(n²); a deterministic, timing-free perf-regression test reads it. Never
+   * consumed by production code.
+   */
+  renderedChars = 0
 
   reset(): void {
     this.frozenEnd = 0
@@ -279,6 +287,7 @@ export class FrozenTailRenderer {
     const tailHtml = tailTokens.length
       ? renderBlocks(complete, tailTokens, { linkRefs, ...RENDER_OPTS })
       : ''
+    this.renderedChars += deltaHtml.length + tailHtml.length
 
     // Reconcile everything after the frozen prefix — newly-settled delta plus
     // tail — in ONE morph. Morphing (not re-parsing) means the blocks that are
@@ -321,7 +330,9 @@ export class FrozenTailRenderer {
     tokens: BlockToken[],
     linkRefKey: string,
   ): void {
-    morphInnerHtml(completedEl, sanitizeRenderedMarkdown(renderMarkdown(complete, { tokens })))
+    const html = sanitizeRenderedMarkdown(renderMarkdown(complete, { tokens }))
+    this.renderedChars += html.length
+    morphInnerHtml(completedEl, html)
     this.frozenEnd = 0
     this.frozenSource = ''
     this.frozenHasHtml = false
