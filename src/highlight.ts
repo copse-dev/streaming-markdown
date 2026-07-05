@@ -84,7 +84,12 @@ export function highlightFenceCode(code: string, lang: string): string {
 export function fenceCodeClass(lang: string): string {
   const language = resolveLanguage(lang)
   const label = language ?? (lang.trim() ? lang.trim().toLowerCase() : 'text')
-  return `hljs lang-${label}`
+  // The info string is entity-decoded, so an unrecognized language falls back to
+  // attacker-controlled text. Escape it before it lands in a `class="…"` context
+  // in the string emitter (the DOM path assigns `.className`, which can't break
+  // out). Recognized languages are already safe hljs ids, but escaping is a no-op
+  // for them.
+  return `hljs lang-${escapeHtml(label)}`
 }
 
 /**
