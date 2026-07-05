@@ -111,3 +111,33 @@ export function morphInnerHtmlFrom(container: HTMLElement, startIndex: number, h
   template.innerHTML = html
   morphChildren(container, template, startIndex)
 }
+
+/**
+ * Reconcile `el`'s children from `offset` onward against `template`'s children,
+ * leaving the first `offset` children untouched. Used for intra-list freezing
+ * (#29): the frozen `<li>` prefix of a still-growing `<ul>` is never touched,
+ * only the items after it are reconciled. Nodes are moved out of `template`.
+ */
+export function morphElementChildrenFrom(el: Element, template: Element, offset: number): void {
+  morphChildren(el, template, offset)
+}
+
+/**
+ * Make `el`'s attribute list byte-identical (names, values, and order) to
+ * `template`'s, without touching children. A shared streaming list element can
+ * legitimately change attributes while its frozen items must not be re-rendered
+ * — e.g. `<ul>` gaining `class="contains-task-list"` when a later item adds a
+ * checkbox (#29).
+ */
+export function syncAttributes(el: Element, template: Element): void {
+  if (attributesEqual(el, template)) return
+  while (el.attributes.length > 0) {
+    const attr = el.attributes[0]
+    if (!attr) break
+    el.removeAttribute(attr.name)
+  }
+  for (let i = 0; i < template.attributes.length; i++) {
+    const attr = template.attributes[i]
+    if (attr) el.setAttribute(attr.name, attr.value)
+  }
+}

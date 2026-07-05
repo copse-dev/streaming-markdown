@@ -149,6 +149,118 @@ describe('frozen-tail committed-prefix render work is sub-quadratic (#21 CI guar
   })
 })
 
+describe('intra-list tail bounding (#29)', () => {
+  /** Byte-parity with the at-rest render at every fully-committed frame. */
+  function assertFullHistoryParity(md: string): void {
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    for (let cut = 1; cut <= md.length; cut++) {
+      const prefix = md.slice(0, cut)
+      r.update(prefix)
+      const split = splitForStreaming(prefix)
+      if (split.pending !== '') continue
+      assert.equal(
+        completeEl(host).innerHTML,
+        sanitizeRenderedMarkdown(renderMarkdown(split.complete)),
+        `cut=${String(cut)}`,
+      )
+    }
+  }
+
+  const items = (n: number, mk: (i: number) => string): string =>
+    Array.from({ length: n }, (_, i) => mk(i)).join('\n')
+
+  it('holds byte-parity across freeze, seal, and a following ordered list', () => {
+    assertFullHistoryParity(
+      `${items(12, (i) => `- item ${String(i)} with **bold** and \`code\``)}\n\nAfter.\n\n${items(6, (i) => `${String(i + 1)}. o${String(i)}`)}\n\nEnd.\n\n`,
+    )
+  })
+
+  it('tight→loose flip after items froze falls back and stays byte-identical', () => {
+    assertFullHistoryParity(`${items(8, (i) => `- t${String(i)}`)}\n\n- late loose item\n\nafter\n\n`)
+  })
+
+  it('a task item arriving after items froze updates the shared <ul> class', () => {
+    assertFullHistoryParity(`${items(6, (i) => `- plain ${String(i)}`)}\n- [x] done late\n- [ ] todo\n\nafter\n\n`)
+  })
+
+  it('a marker change mid-run splits the group and stays byte-identical', () => {
+    assertFullHistoryParity(
+      `${items(6, (i) => `- a${String(i)}`)}\n${items(6, (i) => `* b${String(i)}`)}\n\nafter\n\n`,
+    )
+  })
+
+  it('a late multi-paragraph item (loose via content) stays byte-identical', () => {
+    assertFullHistoryParity(
+      `${items(6, (i) => `- c${String(i)}`)}\n- multi\n\n  second para of item\n\nafter\n\n`,
+    )
+  })
+
+  it('ordered lists keep their start attribute across intra-list freezing', () => {
+    assertFullHistoryParity(`${items(8, (i) => `${String(i + 3)}. o${String(i)}`)}\n\nafter\n\n`)
+  })
+
+  it('items with nested lists freeze correctly', () => {
+    assertFullHistoryParity(
+      `${items(6, (i) => `- outer ${String(i)}\n  - nested ${String(i)}`)}\n\nafter\n\n`,
+    )
+  })
+
+  it('an in-place rewrite while intra-list freezing is active is replaced', () => {
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    const alpha = `${items(8, (i) => `- alpha ${String(i)}`)}\n`
+    const bravo = `${items(8, (i) => `- bravo ${String(i)}`)}\n`
+    for (let cut = 1; cut <= alpha.length; cut++) r.update(alpha.slice(0, cut))
+    r.update(bravo)
+    assert.equal(
+      completeEl(host).innerHTML,
+      sanitizeRenderedMarkdown(renderMarkdown(splitForStreaming(bravo).complete)),
+    )
+  })
+
+  it('a frozen <li> keeps its node instance for the rest of the stream', () => {
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    let acc = ''
+    const seen = new Set<Element>()
+    for (let i = 0; i < 20; i++) {
+      acc += `- item ${String(i)} with **bold** text\n`
+      r.update(acc)
+      const first = completeEl(host).querySelector('li')
+      const total = completeEl(host).querySelectorAll('li').length
+      if (first && total > 2 && first.textContent?.startsWith('item 0')) seen.add(first)
+    }
+    assert.equal(seen.size, 1, 'first item li never re-created once frozen')
+  })
+
+  it('doubling a pure list roughly doubles committed render work (#29 CI guard)', () => {
+    // The list-shaped analogue of the top-level guard: before intra-list
+    // freezing this grew ~4×/doubling (the whole group re-rendered per commit).
+    function listRenderedChars(itemCount: number): number {
+      const doc = `${items(itemCount, (i) => `- item ${String(i)} with **bold** and \`code\``)}\n`
+      const host = document.createElement('div')
+      const ft = new FrozenTailRenderer()
+      let last = ''
+      for (let cut = 1; cut <= doc.length; cut++) {
+        const complete = splitForStreaming(doc.slice(0, cut)).complete
+        if (complete !== last) {
+          ft.update(host, complete, tokenizeBlocks(complete))
+          last = complete
+        }
+      }
+      return ft.renderedChars
+    }
+    const small = listRenderedChars(50)
+    const large = listRenderedChars(100)
+    const ratio = large / small
+    assert.ok(
+      ratio < 3,
+      `list render work grew ${ratio.toFixed(2)}× when items doubled (expected ~2×, ~4× = regression)`,
+    )
+  })
+})
+
 describe('frozen-tail settling hazards', () => {
   it('paragraph → setext retro-conversion (tail never frozen too early)', () => {
     // "Hello\n" commits as an open paragraph in the tail; "===\n" retro-converts

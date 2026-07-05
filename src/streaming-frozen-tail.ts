@@ -26,25 +26,46 @@
 //     `parseLinkReferenceDefinitions` below. They keep the asymptote at Θ(n²)
 //     but are a few percent of wall-clock at realistic sizes; true linearity
 //     needs an incremental tokenizer + link-ref scan (out of scope for v1).
-//   - A document whose trailing group never settles (one long open list or
-//     blockquote) keeps the whole group in the tail, so list-shaped output
-//     degrades toward the old per-commit cost. Bounding the tail for long open
-//     groups is follow-up work.
+//   - A long, still-open trailing LIST is handled by intra-list freezing (#29):
+//     settled items freeze inside the shared <ul>/<ol> and per-commit work is
+//     the unfrozen item slice. A long open trailing BLOCKQUOTE is not — its
+//     grouping re-renders merged content, so it stays wholly in the tail and
+//     degrades toward the old per-commit cost (rare shape; follow-up if seen).
 //
 // Every uncertainty falls back to `morphInnerHtml(sanitize(render(complete)))` —
 // today's exact, correct behaviour — so the fast path is a pure optimization: a
 // mishandled case degrades to slower-but-correct output, never to wrong output.
 import { type BlockKind, type BlockToken } from './block-tokenizer.ts'
-import { renderBlocks } from './render-blocks.ts'
+import {
+  listGroupCloseTag,
+  listGroupOpenTag,
+  listItemSliceIsMultiParagraph,
+  listSliceContinuesGroup,
+  renderBlocks,
+  renderListItemsSlice,
+  scanListGroup,
+  type ListGroupSignature,
+} from './render-blocks.ts'
 import { parseLinkReferenceDefinitions, type LinkReferenceMap } from './link-references.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { renderMarkdown, TOP_LEVEL_RENDER_OPTS } from './renderer.ts'
-import { morphInnerHtml, morphInnerHtmlFrom } from './streaming-dom-morph.ts'
+import {
+  morphElementChildrenFrom,
+  morphInnerHtml,
+  morphInnerHtmlFrom,
+  syncAttributes,
+} from './streaming-dom-morph.ts'
 
 // Shared with renderMarkdown (the full-morph fallback) so a frozen/tail slice
 // renders byte-identically to the whole-string render — the two must not drift
 // (gap A: top-level indented raw HTML follows the raw-HTML policy, not <pre>).
 const RENDER_OPTS = TOP_LEVEL_RENDER_OPTS
+
+// Minimum items in an open trailing list before intra-list freezing engages
+// (#29). Below this the generic whole-group tail is cheap and avoids per-item
+// bookkeeping; above it, re-rendering the whole group per commit is the O(n²)
+// this mode removes.
+const INTRA_LIST_MIN_ITEMS = 4
 
 /**
  * How a block kind behaves at the settled/tail boundary:
@@ -245,12 +266,39 @@ export class FrozenTailRenderer {
    */
   renderedChars = 0
 
+  // ---- Intra-list freezing (#29) ----------------------------------------
+  // When the trailing group is a long, still-open, signature-uniform list, the
+  // whole group would otherwise stay in the tail and be re-rendered per commit
+  // (O(n²) for list-shaped output). Instead, settled items freeze INSIDE the
+  // shared <ul>/<ol>: `frozenEnd` then points at an item-token boundary within
+  // the group, the list element itself stays live (its attributes may still
+  // change), and per-commit work is the unfrozen item slice only.
+  /** Signature of the active shared trailing list; null = intra-list inactive. */
+  private listSig: ListGroupSignature | null = null
+  /** Number of leading `<li>` children of the shared list that are frozen. */
+  private listFrozenLis = 0
+  /** Child index of the shared list element within `completedEl`. */
+  private listElIndex = 0
+  /** Looseness baked into the frozen items (a flip forces a full morph). */
+  private listLoose = false
+  /** Task-list evidence seen so far (drives the `<ul>` class; monotonic). */
+  private listHasTask = false
+
+  private resetListState(): void {
+    this.listSig = null
+    this.listFrozenLis = 0
+    this.listElIndex = 0
+    this.listLoose = false
+    this.listHasTask = false
+  }
+
   reset(): void {
     this.frozenEnd = 0
     this.frozenSource = ''
     this.frozenHasHtml = false
     this.frozenNodeCount = 0
     this.lastLinkRefKey = ''
+    this.resetListState()
   }
 
   /**
@@ -295,6 +343,22 @@ export class FrozenTailRenderer {
     ) {
       this.fullMorph(completedEl, complete, tokens, linkRefKey)
       return
+    }
+
+    // Intra-list freezing (#29): while a long trailing list is still open,
+    // reconcile only its unfrozen item slice inside the shared list element.
+    // 'handled' means the commit is fully done; 'sealed' means the list just
+    // ended and was promoted to a frozen top-level node — fall through so the
+    // generic path processes the content after it; 'fallback' means an
+    // intra-list guard tripped (loose flip, signature break, DOM mismatch).
+    if (this.listSig) {
+      const outcome = this.commitSharedList(completedEl, complete, tokens, linkRefs, linkRefKey)
+      if (outcome === 'fallback') {
+        this.fullMorph(completedEl, complete, tokens, linkRefKey)
+        return
+      }
+      if (outcome === 'handled') return
+      // 'sealed' → continue below with the advanced frozen boundary.
     }
     // Never move the frozen boundary backward (see above).
     const advanceTo = Math.max(settledOffset, this.frozenEnd)
@@ -357,6 +421,175 @@ export class FrozenTailRenderer {
     this.frozenEnd = advanceTo
     this.frozenSource = complete.slice(0, advanceTo)
     this.lastLinkRefKey = linkRefKey
+
+    this.maybeActivateIntraList(completedEl, complete, tokens, tailStart)
+  }
+
+  /**
+   * Arm intra-list freezing when the generic commit just rendered a trailing
+   * group that qualifies: a signature-uniform list, starting at the frozen
+   * boundary, still open (nothing after it but blanks), with enough items to be
+   * worth per-item bookkeeping. Pure state initialization — no DOM work, and no
+   * items are frozen yet: the next commit's shared-list pass freezes them
+   * through the normal path (including the raw-inline balance check).
+   */
+  private maybeActivateIntraList(
+    completedEl: HTMLElement,
+    complete: string,
+    tokens: BlockToken[],
+    tailStart: number,
+  ): void {
+    const first = tokens[tailStart]
+    if (!first || first.kind !== 'list_item' || first.start < this.frozenEnd) return
+    const scan = scanListGroup(complete, tokens, tailStart)
+    if (scan.itemTokens.length < INTRA_LIST_MIN_ITEMS) return
+    // The group must run to the end of the committed content (trailing blanks
+    // only after it) — a closed or signature-mixed run stays on the generic
+    // path (it settles wholesale, or conservatively stays in the tail).
+    for (let i = scan.next; i < tokens.length; i++) {
+      if (tokens[i]?.kind !== 'blank') return
+    }
+    // The generic morph just rendered the tail, whose last node is the group's
+    // list element (pending elements are appended only after this runs).
+    const lastIdx = completedEl.childNodes.length - 1
+    const el = completedEl.childNodes[lastIdx]
+    if (!(el instanceof HTMLElement) || el.tagName !== (scan.sig.ordered ? 'OL' : 'UL')) return
+    this.listSig = scan.sig
+    this.listFrozenLis = 0
+    this.listElIndex = lastIdx
+    this.listLoose = scan.loose
+    this.listHasTask = false
+  }
+
+  /**
+   * Per-commit reconcile while intra-list freezing is active. Freezes every
+   * settled unfrozen item (all but the last, or all when the group just ended)
+   * into the shared list element, morphs the unfrozen item slice in place, and
+   * syncs the element's own attributes. Returns:
+   *  - 'handled' — the list is still the open trailing group; commit complete.
+   *  - 'sealed'  — the group ended; the list is now a fully frozen top-level
+   *    node and the caller's generic path must process what follows it.
+   *  - 'fallback' — a guard tripped (tight→loose flip against frozen items,
+   *    signature break the caller can't see, or a DOM shape mismatch); the
+   *    caller full-morphs, which also resets all intra-list state.
+   */
+  private commitSharedList(
+    completedEl: HTMLElement,
+    complete: string,
+    tokens: BlockToken[],
+    linkRefs: LinkReferenceMap,
+    linkRefKey: string,
+  ): 'handled' | 'sealed' | 'fallback' {
+    const sig = this.listSig
+    if (!sig) return 'fallback'
+    const wantTag = sig.ordered ? 'OL' : 'UL'
+    const listEl = completedEl.childNodes[this.listElIndex]
+    if (!(listEl instanceof HTMLElement) || listEl.tagName !== wantTag) return 'fallback'
+
+    // Walk the unfrozen region: interleaved blanks plus items that continue the
+    // signature. Loose evidence is exactly scanListGroup's rule, applied
+    // incrementally — a blank run counts only when a continuing item follows;
+    // evidence inside the frozen region was accumulated when those items froze.
+    const unfrozenItems: BlockToken[] = []
+    let looseEvidence = false
+    let blankPending = false
+    let ended = false
+    for (let i = lowerBound(tokens, this.frozenEnd); i < tokens.length; i++) {
+      const token = tokens[i]
+      if (!token) break
+      if (token.kind === 'blank') {
+        blankPending = true
+        continue
+      }
+      if (
+        token.kind === 'list_item' &&
+        listSliceContinuesGroup(sig, complete.slice(token.start, token.end))
+      ) {
+        if (blankPending) looseEvidence = true
+        blankPending = false
+        if (listItemSliceIsMultiParagraph(complete.slice(token.start, token.end))) {
+          looseEvidence = true
+        }
+        unfrozenItems.push(token)
+        continue
+      }
+      // Any other token (or a non-continuing item) closes the group here.
+      ended = true
+      break
+    }
+
+    const currentLoose = this.listLoose || looseEvidence
+    if (currentLoose !== this.listLoose) {
+      // Tight→loose flip: frozen items were rendered tight and are now wrong —
+      // one-time fallback per list (looseness never reverts, so the rebuilt
+      // state freezes loose from then on). With nothing frozen yet, just adopt.
+      if (this.listFrozenLis > 0) return 'fallback'
+      this.listLoose = currentLoose
+    }
+
+    // Freeze every settled item: all but the last while the group can still
+    // grow (the last item may still absorb continuation lines), all of them
+    // once the group has ended.
+    const freezeCount = ended ? unfrozenItems.length : Math.max(0, unfrozenItems.length - 1)
+    const deltaItems = unfrozenItems.slice(0, freezeCount)
+    const tailItems = unfrozenItems.slice(freezeCount)
+
+    const delta = renderListItemsSlice(complete, deltaItems, this.listLoose, linkRefs)
+    // Same hazard as the top-level delta (gap F): never freeze an item slice
+    // whose raw benign inline tags are unbalanced.
+    if (delta.itemsHtml !== '' && hasUnbalancedBenignRawInline(delta.itemsHtml)) return 'fallback'
+    const tail = renderListItemsSlice(complete, tailItems, this.listLoose, linkRefs)
+    this.renderedChars += delta.itemsHtml.length + tail.itemsHtml.length
+
+    const hasTask = this.listHasTask || delta.anyTask || tail.anyTask
+    const open = listGroupOpenTag(sig, hasTask)
+    const close = listGroupCloseTag(sig)
+
+    // Reconcile the unfrozen item region in place. Parsing the wrapped list
+    // keeps DOMPurify and the fragment parser in list context; the element's
+    // own attributes are synced separately (the task class can appear later)
+    // while its frozen <li> children are never touched.
+    const templateHost = completedEl.cloneNode(false) as HTMLElement
+    templateHost.innerHTML = sanitizeRenderedMarkdown(
+      `${open}${delta.itemsHtml}${tail.itemsHtml}${close}`,
+    )
+    const templateList = templateHost.firstElementChild
+    if (!(templateList instanceof HTMLElement) || templateList.tagName !== wantTag) {
+      return 'fallback'
+    }
+    syncAttributes(listEl, templateList)
+    morphElementChildrenFrom(listEl, templateList, this.listFrozenLis)
+
+    if (freezeCount > 0) {
+      // Counted advance (gap C): parse the sanitized frozen slice alone.
+      const countHost = completedEl.cloneNode(false) as HTMLElement
+      countHost.innerHTML = sanitizeRenderedMarkdown(`${open}${delta.itemsHtml}${close}`)
+      this.listFrozenLis += countHost.firstElementChild?.childNodes.length ?? 0
+      const lastFrozen = deltaItems[deltaItems.length - 1]
+      if (lastFrozen) {
+        this.frozenEnd = lastFrozen.end
+        this.frozenSource = complete.slice(0, this.frozenEnd)
+      }
+    }
+    this.listHasTask = hasTask
+    this.lastLinkRefKey = linkRefKey
+
+    if (ended) {
+      // Promote the shared list to a fully frozen top-level node (the '\n'
+      // seam before it, if any, is absorbed into the frozen count) and let the
+      // generic path handle the content after the group in this same commit.
+      this.frozenNodeCount = this.listElIndex + 1
+      this.frozenHasHtml = true
+      this.resetListState()
+      return 'sealed'
+    }
+
+    // Still open: sweep stale top-level children after the list (block-level
+    // pending elements appended by the previous frame).
+    while (completedEl.childNodes.length > this.listElIndex + 1) {
+      completedEl.lastChild?.remove()
+    }
+    return 'handled'
   }
 
   private fullMorph(
@@ -373,5 +606,6 @@ export class FrozenTailRenderer {
     this.frozenHasHtml = false
     this.frozenNodeCount = 0
     this.lastLinkRefKey = linkRefKey
+    this.resetListState()
   }
 }
