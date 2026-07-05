@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>@copse/streaming-markdown — Live Demo</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1c2128;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --text-bright: #f0f6fc;
+      --accent: #58a6ff;
+      --accent-dim: rgba(31, 111, 235, 0.15);
+      --accent-glow: rgba(88, 166, 255, 0.1);
+      --success: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+      --code-bg: #161b22;
+      --pending-bg: rgba(21, 40, 70, 0.7);
+      --pending-border: rgba(31, 111, 235, 0.5);
+      --pending-text: #8b949e;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    .site-header {
+      border-bottom: 1px solid var(--border);
+      padding: 1.5rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .site-header-left {
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+    }
+
+    .site-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text-bright);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    .site-tagline {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    .header-links {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .header-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.15s;
+    }
+
+    .header-links a:hover { color: var(--accent); }
+
+    .npm-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.35rem 0.75rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      user-select: all;
+    }
+
+    .npm-badge:hover {
+      border-color: var(--accent);
+      color: var(--text-bright);
+    }
+
+    .npm-badge .npm-icon { color: var(--danger); }
+
+    /* ── Hero ────────────────────────────────────────────── */
+    .hero {
+      padding: 3rem 2rem 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .hero-text {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    .hero-text h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--text-bright);
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.02em;
+    }
+
+    .hero-text p {
+      color: var(--text-muted);
+      font-size: 1rem;
+      max-width: 560px;
+      margin: 0 auto;
+      line-height: 1.7;
+    }
+
+    .hero-demo {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .hero-demo-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 1rem;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      gap: 1rem;
+    }
+
+    .hero-demo-title {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    .hero-demo-meta {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      font-size: 0.75rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--text-muted);
+    }
+
+    .stream-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      flex-shrink: 0;
+    }
+
+    .stream-dot.active {
+      background: var(--warning);
+      animation: blink 0.8s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .hero-output {
+      padding: 1.5rem;
+      min-height: 260px;
+      font-size: 0.95rem;
+    }
+
+    /* ── Section layout ──────────────────────────────────── */
+    .section {
+      padding: 2.5rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .section-header {
+      margin-bottom: 1.5rem;
+    }
+
+    .section-header h2 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 0.4rem;
+    }
+
+    .section-header p {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+
+    /* ── Comparison panels ───────────────────────────────── */
+    .compare-controls {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .compare-controls label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .preset-bar {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .preset-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 6px;
+      padding: 0.3rem 0.7rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .preset-btn:hover, .preset-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .compare-input {
+      width: 100%;
+      min-height: 140px;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.82rem;
+      resize: vertical;
+      margin-bottom: 0.75rem;
+      line-height: 1.5;
+    }
+
+    .compare-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .compare-action-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+      align-items: center;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 0.5rem 1.1rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: opacity 0.15s;
+    }
+
+    .btn-primary:hover { opacity: 0.85; }
+
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 6px;
+      padding: 0.5rem 0.9rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--text-muted);
+      color: var(--text);
+    }
+
+    .speed-toggle {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+
+    .speed-toggle input { cursor: pointer; accent-color: var(--accent); }
+
+    .compare-panels {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+
+    @media (max-width: 820px) {
+      .compare-panels { grid-template-columns: 1fr; }
+    }
+
+    .compare-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .compare-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 1rem;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .compare-panel-title {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    .compare-panel-title span {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .panel-stats {
+      font-size: 0.72rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--text-muted);
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .panel-stats .stat-val {
+      color: var(--success);
+    }
+
+    .compare-panel-body {
+      padding: 1rem;
+      min-height: 240px;
+      max-height: 380px;
+      overflow-y: auto;
+      font-size: 0.9rem;
+    }
+
+    /* ── Rendered content styles ─────────────────────────── */
+    .compare-panel-body h1 { font-size: 1.4rem; margin: 0.5rem 0; color: var(--text-bright); }
+    .compare-panel-body h2 { font-size: 1.15rem; margin: 0.75rem 0 0.4rem; color: var(--text-bright); }
+    .compare-panel-body h3 { font-size: 1rem; margin: 0.6rem 0 0.3rem; color: var(--text-bright); }
+    .compare-panel-body p { margin: 0.4rem 0; }
+    .compare-panel-body ul, .compare-panel-body ol { margin: 0.4rem 0 0.4rem 1.5rem; }
+    .compare-panel-body li { margin: 0.15rem 0; }
+    .compare-panel-body blockquote {
+      border-left: 3px solid var(--border);
+      padding-left: 0.75rem;
+      color: var(--text-muted);
+      margin: 0.5rem 0;
+      font-style: italic;
+    }
+    .compare-panel-body code {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+      font-size: 0.82em;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+    .compare-panel-body pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      overflow-x: auto;
+      margin: 0.5rem 0;
+    }
+    .compare-panel-body pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 0.85em;
+    }
+    .compare-panel-body table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 0.5rem 0;
+      font-size: 0.88em;
+    }
+    .compare-panel-body th, .compare-panel-body td {
+      border: 1px solid var(--border);
+      padding: 0.35rem 0.6rem;
+      text-align: left;
+    }
+    .compare-panel-body th { background: var(--surface2); color: var(--text-bright); }
+    .compare-panel-body a { color: var(--accent); }
+    .compare-panel-body strong { color: var(--text-bright); }
+    .compare-panel-body hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0.75rem 0;
+    }
+
+    /* ── Pending state styles (shown during streaming) ───── */
+    .stream-pending-paragraph {
+      background: var(--pending-bg);
+      border-left: 3px solid var(--pending-border);
+      padding-left: 0.6rem;
+      color: var(--pending-text);
+      border-radius: 0 3px 3px 0;
+    }
+
+    .stream-pending-list-item {
+      background: var(--pending-bg);
+      border-left: 3px solid var(--pending-border);
+      padding-left: 0.5rem;
+      color: var(--pending-text);
+    }
+
+    .stream-pending-list-item::marker { color: var(--accent); }
+
+    .stream-pending-heading {
+      background: var(--pending-bg);
+      border-left: 3px solid var(--pending-border);
+      padding-left: 0.6rem;
+      color: var(--pending-text);
+      border-radius: 0 3px 3px 0;
+    }
+
+    .stream-pending-h1 { font-size: 1.4rem; }
+    .stream-pending-h2 { font-size: 1.15rem; }
+    .stream-pending-h3 { font-size: 1rem; }
+
+    .stream-pending-blockquote {
+      background: var(--pending-bg);
+      border-left: 3px solid var(--pending-border);
+      padding-left: 0.75rem;
+      color: var(--pending-text);
+      font-style: italic;
+    }
+
+    .stream-table-forming {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.5rem 0;
+      font-size: 0.88em;
+    }
+
+    .stream-table-forming th,
+    .stream-table-forming td {
+      border: 1px solid var(--border);
+      padding: 0.35rem 0.6rem;
+      text-align: left;
+    }
+
+    .stream-table-forming th { background: var(--surface2); }
+
+    .stream-table-forming tr.pending-row {
+      background: var(--pending-bg);
+      color: var(--pending-text);
+    }
+
+    .stream-fence-forming {
+      background: var(--code-bg);
+      border: 1px solid var(--pending-border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      overflow-x: auto;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.85em;
+      margin: 0.5rem 0;
+    }
+
+    .stream-pending {
+      color: var(--pending-text);
+    }
+
+    /* ── Code snippet section ────────────────────────────── */
+    .snippets {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .snippet-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 720px) {
+      .snippet-grid { grid-template-columns: 1fr; }
+    }
+
+    .snippet-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .snippet-card-header {
+      padding: 0.5rem 0.9rem;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .snippet-card-header span {
+      color: var(--accent);
+    }
+
+    .snippet-card pre {
+      padding: 0.9rem;
+      font-size: 0.8rem;
+      line-height: 1.55;
+      overflow-x: auto;
+      margin: 0;
+    }
+
+    .snippet-card code {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    .kw { color: #ff7b72; }
+    .fn { color: #79c0ff; }
+    .str { color: #a5d6ff; }
+    .cmt { color: #8b949e; font-style: italic; }
+    .cls { color: #ffa657; }
+    .prop { color: #d2a8ff; }
+
+    /* ── Fidelity indicator ──────────────────────────────── */
+    .fidelity-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.72rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      background: rgba(63, 185, 80, 0.1);
+      border: 1px solid rgba(63, 185, 80, 0.3);
+      color: var(--success);
+    }
+
+    .fidelity-badge.checking {
+      background: rgba(210, 153, 34, 0.1);
+      border-color: rgba(210, 153, 34, 0.3);
+      color: var(--warning);
+    }
+
+    /* ── Footer ──────────────────────────────────────────── */
+    .site-footer {
+      padding: 1.5rem 2rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .site-footer a { color: var(--text-muted); text-decoration: none; }
+    .site-footer a:hover { color: var(--accent); }
+
+    /* ── Scrollbar ───────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-left">
+    <span class="site-title">@copse/streaming-markdown</span>
+    <span class="site-tagline">CommonMark streaming renderer</span>
+  </div>
+  <div class="header-links">
+    <span class="npm-badge" title="npm install @copse/streaming-markdown">
+      <span class="npm-icon">▲</span>
+      npm install @copse/streaming-markdown
+    </span>
+    <a href="https://github.com/copse-dev/streaming-markdown" target="_blank">GitHub</a>
+    <a href="https://www.npmjs.com/package/@copse/streaming-markdown" target="_blank">npm</a>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="hero-text">
+    <h1>Markdown that renders as it arrives</h1>
+    <p>
+      Two emitters — a pure <code style="font-size:0.9em;background:var(--surface);padding:0.1rem 0.35rem;border-radius:3px;border:1px solid var(--border);">string→HTML</code>
+      function and an incremental DOM renderer — with pending block states
+      that show partial structure without flashing raw syntax.
+      Built for LLM chat UIs.
+    </p>
+  </div>
+
+  <div class="hero-demo">
+    <div class="hero-demo-bar">
+      <span class="hero-demo-title">Live stream — <span style="color:var(--accent)">StreamingMarkdownRenderer</span></span>
+      <div class="hero-demo-meta">
+        <span id="hero-cps">— chars/s</span>
+        <span id="hero-updates">— updates</span>
+        <span class="stream-dot active" id="hero-dot"></span>
+      </div>
+    </div>
+    <div class="hero-output compare-panel-body" id="hero-output" style="min-height:280px;max-height:400px"></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-header">
+    <h2>Interactive comparison</h2>
+    <p>Both APIs streaming the same content simultaneously. Pending blocks are highlighted while they form.</p>
+  </div>
+
+  <div class="preset-bar" id="preset-bar">
+    <button class="preset-btn active" data-preset="mixed">Mixed</button>
+    <button class="preset-btn" data-preset="table">Table</button>
+    <button class="preset-btn" data-preset="code">Code</button>
+    <button class="preset-btn" data-preset="lists">Lists</button>
+    <button class="preset-btn" data-preset="basic">Basic</button>
+  </div>
+
+  <textarea class="compare-input" id="compare-input" spellcheck="false"></textarea>
+
+  <div class="compare-action-bar">
+    <button class="btn-primary" id="btn-stream">&#9654; Stream both</button>
+    <button class="btn-secondary" id="btn-clear">Clear</button>
+    <label class="speed-toggle">
+      <input type="checkbox" id="speed-check" checked>
+      Fast
+    </label>
+    <span id="fidelity-badge" class="fidelity-badge" style="display:none">&#10003; outputs match</span>
+  </div>
+
+  <div class="compare-panels">
+    <div class="compare-panel">
+      <div class="compare-panel-header">
+        <span class="compare-panel-title"><span>renderStreamingMarkdown</span>(partial)</span>
+        <div class="panel-stats" id="string-stats">
+          <span>—</span>
+        </div>
+      </div>
+      <div class="compare-panel-body" id="string-output"></div>
+    </div>
+
+    <div class="compare-panel">
+      <div class="compare-panel-header">
+        <span class="compare-panel-title">renderer.<span>update</span>(partial)</span>
+        <div class="panel-stats" id="dom-stats">
+          <span>—</span>
+        </div>
+      </div>
+      <div class="compare-panel-body" id="dom-output"></div>
+    </div>
+  </div>
+</div>
+
+<div class="snippets">
+  <div class="section">
+    <div class="section-header">
+      <h2>API</h2>
+      <p>Two emitters for the same content stream — pick the one that fits your rendering pipeline.</p>
+    </div>
+    <div class="snippet-grid">
+      <div class="snippet-card">
+        <div class="snippet-card-header">
+          <span>String emitter</span> — rerenders on each chunk, minimal setup
+        </div>
+        <pre><code><span class="kw">import</span> { <span class="fn">renderStreamingMarkdown</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown'</span>
+
+<span class="cmt">// Call with the full partial string on each token</span>
+<span class="kw">for await</span> (<span class="kw">const</span> chunk <span class="kw">of</span> stream) {
+  accumulated += chunk
+  el.innerHTML = <span class="fn">renderStreamingMarkdown</span>(accumulated)
+}</code></pre>
+      </div>
+
+      <div class="snippet-card">
+        <div class="snippet-card-header">
+          <span>DOM emitter</span> — incremental updates, avoids full innerHTML churn
+        </div>
+        <pre><code><span class="kw">import</span> { <span class="cls">StreamingMarkdownRenderer</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown'</span>
+
+<span class="kw">const</span> renderer = <span class="kw">new</span> <span class="cls">StreamingMarkdownRenderer</span>(el)
+
+<span class="kw">for await</span> (<span class="kw">const</span> chunk <span class="kw">of</span> stream) {
+  accumulated += chunk
+  renderer.<span class="prop">update</span>(accumulated) <span class="cmt">// incremental DOM patch</span>
+}</code></pre>
+      </div>
+
+      <div class="snippet-card">
+        <div class="snippet-card-header">
+          <span>At-rest rendering</span> — sanitized HTML from complete markdown
+        </div>
+        <pre><code><span class="kw">import</span> {
+  <span class="fn">renderMarkdown</span>,
+  <span class="fn">sanitizeRenderedMarkdown</span>,
+} <span class="kw">from</span> <span class="str">'@copse/streaming-markdown'</span>
+
+<span class="cmt">// Output is untrusted HTML — always sanitize at the sink.</span>
+el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
+  <span class="fn">renderMarkdown</span>(markdown)
+)</code></pre>
+      </div>
+
+      <div class="snippet-card">
+        <div class="snippet-card-header">
+          <span>Sanitizer backend</span> — swap in DOMPurify for Node/jsdom
+        </div>
+        <pre><code><span class="kw">import</span> { <span class="fn">setSanitizerBackend</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown'</span>
+<span class="kw">import</span> { <span class="fn">dompurifyBackend</span> }
+  <span class="kw">from</span> <span class="str">'@copse/streaming-markdown/sanitizers/dompurify'</span>
+
+<span class="cmt">// Register once before the first render.</span>
+<span class="cmt">// Default is the native Sanitizer API (zero-dependency).</span>
+<span class="fn">setSanitizerBackend</span>(dompurifyBackend)</code></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <span>@copse/streaming-markdown · Apache-2.0</span>
+  <span>
+    <a href="https://github.com/copse-dev/streaming-markdown">GitHub</a> ·
+    <a href="https://www.npmjs.com/package/@copse/streaming-markdown">npm</a>
+  </span>
+</footer>
+
+<script type="module">
+import {
+  renderStreamingMarkdown,
+  StreamingMarkdownRenderer,
+} from './dist/index.js';
+
+// ── Presets ────────────────────────────────────────────────────────────────
+const PRESETS = {
+  mixed: `# Streaming Markdown
+
+This demo shows **streaming markdown** rendering with pending block states.
+Blocks are styled differently while they're still *forming*, then settle into
+their final appearance once the next newline arrives.
+
+## Features
+
+- **Headings** recognised as they form — h1 through h6
+- *Lists* show pending items with a distinctive left border
+- Tables detect the separator line (\`|---|---|\`) to switch display mode
+- Code fences apply syntax highlighting in real-time
+
+### Example: fibonacci in Python
+
+\`\`\`python
+def fibonacci(n):
+    """Generate the Fibonacci sequence up to n terms."""
+    a, b = 0, 1
+    for _ in range(n):
+        yield a
+        a, b = b, a + b
+
+for num in fibonacci(10):
+    print(num, end=" ")
+\`\`\`
+
+| Block type | Pending class | Settled class |
+|------------|---------------|---------------|
+| Paragraph  | \`stream-pending-paragraph\` | \`<p>\` |
+| List item  | \`stream-pending-list-item\` | \`<li>\` |
+| Heading    | \`stream-pending-heading\` | \`<h1>…<h6>\` |
+| Code fence | \`stream-fence-forming\` | \`<pre><code>\` |
+
+> "The best way to predict the future is to invent it."
+> — Alan Kay
+
+*Open the DevTools Elements panel while streaming to watch the DOM update live.*`,
+
+  table: `## API Reference
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| GET | /users | List all users | Bearer |
+| POST | /users | Create user | Bearer |
+| GET | /users/:id | Get by ID | Bearer |
+| PUT | /users/:id | Update user | Bearer |
+| DELETE | /users/:id | Delete user | Admin |
+| GET | /health | Healthcheck | Public |
+
+### Status codes
+
+| Code | Meaning |
+|------|---------|
+| 200 | OK |
+| 201 | Created |
+| 400 | Bad Request |
+| 401 | Unauthorized |
+| 404 | Not Found |
+| 500 | Server Error |
+
+Tables are progressively rendered: the header row appears immediately,
+the separator line triggers the table layout, and body rows appear one by one.
+The pending row gets a \`pending-row\` class until the next \`|\\n\` arrives.`,
+
+  code: `## Code Examples
+
+Inline \`code spans\` are rendered immediately. Fenced blocks wait for the
+opening fence line, then stream content into a \`<pre><code>\` with live
+syntax highlighting:
+
+\`\`\`javascript
+// Streaming a response from a fetch call
+async function streamMarkdown(url, targetEl) {
+  const renderer = new StreamingMarkdownRenderer(targetEl)
+  const res = await fetch(url)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let accumulated = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    accumulated += decoder.decode(value, { stream: true })
+    renderer.update(accumulated)
+  }
+}
+\`\`\`
+
+\`\`\`typescript
+// Type signature of the two streaming exports
+export function renderStreamingMarkdown(content: string): string
+
+export class StreamingMarkdownRenderer {
+  constructor(host: HTMLElement)
+  update(content: string): void
+}
+\`\`\`
+
+The fence is \`stream-fence-forming\` until the closing \`\`\`\`\`\` appears.
+After that it becomes a normal \`<pre><code>\` block.`,
+
+  lists: `## CommonMark list support
+
+Tight lists (no blank lines between items):
+
+- **Bold** item text
+- *Italic* item text
+- Item with \`inline code\`
+- Item with a [link](https://example.com)
+
+Loose lists (blank lines between items):
+
+- First item
+
+  This paragraph belongs to the first list item.
+
+- Second item
+
+  Another continuation paragraph.
+
+Ordered lists:
+
+1. Step one — set up the renderer
+2. Step two — call \`renderer.update(partial)\` on each token
+3. Step three — the DOM updates incrementally
+
+Nested lists:
+
+- Parent
+  - Child 1
+  - Child 2
+    - Grandchild with [a link](https://example.com)
+- Another parent
+  1. Nested ordered
+  2. Sub-step
+
+> Pending list items get \`stream-pending-list-item\` on the \`<li>\`
+> until the next list marker or blank line arrives.`,
+
+  basic: `# Welcome
+
+This is a **paragraph** with *emphasis*, ~~strikethrough~~, and \`inline code\`.
+
+Links: [GitHub](https://github.com) — [npm](https://npmjs.com)
+
+---
+
+Second paragraph after a thematic break. The renderer handles:
+
+- Hard line breaks (two trailing spaces)
+- Soft breaks (single newline within a paragraph)
+- HTML entities like &amp; and &copy;
+- Backslash escapes like \\*not italic\\*
+
+> Blockquotes work too, and they can span
+> multiple lines before the block is complete.
+
+That's it — *start typing in the textarea above* to see your own markdown stream in.`
+};
+
+// ── State ──────────────────────────────────────────────────────────────────
+let heroRenderer = null;
+let heroTimer = null;
+let heroPos = 0;
+let heroUpdates = 0;
+let heroStart = 0;
+
+let compareTimer = null;
+let comparePos = 0;
+let compareUpdates = 0;
+let compareStart = 0;
+let domRenderer = null;
+let currentPreset = 'mixed';
+
+// ── Hero auto-stream ───────────────────────────────────────────────────────
+const heroOutput = document.getElementById('hero-output');
+const heroDot = document.getElementById('hero-dot');
+const heroCps = document.getElementById('hero-cps');
+const heroUpdatesEl = document.getElementById('hero-updates');
+
+function heroReset() {
+  if (heroTimer) clearInterval(heroTimer);
+  heroOutput.innerHTML = '';
+  heroRenderer = new StreamingMarkdownRenderer(heroOutput);
+  heroPos = 0;
+  heroUpdates = 0;
+  heroStart = performance.now();
+  heroDot.classList.add('active');
+}
+
+function heroTick(text) {
+  if (heroPos >= text.length) {
+    heroPos = text.length;
+    clearInterval(heroTimer);
+    heroDot.classList.remove('active');
+    const elapsed = (performance.now() - heroStart) / 1000;
+    heroCps.textContent = `${Math.round(text.length / elapsed).toLocaleString()} chars/s`;
+    heroUpdatesEl.textContent = `${heroUpdates} updates`;
+    // restart after pause
+    heroTimer = setTimeout(() => startHero(), 3500);
+    return;
+  }
+  heroPos = Math.min(heroPos + 6, text.length);
+  heroRenderer.update(text.slice(0, heroPos));
+  heroUpdates++;
+  const elapsed = (performance.now() - heroStart) / 1000 || 0.001;
+  heroCps.textContent = `${Math.round(heroPos / elapsed).toLocaleString()} chars/s`;
+  heroUpdatesEl.textContent = `${heroUpdates} updates`;
+}
+
+function startHero() {
+  const text = PRESETS.mixed;
+  heroReset();
+  heroTimer = setInterval(() => heroTick(text), 25);
+}
+
+startHero();
+
+// ── Comparison ─────────────────────────────────────────────────────────────
+const compareInput = document.getElementById('compare-input');
+const stringOutput = document.getElementById('string-output');
+const domOutput = document.getElementById('dom-output');
+const stringStats = document.getElementById('string-stats');
+const domStats = document.getElementById('dom-stats');
+const fidelityBadge = document.getElementById('fidelity-badge');
+const speedCheck = document.getElementById('speed-check');
+
+compareInput.value = PRESETS[currentPreset];
+
+document.getElementById('preset-bar').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-preset]');
+  if (!btn) return;
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentPreset = btn.dataset.preset;
+  compareInput.value = PRESETS[currentPreset];
+  fidelityBadge.style.display = 'none';
+});
+
+document.getElementById('btn-stream').addEventListener('click', startCompare);
+document.getElementById('btn-clear').addEventListener('click', clearCompare);
+
+function formatStats(elapsed, chars, updates) {
+  const cps = elapsed > 0 ? Math.round(chars / (elapsed / 1000)) : 0;
+  return `<span>${cps.toLocaleString()} chars/s</span> · <span class="stat-val">${updates} updates</span>`;
+}
+
+function clearCompare() {
+  if (compareTimer) { clearInterval(compareTimer); compareTimer = null; }
+  stringOutput.innerHTML = '';
+  domOutput.innerHTML = '';
+  stringStats.innerHTML = '<span>—</span>';
+  domStats.innerHTML = '<span>—</span>';
+  fidelityBadge.style.display = 'none';
+}
+
+function startCompare() {
+  if (compareTimer) { clearInterval(compareTimer); compareTimer = null; }
+  const text = compareInput.value;
+  if (!text.trim()) return;
+
+  stringOutput.innerHTML = '';
+  domOutput.innerHTML = '';
+  fidelityBadge.style.display = 'none';
+  domRenderer = new StreamingMarkdownRenderer(domOutput);
+
+  comparePos = 0;
+  compareUpdates = 0;
+  compareStart = performance.now();
+
+  const fast = speedCheck.checked;
+  const step = fast ? 6 : 2;
+  const interval = fast ? 20 : 50;
+
+  compareTimer = setInterval(() => {
+    if (comparePos >= text.length) {
+      comparePos = text.length;
+      clearInterval(compareTimer);
+      compareTimer = null;
+      const elapsed = performance.now() - compareStart;
+      stringStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
+      domStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
+      checkFidelity(text);
+      return;
+    }
+
+    comparePos = Math.min(comparePos + step, text.length);
+    const partial = text.slice(0, comparePos);
+
+    const t0 = performance.now();
+    const html = renderStreamingMarkdown(partial);
+    const stringMs = performance.now() - t0;
+    stringOutput.innerHTML = html;
+
+    const t1 = performance.now();
+    domRenderer.update(partial);
+    const domMs = performance.now() - t1;
+
+    compareUpdates++;
+    const elapsed = performance.now() - compareStart;
+    stringStats.innerHTML = formatStats(elapsed, comparePos, compareUpdates)
+      + ` · <span>${stringMs.toFixed(1)}ms</span>`;
+    domStats.innerHTML = formatStats(elapsed, comparePos, compareUpdates)
+      + ` · <span>${domMs.toFixed(1)}ms</span>`;
+  }, interval);
+}
+
+function checkFidelity(text) {
+  // Compare the final innerHTML of both panels.
+  // They should produce identical output at the end of a complete document.
+  const stringHtml = stringOutput.innerHTML;
+  const domHtml = domOutput.innerHTML;
+  fidelityBadge.style.display = 'inline-flex';
+  if (stringHtml === domHtml) {
+    fidelityBadge.className = 'fidelity-badge';
+    fidelityBadge.textContent = '✓ outputs match';
+  } else {
+    fidelityBadge.className = 'fidelity-badge checking';
+    fidelityBadge.textContent = '≠ outputs differ (pending tail)';
+  }
+}
+
+// Auto-start comparison with the default preset
+startCompare();
+</script>
+</body>
+</html>
