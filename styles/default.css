@@ -203,16 +203,6 @@
   & tbody tr:nth-child(even) td {
     background: var(--sm-th-stripe, rgba(255, 255, 255, 0.02));
   }
-  /* A lone code span (e.g. a long slug) wraps inside its cell rather than
-     widening the table. */
-  & :is(td, th) > code:only-child {
-    display: block;
-    min-width: 0;
-    max-width: 100%;
-    box-sizing: border-box;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
 
   & .mermaid-diagram {
     margin: var(--sm-space-sm, 8px) 0;
