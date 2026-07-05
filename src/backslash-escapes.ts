@@ -16,7 +16,7 @@
  * span scanner (which runs on encoded text) ever sees it.
  */
 import { decodeHTMLStrict } from 'entities'
-import { nextCodeSpan } from './inline-code-spans.ts'
+import { ANGLE_AUTOLINK_VERBATIM_RE, nextCodeSpan } from './inline-code-spans.ts'
 
 const ESCAPED_BASE = 0xe000
 
@@ -31,8 +31,7 @@ function isEscapablePunctuation(ch: string): boolean {
  * backslash from the local part — `<foo\+@bar.example.com>` is NOT an email
  * autolink, so its `\+` escape must still be processed (spec 606).
  */
-const ANGLE_AUTOLINK_RE =
-  /^<(?:[a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\s]*|[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[^<>\s@]+\.[^<>\s@]+)>/
+const ANGLE_AUTOLINK_RE = ANGLE_AUTOLINK_VERBATIM_RE
 
 /**
  * Raw inline `<tag ...>` spans are verbatim regions too (matches

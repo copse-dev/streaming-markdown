@@ -527,7 +527,8 @@ describe('renderMarkdown', () => {
   it('keeps a lazy continuation line inside the blockquote (no leaked &gt;)', () => {
     const html = renderMarkdown('> line one\nlazy continuation')
     assert.match(html, /<blockquote>/)
-    assert.match(html, /line one[\n]lazy continuation/)
+    // Lazy lines merge into the paragraph as text (space join, spec 93/238).
+    assert.match(html, /line one lazy continuation/)
     assert.doesNotMatch(html, /&gt;/)
   })
 

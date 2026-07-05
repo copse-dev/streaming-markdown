@@ -11,6 +11,7 @@ import {
 } from './link-references.ts'
 import {
   ATX_HEADING_DETECT_RE as ATX_HEADING_RE,
+  expandListPrefixTabs,
   FENCE_OPEN_RE,
   fenceCloses,
   fenceMarker,
@@ -107,7 +108,7 @@ export function isEmptyListItemLine(line: string): boolean {
  * (#273/#274/#278).
  */
 export function listItemContentColumn(line: string): number {
-  const m = line.match(/^( {0,3})(\d{1,9}[.)]|[-*+])( *)(.*)$/)
+  const m = expandListPrefixTabs(line).match(/^( {0,3})(\d{1,9}[.)]|[-*+])( *)(.*)$/)
   if (!m) return Infinity
   const indent = m[1]?.length ?? 0
   const markerWidth = m[2]?.length ?? 0
@@ -117,8 +118,9 @@ export function listItemContentColumn(line: string): number {
   return indent + markerWidth + n
 }
 
+/** Continuation indent in COLUMNS (tabs expand at 4-column stops, spec 4/5). */
 function lazyContinuationIndent(line: string): number {
-  return line.match(/^ */)?.[0].length ?? 0
+  return leadingIndentWidth(line)
 }
 
 /** Ordered marker mid-paragraph (#304): only `1` may interrupt; other markers continue. */
@@ -589,9 +591,17 @@ export function tokenizeBlocks(source: string): BlockToken[] {
     // Paragraph: collect consecutive non-blank lines until a block boundary.
     const paraStart = line.start
     let j = i + 1
+    let setextUnderline: ScannedLine | null = null
     while (j < lines.length) {
       const next = lines[j]
       if (!next || next.text.trim() === '') break
+      // A setext underline closes the WHOLE collected paragraph into a
+      // heading (spec 81/95) — checked before the thematic-break test so a
+      // `---` after paragraph text reads as an underline, not an <hr>.
+      if (next.terminated && SETEXT_UNDERLINE_RE.test(next.text)) {
+        setextUnderline = next
+        break
+      }
       if (
         ATX_HEADING_RE.test(next.text) ||
         THEMATIC_BREAK_RE.test(next.text) ||
@@ -603,12 +613,16 @@ export function tokenizeBlocks(source: string): BlockToken[] {
         fenceMarker(next.text) ||
         // NOTE: a link reference definition cannot interrupt a paragraph
         // (spec 213) — a `[label]: dest` line here is a lazy continuation.
-        (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? '')) ||
-        (lines[j + 1] && SETEXT_UNDERLINE_RE.test(lines[j + 1]?.text ?? ''))
+        (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
       ) {
         break
       }
       j++
+    }
+    if (setextUnderline) {
+      pushBlock(blocks, 'setext_heading', 'complete', paraStart, setextUnderline.end)
+      i = j + 1
+      continue
     }
     const last = lines[j - 1] ?? line
     const status: BlockStatus = last.terminated ? 'complete' : 'open'

@@ -1,8 +1,12 @@
 import {
   ATX_HEADING_CAPTURE_RE as ATX_HEADING_RE,
+  BLOCKQUOTE_DETECT_RE,
   dropTrailingNewline,
+  expandLeadingTabs,
+  expandListPrefixTabs,
   parseFenceSlice,
   stripAtxClosingHashes,
+  stripBlockquoteMarker,
   stripFourColumnIndent,
 } from './block-patterns.ts'
 import {
@@ -41,9 +45,6 @@ export interface RenderBlocksOptions {
   indentedCode?: boolean
 }
 
-// Marker may sit after up to three spaces of indent (matches the tokenizer's
-// BLOCKQUOTE_RE); lines are no longer pre-trimmed before stripping.
-const BLOCKQUOTE_LINE_RE = /^ {0,3}> ?/
 
 function renderFencedBlock(lang: string, code: string): string {
   if (lang === 'mermaid') {
@@ -70,9 +71,9 @@ function stripParagraphIndent(text: string): string {
     .join('\n')
 }
 
-function stripBlockquoteLine(line: string): string {
-  return line.replace(BLOCKQUOTE_LINE_RE, '')
-}
+// One shared marker stripper (block-patterns) keeps the tokenizer's laziness
+// checks and the renderer's unwrapping byte-identical, tab handling included.
+const stripBlockquoteLine = stripBlockquoteMarker
 
 /** A GFM task-list checkbox at the very start of an item's content (#614). */
 const TASK_LIST_MARKER_RE = /^\[([ xX])\](?=\s|$)/
@@ -109,7 +110,10 @@ function dedentListItemContent(slice: string): string {
   const first = lines.find((l) => l.trim() !== '') ?? ''
   const col = listItemContentColumn(first)
   const dedented: string[] = []
-  lines.forEach((line, index) => {
+  lines.forEach((rawLine, index) => {
+    // Tabs in the marker prefix / leading whitespace expand at absolute
+    // 4-column stops (spec 4/5/7/9), so slicing by column offset is exact.
+    const line = index === 0 ? expandListPrefixTabs(rawLine) : expandLeadingTabs(rawLine)
     if (index === 0) {
       dedented.push(line.slice(Math.min(col, line.length)))
       return
@@ -185,8 +189,12 @@ function renderAtxHeading(slice: string, linkRefs: LinkReferenceMap): string {
 
 function renderSetextHeading(slice: string, linkRefs: LinkReferenceMap): string {
   const lines = dropTrailingNewline(slice).split('\n')
-  const text = lines[0] ?? ''
-  const underline = lines[1] ?? ''
+  // All lines above the underline are heading content (spec 81/95).
+  const text = lines
+    .slice(0, -1)
+    .map((l) => l.trim())
+    .join('\n')
+  const underline = lines.at(-1) ?? ''
   const level = underline.trim().startsWith('=') ? 1 : 2
   return `<h${String(level)}>${renderProseBlock(text, linkRefs)}</h${String(level)}>`
 }
@@ -209,12 +217,24 @@ function renderTable(slice: string, linkRefs: LinkReferenceMap): string {
 }
 
 function stripBlockquoteSource(slice: string): string {
-  // No per-line trim: a lazy continuation keeps its indentation, so
-  // `>foo` + `    - bar` stays paragraph text rather than becoming a
-  // nested list or code block (spec 238).
-  return slice
-    .split('\n')
-    .map((l) => stripBlockquoteLine(l))
+  // Lazy (unmarked) continuation lines are paragraph TEXT: merge them into
+  // the previous line so the recursive parse cannot reinterpret them as a
+  // block start — `    - bar` stays prose (spec 238) and a lazy `===` cannot
+  // underline a setext heading (spec 93).
+  const out: string[] = []
+  for (const line of slice.split('\n')) {
+    if (BLOCKQUOTE_DETECT_RE.test(line)) {
+      out.push(stripBlockquoteLine(line))
+      continue
+    }
+    const prev = out.at(-1)
+    if (line.trim() !== '' && prev !== undefined && prev.trim() !== '') {
+      out[out.length - 1] = `${prev} ${line.trim()}`
+      continue
+    }
+    out.push(line)
+  }
+  return out
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/^\n+|\n+$/g, '')
