@@ -21,11 +21,13 @@
 // down from ~4×).
 //
 // Known bounds:
-//   - The pure-string scans stay O(prefix) per update (issue #21 limitation K):
-//     the full-string tokenize threaded in from Layer 1 and the per-commit
-//     `parseLinkReferenceDefinitions` below. They keep the asymptote at Θ(n²)
-//     but are a few percent of wall-clock at realistic sizes; true linearity
-//     needs an incremental tokenizer + link-ref scan (out of scope for v1).
+//   - The pure-string scans (issue #21 limitation K) are incremental since #30:
+//     the DOM path's tokenize + link-ref scans resume from a safe boundary
+//     (`IncrementalSourceScanner`), so per-update parse work is O(tail). What
+//     remains O(prefix) per update is byte comparison (the append-only guards'
+//     `startsWith` memcmps and the `includes('|')` gate) — hardware-speed, and
+//     accepted. The stateless string path (`renderStreamingMarkdown`) still
+//     scans fully per call by design.
 //   - A long, still-open trailing LIST is handled by intra-list freezing (#29):
 //     settled items freeze inside the shared <ul>/<ol> and per-commit work is
 //     the unfrozen item slice. A long open trailing BLOCKQUOTE is not — its
@@ -305,16 +307,24 @@ export class FrozenTailRenderer {
    * Reconcile `completedEl` so it serializes byte-identically to
    * `sanitizeRenderedMarkdown(renderMarkdown(complete))`, freezing the settled
    * prefix and re-rendering only the tail group. `tokens` must be
-   * `tokenizeBlocks(complete)` (threaded from the caller, Layer 1).
+   * `tokenizeBlocks(complete)` (threaded from the caller, Layer 1), and
+   * `providedLinkRefs`, when given, must equal
+   * `parseLinkReferenceDefinitions(complete)` (threaded from the caller's
+   * incremental scanner, #30 — saves the per-commit O(prefix) ref scan).
    */
-  update(completedEl: HTMLElement, complete: string, tokens: BlockToken[]): void {
+  update(
+    completedEl: HTMLElement,
+    complete: string,
+    tokens: BlockToken[],
+    providedLinkRefs?: LinkReferenceMap,
+  ): void {
     if (complete === '') {
       if (completedEl.childNodes.length > 0) completedEl.replaceChildren()
       this.reset()
       return
     }
 
-    const linkRefs = parseLinkReferenceDefinitions(complete)
+    const linkRefs = providedLinkRefs ?? parseLinkReferenceDefinitions(complete)
     const linkRefKey = serializeLinkRefs(linkRefs)
     const tailStart = settledTailStart(tokens)
     const tailToken = tokens[tailStart]

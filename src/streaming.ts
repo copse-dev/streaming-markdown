@@ -16,7 +16,8 @@ import {
   pendingListOrderedMarker,
   renderPendingLine,
 } from './render-pending-line.ts'
-import { splitForStreaming, type StreamingSplit } from './streaming-split.ts'
+import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from './streaming-split.ts'
+import { IncrementalSourceScanner } from './incremental-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
@@ -482,6 +483,11 @@ export class StreamingMarkdownRenderer {
   /** Whether `lastComplete` contains `|` — cached for the same reason. */
   private committedHasPipe = false
   private readonly frozenTail = new FrozenTailRenderer()
+  // Incremental scanners (#30): re-tokenize / re-scan only past the last safe
+  // boundary instead of the whole string every update. One per source stream —
+  // the raw content and the committed prefix advance differently.
+  private readonly contentScanner = new IncrementalSourceScanner()
+  private readonly completeScanner = new IncrementalSourceScanner()
   private readonly host: HTMLElement
 
   constructor(host: HTMLElement) {
@@ -490,22 +496,28 @@ export class StreamingMarkdownRenderer {
 
   /** Render `content` (the full message text so far) into the host incrementally. */
   update(content: string): void {
-    const split = splitForStreaming(content)
+    const split = splitForStreamingFrom(content, this.contentScanner.tokenize(content))
     const { complete, pending, openListItemFirstLine, blocks } = split
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
 
     if (complete !== this.lastComplete) {
-      // Tokenize `complete` once per COMMIT and cache on the instance so
-      // pending-only frames (the vast majority) never re-scan the unchanged
-      // prefix (#21). When the split committed everything, `blocks` already is
-      // `tokenizeBlocks(complete)` — reuse it instead of tokenizing again.
-      this.committedTokens = pending === '' ? blocks : tokenizeBlocks(complete)
+      // Tokenize `complete` once per COMMIT — incrementally (#30) — and cache
+      // on the instance so pending-only frames (the vast majority) never
+      // re-scan at all (#21). When the split committed everything, `blocks`
+      // already is `tokenizeBlocks(complete)`; still feed the scanner so its
+      // link-ref cache and safe boundary advance with it.
+      this.committedTokens = this.completeScanner.tokenize(complete)
       this.committedHasPipe = complete.includes('|')
       // Freeze the settled prefix and re-render only the tail group (#21). Blocks
       // that can never change again keep their node identity permanently; the
       // fast path degrades to a full in-place morph on any uncertainty, so output
       // is byte-identical to re-rendering the whole committed prefix.
-      this.frozenTail.update(completedEl, complete, this.committedTokens)
+      this.frozenTail.update(
+        completedEl,
+        complete,
+        this.committedTokens,
+        this.completeScanner.linkRefs(complete),
+      )
       this.lastComplete = complete
     }
     const completeTokensForPending = pending.includes('|') ? this.committedTokens : undefined

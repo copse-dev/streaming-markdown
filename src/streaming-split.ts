@@ -116,7 +116,19 @@ function splitOpenTable(block: BlockToken, content: string): StreamingSplit {
  * and fully determined by `content`).
  */
 export function splitForStreaming(content: string): StreamingSplitWithTokens {
-  const blocks = tokenizeBlocks(content)
+  return splitForStreamingFrom(content, tokenizeBlocks(content))
+}
+
+/**
+ * `splitForStreaming` with the tokenization supplied by the caller — the entry
+ * point for incremental tokenization (#30), where `blocks` comes from an
+ * `IncrementalSourceScanner` instead of a fresh full-string scan. `blocks` must
+ * equal `tokenizeBlocks(content)`.
+ */
+export function splitForStreamingFrom(
+  content: string,
+  blocks: BlockToken[],
+): StreamingSplitWithTokens {
   return { ...splitForStreamingCore(content, blocks), blocks }
 }
 
