@@ -34,6 +34,7 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:demo": "npm run build && esbuild docs/browser-entry.mjs --bundle --format=esm --platform=browser --outfile=docs/streaming-markdown.browser.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "check:conformance": "node --import tsx --test src/commonmark-conformance.test.ts",
