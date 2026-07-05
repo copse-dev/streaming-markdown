@@ -24,7 +24,14 @@ export {
 // `@copse/streaming-markdown/sanitizers/dompurify` entry so it is only bundled
 // when a host explicitly opts in.
 export { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize-browser.ts'
-export { setRawImageRenderer, type RawImageRenderer, type RawImageTag } from './raw-images.ts'
+export {
+  setRawImageRenderer,
+  normalizeHostImagePath,
+  type RawImageRenderer,
+  type RawImageTag,
+  type NormalizedImagePath,
+  type NormalizeImagePathOptions,
+} from './raw-images.ts'
 export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './escape.ts'
 export { fenceCodeClass, highlightFenceCode, stripAppCodeDecorations } from './highlight.ts'
 export { mermaidSourceCandidates, prepareMermaidSource } from './mermaid-source.ts'

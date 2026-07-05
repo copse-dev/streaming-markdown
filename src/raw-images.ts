@@ -80,3 +80,104 @@ export function restoreRawImages(text: string, images: readonly string[]): strin
   if (images.length === 0) return text
   return text.replace(PLACEHOLDER_RE, (_match, index: string) => images[Number(index)] ?? '')
 }
+
+/** A host image `src` reduced to a stable, machine-independent form. */
+export interface NormalizedImagePath {
+  /**
+   * The image path relative to (and including) the root marker segment, e.g.
+   * `artifacts/screenshots/x.png`. Deterministic across machines: any leading
+   * absolute/container/repo directory prefix is stripped.
+   */
+  path: string
+  /**
+   * Query params carried by a URL `src` (e.g. a per-session agent id). These are
+   * volatile and MUST be kept out of any attribute that ends up in a rendered
+   * snapshot/screenshot — surface them separately (or use them only at fetch
+   * time) so they can't churn the committed image. Omitted when the `src` was a
+   * plain path with no query string.
+   */
+  params?: Record<string, string>
+}
+
+export interface NormalizeImagePathOptions {
+  /**
+   * The path segment that anchors the stable relative path. Everything before the
+   * first occurrence of this segment is discarded; the segment and everything
+   * after it are kept. Defaults to `'artifacts'`.
+   */
+  rootMarker?: string
+}
+
+/**
+ * Reduce a raw image `src` to a stable, machine-independent {@link NormalizedImagePath},
+ * or `null` when it does not contain the root marker (host should then fall through
+ * to escaping). This is the determinism primitive behind screenshot churn: agent
+ * output references the same artifact through volatile forms —
+ *
+ *   - `artifacts/screenshots/x.png`                              (already relative)
+ *   - `/opt/cursor/artifacts/screenshots/x.png`                 (container abs path)
+ *   - `/home/user/some-repo/artifacts/screenshots/x.png`        (repo/dir names leak)
+ *   - `https://host/v1/agents/<session>/artifacts/download?path=artifacts/screenshots/x.png`
+ *
+ * — all of which must render identically. This collapses each to the same
+ * `artifacts/screenshots/x.png` so the rendered DOM (and any screenshot of it) stops
+ * changing when the container dir, repo name, directory layout, or session id changes.
+ *
+ * The core stays app-agnostic: no host path is hardcoded — the anchor segment is the
+ * caller-supplied {@link NormalizeImagePathOptions.rootMarker}. Path traversal
+ * (`..`) is rejected as a safety measure.
+ */
+export function normalizeHostImagePath(
+  rawSrc: string,
+  options: NormalizeImagePathOptions = {},
+): NormalizedImagePath | null {
+  const rootMarker = options.rootMarker ?? 'artifacts'
+  const src = rawSrc.trim()
+  if (!src) return null
+
+  let candidate = src
+  let params: Record<string, string> | undefined
+
+  // A URL src carries the stable path in its `?path=` query param (the URL's own
+  // pathname holds a volatile per-session id); prefer it. Other query params are
+  // returned separately so the host keeps them out of snapshot-visible attributes.
+  const url = tryParseUrl(src)
+  if (url) {
+    const pathParam = url.searchParams.get('path')
+    candidate = pathParam ?? url.pathname
+    const rest: Record<string, string> = {}
+    for (const [key, value] of url.searchParams) {
+      if (key === 'path') continue
+      rest[key] = value
+    }
+    if (Object.keys(rest).length > 0) params = rest
+  }
+
+  const path = stableRelativePath(candidate, rootMarker)
+  if (path == null) return null
+  return params ? { path, params } : { path }
+}
+
+function tryParseUrl(src: string): URL | null {
+  // Only absolute URLs (with a scheme) are URLs here; bare paths must not be
+  // coerced (no base is supplied), so `new URL(src)` naturally rejects them.
+  try {
+    return new URL(src)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Keep the `rootMarker` segment and everything after it, discarding any leading
+ * directory prefix. Returns `null` if the marker is absent or a `..` segment would
+ * escape the root.
+ */
+function stableRelativePath(rawPath: string, rootMarker: string): string | null {
+  const segments = rawPath.split('/').filter((segment) => segment !== '' && segment !== '.')
+  const start = segments.indexOf(rootMarker)
+  if (start === -1) return null
+  const kept = segments.slice(start)
+  if (kept.includes('..')) return null
+  return kept.join('/')
+}

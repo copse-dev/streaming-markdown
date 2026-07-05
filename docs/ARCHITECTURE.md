@@ -37,6 +37,18 @@ When extending the renderer or its CSS, preserve these rules:
     `<img>` becomes (e.g. an app's artifact placeholder). The core escapes every
     `<img>` by default; the renderer's output bypasses escaping via a placeholder and
     is restored afterward.
+  - `normalizeHostImagePath` (`raw-images.ts`) — determinism primitive for that renderer.
+    Agent output references the same artifact through volatile `src` forms — a relative
+    `artifacts/…` path, a container absolute path (`/opt/cursor/artifacts/…`), a
+    repo/directory-named path (`/home/user/<repo>/artifacts/…`), or a per-session download
+    URL (`…/v1/agents/<id>/artifacts/download?path=artifacts/…`). Left verbatim in the
+    rendered attribute, those volatile segments (container dir, repo name, directory layout,
+    session id) change per run and churn the host's e2e **screenshots**. This collapses each
+    to the same stable `artifacts/…` path (marker segment configurable; no host path is
+    hardcoded) and keeps URL query params out of the path, so a host that renders
+    `normalizeHostImagePath(src).path` gets identical output across machines. Hosts should
+    route their artifact `<img>` through it and never fold volatile query params into a
+    snapshot-visible attribute.
   - `setSanitizeExtension` (`sanitize.ts`) — widens the sanitizer allowlist and adds a
     per-element gate so a host's injected markup (e.g. its artifact `<img>`) survives
     sanitization. The core allowlist stays the security gate; keep additions narrow.

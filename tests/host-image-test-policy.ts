@@ -2,9 +2,16 @@
 // core renderer escapes raw `<img>` and allows none through the sanitizer. This
 // fixture simulates a host (the real policy lives in the consuming app) so the
 // injection surface — `setRawImageRenderer` + `setSanitizeExtension` — can be
-// exercised. Only an `<img>` whose `src` starts with `artifacts/` becomes a
-// locked-down, src-less placeholder; everything else falls through to escaping.
-import { setRawImageRenderer, type RawImageTag } from '../src/raw-images.ts'
+// exercised. An `<img>` whose `src` resolves (via `normalizeHostImagePath`) to a
+// stable `artifacts/…` path becomes a locked-down, src-less placeholder; every
+// other tag falls through to escaping.
+//
+// The renderer normalizes the path so volatile prefixes — a container abs path
+// (`/opt/cursor/artifacts/…`), a repo/dir name (`/home/user/<repo>/artifacts/…`),
+// or a per-session download URL — all collapse to the same
+// `data-host-image-path`. That determinism is what stops the rendered DOM (and
+// any screenshot of it) from churning when those environment details change.
+import { setRawImageRenderer, normalizeHostImagePath, type RawImageTag } from '../src/raw-images.ts'
 import { setSanitizeExtension } from '../src/sanitize.ts'
 import { escapeHtml } from '../src/escape.ts'
 
@@ -12,9 +19,13 @@ const HOST_IMAGE_CLASS = 'host-image'
 
 function hostImageRenderer({ attrs }: RawImageTag): string | null {
   const src = attrs['src']
-  if (!src || !src.startsWith('artifacts/')) return null
+  if (!src) return null
+  const normalized = normalizeHostImagePath(src)
+  if (!normalized) return null
   const alt = escapeHtml(attrs['alt'] ?? '')
-  return `<img class="${HOST_IMAGE_CLASS}" data-host-image-path="${escapeHtml(src)}" alt="${alt}" loading="lazy">`
+  // Only the stable relative path reaches the rendered attribute; the volatile
+  // query params (e.g. a session id) stay out of anything a screenshot captures.
+  return `<img class="${HOST_IMAGE_CLASS}" data-host-image-path="${escapeHtml(normalized.path)}" alt="${alt}" loading="lazy">`
 }
 
 const hostImageSanitize = {
