@@ -257,6 +257,11 @@ function collectListGroup(
   const markerChar = ordered ? null : sliceUnorderedMarkerChar(firstSlice)
   const orderedDelimiter = ordered ? orderedListDelimiter(firstSlice) : null
   const listStart = ordered ? orderedListStart(firstSlice) : 1
+  const continuesList = (slice: string): boolean => {
+    if (isOrderedListSlice(slice) !== ordered) return false
+    if (ordered) return orderedListDelimiter(slice) === orderedDelimiter
+    return sliceUnorderedMarkerChar(slice) === markerChar
+  }
   const itemSlices: string[] = []
   let loose = false
   let i = start
@@ -264,23 +269,21 @@ function collectListGroup(
     const token = tokens[i]
     if (!token) break
     if (token.kind === 'blank') {
-      const next = tokens[i + 1]
-      if (next?.kind === 'list_item') {
+      // Skip any run of blank lines; the list continues if the next non-blank
+      // token is a same-type list item, even across multiple blanks (#306).
+      let k = i + 1
+      while (tokens[k]?.kind === 'blank') k++
+      const next = tokens[k]
+      if (next?.kind === 'list_item' && continuesList(source.slice(next.start, next.end))) {
         loose = true
-        i++
+        i = k
         continue
       }
       break
     }
     if (token.kind !== 'list_item') break
     const slice = source.slice(token.start, token.end)
-    if (isOrderedListSlice(slice) !== ordered) break
-    if (ordered) {
-      if (orderedListDelimiter(slice) !== orderedDelimiter) break
-    } else {
-      const itemMarker = sliceUnorderedMarkerChar(slice)
-      if (itemMarker !== markerChar) break
-    }
+    if (!continuesList(slice)) break
     if (splitListItemParagraphs(dropTrailingNewline(slice)).length > 1) {
       loose = true
     }

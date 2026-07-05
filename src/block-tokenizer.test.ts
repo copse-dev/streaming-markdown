@@ -4,6 +4,9 @@ import {
   completeEndsInOpenTable,
   getIncompleteFenceSource,
   isAmbiguousBlockLine,
+  isEmptyListItemLine,
+  isListItemLine,
+  listItemContentColumn,
   pendingLineBelongsInTable,
   scanLines,
   streamingHoldStart,
@@ -95,6 +98,58 @@ describe('tokenizeBlocks', () => {
       blocks.map((b) => b.kind),
       ['paragraph'],
     )
+  })
+
+  it('tokenizes bare markers as empty list items (#281, #283)', () => {
+    assert.deepEqual(
+      tokenizeBlocks('- foo\n-\n- bar\n').map((b) => b.kind),
+      ['list_item', 'list_item', 'list_item'],
+    )
+    assert.deepEqual(
+      tokenizeBlocks('1. foo\n2.\n3. bar\n').map((b) => b.kind),
+      ['list_item', 'list_item', 'list_item'],
+    )
+  })
+
+  it('does not let an empty list marker interrupt a paragraph (#285)', () => {
+    assert.deepEqual(
+      tokenizeBlocks('foo\n*\n').map((b) => b.kind),
+      ['paragraph'],
+    )
+    assert.deepEqual(
+      tokenizeBlocks('foo\n1.\n').map((b) => b.kind),
+      ['paragraph'],
+    )
+  })
+})
+
+describe('list item marker helpers', () => {
+  it('recognizes bare markers as list item lines', () => {
+    assert.equal(isListItemLine('-'), true)
+    assert.equal(isListItemLine('2.'), true)
+    assert.equal(isListItemLine('foo'), false)
+  })
+
+  it('flags empty list item markers', () => {
+    assert.equal(isEmptyListItemLine('-'), true)
+    assert.equal(isEmptyListItemLine('2.'), true)
+    assert.equal(isEmptyListItemLine('-   '), true)
+    assert.equal(isEmptyListItemLine('- foo'), false)
+    assert.equal(isEmptyListItemLine('foo'), false)
+  })
+
+  it('applies the CommonMark 1-4 vs 5+ space content column rule (#273, #274, #278)', () => {
+    // 1-4 spaces after the marker: content begins after all of them.
+    assert.equal(listItemContentColumn('- foo'), 2)
+    assert.equal(listItemContentColumn('-   foo'), 4)
+    // 5+ spaces: only one space counts, the rest is indented code.
+    assert.equal(listItemContentColumn('1.     indented code'), 3)
+    assert.equal(listItemContentColumn('1.      indented code'), 3)
+    // Empty item: content column is marker width + 1.
+    assert.equal(listItemContentColumn('-'), 2)
+    assert.equal(listItemContentColumn('2.'), 3)
+    // Leading indent of the marker line is included.
+    assert.equal(listItemContentColumn('  - foo'), 4)
   })
 })
 
