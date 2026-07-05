@@ -8,10 +8,23 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version: a bump keyword (patch | minor | major | prepatch | preminor | premajor | prerelease) or an exact version (e.g. 1.2.0)'
+      bump:
+        description: 'Semver bump to apply (ignored when "exact version" is set below)'
         required: true
         default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+      exact_version:
+        description: 'Optional: exact version to release (e.g. 1.2.0). Overrides the bump dropdown when set.'
+        required: false
+        default: ''
         type: string
       prerelease:
         description: 'Mark the GitHub Release as a pre-release'
@@ -65,10 +78,12 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          # `npm version` accepts both bump keywords and exact versions, and
+          # Prefer the free-text exact version when provided; otherwise use the
+          # bump keyword from the dropdown. `npm version` accepts both forms and
           # prints the resulting `vX.Y.Z`. --no-git-tag-version edits
           # package.json + package-lock.json without tagging (we tag ourselves).
-          TAG=$(npm version "${{ inputs.version }}" --no-git-tag-version)
+          TARGET="${{ inputs.exact_version || inputs.bump }}"
+          TAG=$(npm version "$TARGET" --no-git-tag-version)
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
