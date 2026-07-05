@@ -33,6 +33,15 @@ describe('fenceCodeClass', () => {
     assert.equal(fenceCodeClass('ts'), 'hljs lang-typescript')
     assert.equal(fenceCodeClass(''), 'hljs lang-text')
   })
+
+  it('escapes an unrecognized language so it cannot break out of the class attribute', () => {
+    // The fence parser passes the entity-decoded first word of the info string;
+    // an injection payload like `"><img` must not escape the attribute context.
+    const cls = fenceCodeClass('"><img')
+    assert.ok(!cls.includes('"'), 'no raw quote escapes the attribute')
+    assert.ok(!cls.includes('<'), 'no raw angle bracket escapes the attribute')
+    assert.equal(cls, 'hljs lang-&quot;&gt;&lt;img')
+  })
 })
 
 describe('stripAppCodeDecorations', () => {
