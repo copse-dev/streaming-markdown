@@ -131,7 +131,7 @@ When extending the renderer or its CSS, preserve these rules:
     is restored afterward.
   - `normalizeHostImagePath` (`raw-images.ts`) — determinism primitive for that renderer.
     Agent output references the same artifact through volatile `src` forms — a relative
-    `artifacts/…` path, a container absolute path (`/opt/cursor/artifacts/…`), a
+    `artifacts/…` path, a container absolute path (`/opt/runner/artifacts/…`), a
     repo/directory-named path (`/home/user/<repo>/artifacts/…`), or a per-session download
     URL (`…/v1/agents/<id>/artifacts/download?path=artifacts/…`). Left verbatim in the
     rendered attribute, those volatile segments (container dir, repo name, directory layout,
