@@ -74,21 +74,6 @@ function stripBlockquoteLine(line: string): string {
   return line.replace(BLOCKQUOTE_LINE_RE, '')
 }
 
-function splitListItemParagraphs(text: string): string[] {
-  const parts: string[] = []
-  let current: string[] = []
-  for (const line of text.split('\n')) {
-    if (line.trim() === '') {
-      if (current.length > 0) parts.push(current.join('\n'))
-      current = []
-      continue
-    }
-    current.push(line)
-  }
-  if (current.length > 0) parts.push(current.join('\n'))
-  return parts
-}
-
 /** A GFM task-list checkbox at the very start of an item's content (#614). */
 const TASK_LIST_MARKER_RE = /^\[([ xX])\](?=\s|$)/
 
@@ -118,13 +103,9 @@ interface RenderedListItem {
   task: TaskListMarker | null
 }
 
-function renderListItemContent(
-  slice: string,
-  listLoose: boolean,
-  linkRefs: LinkReferenceMap,
-): RenderedListItem {
-  const normalized = dropTrailingNewline(slice)
-  const lines = normalized.split('\n')
+/** Item content with the marker/indent columns removed (lazy lines merged). */
+function dedentListItemContent(slice: string): string {
+  const lines = dropTrailingNewline(slice).split('\n')
   const first = lines.find((l) => l.trim() !== '') ?? ''
   const col = listItemContentColumn(first)
   const dedented: string[] = []
@@ -153,7 +134,15 @@ function renderListItemContent(
     }
     dedented.push(stripped)
   })
-  let inner = dedented.join('\n')
+  return dedented.join('\n')
+}
+
+function renderListItemContent(
+  slice: string,
+  listLoose: boolean,
+  linkRefs: LinkReferenceMap,
+): RenderedListItem {
+  let inner = dedentListItemContent(slice)
   if (inner.trim() === '') return { html: '', task: null }
   // A checkbox marker only counts on the item's first content line; strip it
   // before recursive tokenization so the box never lands inside prose.
@@ -291,9 +280,25 @@ export function listSliceContinuesGroup(sig: ListGroupSignature, slice: string):
   return sliceUnorderedMarkerChar(slice) === sig.markerChar
 }
 
-/** Loose evidence carried by one item slice: blank-separated inner paragraphs. */
+/**
+ * Loose evidence carried by one item slice: the item DIRECTLY contains two
+ * block-level elements with a blank line between them (CommonMark looseness).
+ * Blank lines inside a nested construct — a fenced block or a deeper list,
+ * which tokenize as a single token — do not count (spec 307/318/319).
+ */
 export function listItemSliceIsMultiParagraph(slice: string): boolean {
-  return splitListItemParagraphs(dropTrailingNewline(slice)).length > 1
+  const tokens = tokenizeBlocks(dedentListItemContent(slice))
+  let seenBlock = false
+  let blankSince = false
+  for (const token of tokens) {
+    if (token.kind === 'blank') {
+      if (seenBlock) blankSince = true
+      continue
+    }
+    if (seenBlock && blankSince) return true
+    seenBlock = true
+  }
+  return false
 }
 
 /**
@@ -341,6 +346,18 @@ export function scanListGroup(source: string, tokens: BlockToken[], start: numbe
     const slice = source.slice(token.start, token.end)
     if (!listSliceContinuesGroup(sig, slice)) break
     if (listItemSliceIsMultiParagraph(slice)) loose = true
+    // Blank lines swallowed into an item's tail still separate it from the
+    // NEXT item (spec 311/313); a trailing blank on the group's last item
+    // does not count.
+    if (/\n[ \t]*\n$/.test(slice)) {
+      const after = tokens[i + 1]
+      if (
+        after?.kind === 'list_item' &&
+        listSliceContinuesGroup(sig, source.slice(after.start, after.end))
+      ) {
+        loose = true
+      }
+    }
     itemTokens.push(token)
     i++
   }

@@ -29,14 +29,16 @@ describe('fenced-code content fidelity (#598)', () => {
 
 describe('parseFenceSlice content fidelity (#598)', () => {
   it('keeps blank lines and indentation between the fences', () => {
+    // Every content line keeps its terminating newline — the trailing blank
+    // line included (spec 318).
     const { code } = parseFenceSlice('```\n\n    a\n\n```')
-    assert.equal(code, '\n    a\n')
+    assert.equal(code, '\n    a\n\n')
   })
 
   it('strips only the opening fence indentation from content lines', () => {
     // Fence opener indented 2 spaces → up to 2 leading spaces removed per line.
     const { code } = parseFenceSlice('  ```\n      six\n  two\n  ```')
-    assert.equal(code, '    six\ntwo')
+    assert.equal(code, '    six\ntwo\n')
   })
 })
 

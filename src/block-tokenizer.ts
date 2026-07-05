@@ -302,6 +302,11 @@ function breaksUnorderedListItem(lines: ScannedLine[], itemStart: number, j: num
   const col = listItemContentColumn(itemStartLine)
   const next = lines[j]
   if (!next) return true
+  // An item that begins empty can begin with at most one blank line: a blank
+  // directly after the bare marker ends the item (spec 280).
+  if (next.text.trim() === '' && j === itemStart + 1 && isEmptyListItemLine(itemStartLine)) {
+    return true
+  }
   if (next.text.trim() === '') {
     let k = j + 1
     while (k < lines.length && lines[k]?.text.trim() === '') k++
@@ -439,6 +444,14 @@ export function tokenizeBlocks(source: string): BlockToken[] {
           if (next.text.trim() === '') {
             j++
             continue
+          }
+          // After a blank line, a 4-column-indented line under the content
+          // column cannot continue the item — `    3. c` under a content
+          // column of 5 is indented code after the list (spec 313). Unindented
+          // prose after a blank still folds into the item: a deliberate
+          // divergence for LLM-shaped numbered lists (renderer-fixtures).
+          if ((lines[j - 1]?.text.trim() ?? '') === '' && leadingIndentWidth(next.text) >= 4) {
+            break
           }
           if (
             ATX_HEADING_RE.test(next.text) ||

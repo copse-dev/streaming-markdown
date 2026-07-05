@@ -124,12 +124,12 @@ export function parseFenceSlice(slice: string): { lang: string; code: string } {
     closeIndex--
   }
   // Content is verbatim between the fences (blank lines and indentation kept);
-  // only the opening fence's own indentation is stripped, per spec.
-  const code = lines
-    .slice(1, closeIndex)
-    .map((line) => stripLeadingSpaces(line, indent))
-    .join('\n')
-  return { lang, code }
+  // only the opening fence's own indentation is stripped, per spec. Every
+  // content line is newline-terminated, including the last — a bare `join`
+  // would silently drop a trailing blank line (spec 318).
+  const contentLines = lines.slice(1, closeIndex)
+  const code = contentLines.map((line) => stripLeadingSpaces(line, indent)).join('\n')
+  return { lang, code: contentLines.length > 0 ? `${code}\n` : code }
 }
 
 /** Parse an open (still streaming) fenced block — body includes all lines after the opener. */
