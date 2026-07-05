@@ -30,6 +30,7 @@ import {
   clearFormingFenceDom,
   syncFormingFenceDom,
 } from './streaming-fence-dom.ts'
+import { morphInnerHtml } from './streaming-dom-morph.ts'
 
 export { pendingHoldIndex } from './inline-emphasis.ts'
 export { splitAtLastNewline, splitForStreaming } from './streaming-split.ts'
@@ -436,7 +437,10 @@ export class StreamingMarkdownRenderer {
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
 
     if (complete !== this.lastComplete) {
-      completedEl.innerHTML = complete ? sanitizeRenderedMarkdown(renderMarkdown(complete)) : ''
+      // Reconcile in place instead of `innerHTML = …`: already-committed blocks
+      // keep their node identity so a pending→committed promotion patches only
+      // the promoting block, never tearing down the whole committed subtree.
+      morphInnerHtml(completedEl, complete ? sanitizeRenderedMarkdown(renderMarkdown(complete)) : '')
       this.lastComplete = complete
     }
 

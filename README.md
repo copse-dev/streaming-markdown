@@ -16,6 +16,11 @@ import { renderMarkdown, sanitizeRenderedMarkdown } from '@copse/streaming-markd
 el.innerHTML = sanitizeRenderedMarkdown(renderMarkdown('# Hi\n\n**bold** and ~~strike~~'))
 ```
 
+Indented code blocks are supported by default (`    code` → `<pre><code>`); pass
+`renderMarkdown(md, { indentedCode: false })` to opt out and render those lines as
+prose paragraphs instead. See the design note in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ### Sanitizer backend
 
 `sanitizeRenderedMarkdown` runs through a **pluggable sanitizer backend**. By
@@ -42,6 +47,14 @@ unsanitized HTML.
 Streaming, syntax highlighting, Mermaid source preparation, and an injectable
 `LinkDecorator` for host-specific `<a>` routing are also exported — see the
 public surface in [`src/index.ts`](src/index.ts).
+
+Link destinations are validated against a scheme allowlist
+(`DEFAULT_SAFE_HREF_SCHEMES`: `http`, `https`, `mailto`, `tel`, `sms`, `ftp`,
+`ftps`, plus scheme-less relative/fragment/path forms); any other scheme —
+including `javascript:` and `data:` — is dropped. Override it with
+`setSafeHrefSchemes([...])` (case-insensitive; pass `null` to restore the
+default). Narrowing the list is always safe; only widen it with schemes that are
+inert as an `href`, never `javascript`/`data`/`vbscript`/`file`.
 
 ## Development
 

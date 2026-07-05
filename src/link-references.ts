@@ -14,6 +14,29 @@ export function normalizeReferenceLabel(label: string): string {
   return label.replace(/\s+/g, ' ').trim().toLocaleLowerCase('und')
 }
 
+/** True if `[` or `]` appears unescaped in the label content (a backslash escapes the next char). */
+function hasUnescapedBrackets(raw: string): boolean {
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]
+    if (ch === '\\') {
+      i++
+      continue
+    }
+    if (ch === '[' || ch === ']') return true
+  }
+  return false
+}
+
+/**
+ * A valid CommonMark link label has at least one non-whitespace character and
+ * no unescaped brackets, so neither a definition nor a reference is formed by
+ * empty labels (`[]`), whitespace-only labels, or bracket-nesting labels like
+ * `[foo]` inside `[[foo]]` / `[ref[bar]]` (spec 547, 548, 551, 552, 590).
+ */
+export function isValidReferenceLabel(raw: string): boolean {
+  return raw.trim() !== '' && !hasUnescapedBrackets(raw)
+}
+
 /** Escape-aware label canonicalization (raw `\!` and PUA forms both → `!`). */
 function decodeEscapes(text: string): string {
   return canonicalizeEscapedPunctuation(text)
@@ -24,15 +47,20 @@ function decodeDestinationEscapes(text: string): string {
   return text.replace(/\\([!"#$%&'()*+,-./:;<=>?@[\\\]^_`{|}~])/g, '$1')
 }
 
-function decodeHtmlCharRefs(text: string): string {
+export function decodeHtmlCharRefs(text: string): string {
   // Full HTML5 named + numeric character references, semicolon required
   // (CommonMark). Escaped-at-source markup is re-encoded by the caller.
   return decodeHTMLStrict(text)
 }
 
-/** Percent-encode href values for HTML output (preserves existing %XX sequences). */
-export function encodeHrefForOutput(href: string): string {
-  const decoded = decodeHtmlCharRefs(href)
+/**
+ * Percent-encode an already-decoded href for HTML output (preserves existing
+ * %XX sequences). Split out from {@link encodeHrefForOutput} so callers that
+ * validate an href's scheme can decode once, check the decoded form, then
+ * encode — without a second {@link decodeHtmlCharRefs} pass re-hiding a
+ * dangerous scheme behind double-encoded entities (`&amp;#x6a;avascript:`).
+ */
+export function percentEncodeHref(decoded: string): string {
   let out = ''
   for (let i = 0; i < decoded.length; i++) {
     const ch = decoded.charAt(i)
@@ -43,13 +71,18 @@ export function encodeHrefForOutput(href: string): string {
     }
     const cp = ch.codePointAt(0)
     if (cp === undefined) continue
-    if (cp < 0x80 && /[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=]/.test(ch)) {
+    if (cp < 0x80 && /[A-Za-z0-9\-._~:/?#@!$&'()*+,;=]/.test(ch)) {
       out += ch
     } else {
       out += encodeURIComponent(ch)
     }
   }
   return out
+}
+
+/** Decode HTML character references then percent-encode an href for output. */
+export function encodeHrefForOutput(href: string): string {
+  return percentEncodeHref(decodeHtmlCharRefs(href))
 }
 
 function parseLinkTitleAt(source: string, start: number): { title: string; end: number } | null {
@@ -223,6 +256,10 @@ export function parseLinkReferenceDefinitions(source: string): LinkReferenceMap 
       i++
       continue
     }
+    if (!isValidReferenceLabel(labelPart.label)) {
+      i++
+      continue
+    }
     const key = normalizeReferenceLabel(decodeEscapes(labelPart.label))
     if (!refs.has(key)) {
       const entry: LinkReference = { href: dest.href }
@@ -239,6 +276,7 @@ export function lookupLinkReference(
   refs: LinkReferenceMap,
   label: string,
 ): LinkReference | undefined {
+  if (!isValidReferenceLabel(label)) return undefined
   return refs.get(normalizeReferenceLabel(decodeEscapes(label)))
 }
 

@@ -1,9 +1,29 @@
 import { escapeHtml } from './escape.ts'
 import { INLINE_HTML_SHIELD_RE } from './inline-emphasis.ts'
-import { safeLinkHref } from './inline-links.ts'
+import { encodeHrefForOutput } from './link-references.ts'
 
-/** CommonMark autolink schemes: 2–32 chars, ASCII letter + alnum/.+/- (#609). */
-const AUTOLINK_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]{1,31}$/
+/**
+ * CommonMark URI autolink: `<scheme:...>`. Scheme is an ASCII letter followed by
+ * 1–31 letters/digits/`+`/`.`/`-`; the rest is any run of characters other than
+ * ASCII whitespace, control characters, `<`, and `>`. Backslash escapes are NOT
+ * recognized inside autolinks — every character is literal (spec 603).
+ */
+const URI_AUTOLINK_RE = /^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*)>/
+
+/**
+ * CommonMark email autolink grammar (spec's `email address` production). The
+ * local part is a restricted punctuation set (notably no backslash, so
+ * `<foo\+@bar>` is not an email autolink, spec 606) and the domain is
+ * dot-separated labels of alphanumerics/hyphens.
+ */
+const EMAIL_AUTOLINK_RE =
+  /^<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)>/
+
+/** Percent-encode an autolink destination, rejecting dangerous schemes. */
+function autolinkHref(raw: string): string | null {
+  if (/^(?:javascript|data|vbscript):/i.test(raw)) return null
+  return encodeHrefForOutput(raw)
+}
 
 function renderedAutolink(label: string, href: string): string {
   // Label stays raw so the outer `escapeHtmlTextNodes` pass escapes it exactly
@@ -11,35 +31,29 @@ function renderedAutolink(label: string, href: string): string {
   return `<a href="${escapeHtml(href)}">${label}</a>`
 }
 
-/** CommonMark autolink: `<scheme:...>` or `<email@domain>`. No interior whitespace. */
+/**
+ * CommonMark autolink: `<scheme:...>` or `<email@domain>`. URI autolinks are
+ * tried before email autolinks so `<MAILTO:foo@bar.baz>` is a scheme autolink
+ * (href kept verbatim) rather than being mangled into a `mailto:` link (spec 597).
+ */
 function tryAngleAutolink(text: string, start: number): { html: string; end: number } | null {
   if (text[start] !== '<') return null
-  let i = start + 1
-  while (i < text.length) {
-    const ch = text[i]
-    if (ch === undefined || ch === '\n' || ch === ' ' || ch === '\t') return null
-    if (ch === '\\' && i + 1 < text.length) {
-      i += 2
-      continue
-    }
-    if (ch === '>') {
-      const inner = text.slice(start + 1, i)
-      if (inner.includes(' ')) return null
-      const email = inner.match(/^([^@\s]+@[^@\s]+)$/)
-      if (email?.[1]) {
-        const href = safeLinkHref(`mailto:${email[1]}`)
-        if (!href) return null
-        return { html: renderedAutolink(inner, href), end: i + 1 }
-      }
-      const colon = inner.indexOf(':')
-      if (colon === -1) return null
-      if (!AUTOLINK_SCHEME_RE.test(inner.slice(0, colon))) return null
-      const href = safeLinkHref(inner)
-      if (!href) return null
-      return { html: renderedAutolink(inner, href), end: i + 1 }
-    }
-    i++
+  const slice = text.slice(start)
+
+  const uri = URI_AUTOLINK_RE.exec(slice)
+  if (uri?.[1] !== undefined) {
+    const href = autolinkHref(uri[1])
+    if (href === null) return null
+    return { html: renderedAutolink(uri[1], href), end: start + uri[0].length }
   }
+
+  const email = EMAIL_AUTOLINK_RE.exec(slice)
+  if (email?.[1] !== undefined) {
+    const href = autolinkHref(`mailto:${email[1]}`)
+    if (href === null) return null
+    return { html: renderedAutolink(email[1], href), end: start + email[0].length }
+  }
+
   return null
 }
 

@@ -73,6 +73,28 @@ When extending the renderer or its CSS, preserve these rules:
   (`BENIGN_RAW_INLINE_TAG_RE` in `escape.ts`); the sanitizer sink allowlist mirrors the set.
   Anything with attributes, and all block/structural raw HTML, stays escaped — see the
   raw-HTML policy discussion in #600 before widening this.
+- **Indented code blocks (#9).** 4-column-indented lines **are** rendered as CommonMark
+  indented code (`<pre><code>`), and this construct **conforms** — `summaryBySection` in the
+  conformance baseline records **Indented code blocks: 12/12**. Recognition happens in the block
+  tokenizer (`indented_code` in `block-tokenizer.ts`); emission is `renderIndentedCode`
+  (`render-blocks.ts`), which strips the opening 4-column indent (`stripFourColumnIndent`,
+  `block-patterns.ts`) and keeps content verbatim. This is deliberately **on by default**: LLM
+  output favours fenced code, but as a general-purpose CommonMark library, silently dropping
+  indented code would surprise consumers — so it stays supported. `renderMarkdown` exposes an
+  opt-out `{ indentedCode: false }` (`RenderMarkdownOptions`, `renderer.ts`) for hosts that want
+  the divergence: with it, a top-level `indented_code` block renders as a prose paragraph instead
+  of `<pre><code>`. The option is threaded through `RenderBlocksOptions.indentedCode`
+  (default `true`) and applies at the **top level** only — recursive list/blockquote content keeps
+  CommonMark indented-code semantics, and the default path (and the conformance baseline) is
+  unchanged.
+
+  **Tab expansion is partial.** Leading tabs expand to a 4-column stop for indented code, tab as
+  the ATX-heading separator, and tab-indented continuation lines (see the `renderMarkdown tab
+  handling` suite in `renderer.test.ts`), but not every spec case — the baseline records **Tabs:
+  6/11**. The remaining gaps are the harder tab-column arithmetic cases in the spec's `Tabs`
+  section; they are tracked by the conformance baseline rather than a separate list, so a fix shows
+  up as the `Tabs` count rising on re-baseline (`UPDATE_COMMONMARK_BASELINE=1 npm test`).
+
 - **Indented HTML blocks.** CommonMark makes any 4-space-indented line an indented code block,
   so a model that indents a `<div>`/`<table>` snippet would otherwise get a literal `<pre><code>`
   dump. At the **top level** (`renderMarkdown` sets `htmlFromIndent`), an `indented_code` block
