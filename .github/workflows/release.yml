@@ -42,8 +42,10 @@ on:
 
 # Least privilege: write to the repo (commit + tag + release). Publishing goes
 # to public npm and authenticates with the NPM_TOKEN secret, not GITHUB_TOKEN.
+# id-token: write lets npm mint a provenance attestation via GitHub OIDC.
 permissions:
   contents: write
+  id-token: write
 
 concurrency:
   group: release
@@ -132,7 +134,10 @@ jobs:
           # publish can proceed. publishConfig in package.json pins the public
           # npm registry and `--access public` for the scoped @copse package.
           npm pkg delete private
-          npm publish
+          # --provenance attaches a signed attestation linking this release to
+          # the source commit + build (via GitHub OIDC), shown as a verified
+          # badge on npm.
+          npm publish --provenance
 
       - name: Create GitHub Release
         if: ${{ !inputs.dry_run }}
