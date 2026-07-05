@@ -106,14 +106,8 @@
       color: var(--success);
     }
 
-    /* The command text is the only selectable part — a click selects it as a
-       unit; the leading glyph stays out of the selection so copies are clean. */
+    /* A click selects the command as a unit for easy copying. */
     .npm-badge .npm-cmd { user-select: all; }
-
-    .npm-badge .npm-icon {
-      color: var(--danger);
-      user-select: none;
-    }
 
     /* ── Hero ────────────────────────────────────────────── */
     .hero {
@@ -560,8 +554,11 @@
       padding: 0.9rem;
       font-size: 0.8rem;
       line-height: 1.55;
-      overflow-x: auto;
       margin: 0;
+      /* Soft-wrap long lines so the narrow two-column cards never show a
+         horizontal scrollbar (and nothing gets clipped). */
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
 
     .snippet-card code {
@@ -627,7 +624,6 @@
   <div class="header-links">
     <span class="npm-badge" id="npm-badge" role="button" tabindex="0"
           title="Click to copy install command">
-      <span class="npm-icon" aria-hidden="true">▲</span>
       <span class="npm-cmd">npm install @copse/streaming-markdown</span>
     </span>
     <a href="https://github.com/copse-dev/streaming-markdown" target="_blank">GitHub</a>
