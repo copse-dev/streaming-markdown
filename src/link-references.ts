@@ -14,6 +14,29 @@ export function normalizeReferenceLabel(label: string): string {
   return label.replace(/\s+/g, ' ').trim().toLocaleLowerCase('und')
 }
 
+/** True if `[` or `]` appears unescaped in the label content (a backslash escapes the next char). */
+function hasUnescapedBrackets(raw: string): boolean {
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]
+    if (ch === '\\') {
+      i++
+      continue
+    }
+    if (ch === '[' || ch === ']') return true
+  }
+  return false
+}
+
+/**
+ * A valid CommonMark link label has at least one non-whitespace character and
+ * no unescaped brackets, so neither a definition nor a reference is formed by
+ * empty labels (`[]`), whitespace-only labels, or bracket-nesting labels like
+ * `[foo]` inside `[[foo]]` / `[ref[bar]]` (spec 547, 548, 551, 552, 590).
+ */
+export function isValidReferenceLabel(raw: string): boolean {
+  return raw.trim() !== '' && !hasUnescapedBrackets(raw)
+}
+
 /** Escape-aware label canonicalization (raw `\!` and PUA forms both → `!`). */
 function decodeEscapes(text: string): string {
   return canonicalizeEscapedPunctuation(text)
@@ -43,7 +66,7 @@ export function encodeHrefForOutput(href: string): string {
     }
     const cp = ch.codePointAt(0)
     if (cp === undefined) continue
-    if (cp < 0x80 && /[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=]/.test(ch)) {
+    if (cp < 0x80 && /[A-Za-z0-9\-._~:/?#@!$&'()*+,;=]/.test(ch)) {
       out += ch
     } else {
       out += encodeURIComponent(ch)
@@ -223,6 +246,10 @@ export function parseLinkReferenceDefinitions(source: string): LinkReferenceMap 
       i++
       continue
     }
+    if (!isValidReferenceLabel(labelPart.label)) {
+      i++
+      continue
+    }
     const key = normalizeReferenceLabel(decodeEscapes(labelPart.label))
     if (!refs.has(key)) {
       const entry: LinkReference = { href: dest.href }
@@ -239,6 +266,7 @@ export function lookupLinkReference(
   refs: LinkReferenceMap,
   label: string,
 ): LinkReference | undefined {
+  if (!isValidReferenceLabel(label)) return undefined
   return refs.get(normalizeReferenceLabel(decodeEscapes(label)))
 }
 

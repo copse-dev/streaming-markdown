@@ -20,4 +20,22 @@ describe('renderAngleAutolinks', () => {
       '<a href="https://foo.bar/test?q=hello&amp;id=22&amp;boolean">https://foo.bar/test?q=hello&amp;id=22&amp;boolean</a>',
     )
   })
+
+  it('prefers a URI autolink over an email interpretation (spec 597)', () => {
+    assert.equal(
+      renderInlineSpans('<MAILTO:FOO@BAR.BAZ>'),
+      '<a href="MAILTO:FOO@BAR.BAZ">MAILTO:FOO@BAR.BAZ</a>',
+    )
+  })
+
+  it('does not treat backslashes inside autolinks as escapes (spec 603)', () => {
+    assert.equal(
+      renderInlineSpans('<https://example.com/\\[\\>'),
+      '<a href="https://example.com/%5C%5B%5C">https://example.com/\\[\\</a>',
+    )
+  })
+
+  it('rejects email autolinks with a backslash in the local part (spec 606)', () => {
+    assert.equal(renderInlineSpans('<foo\\+@bar.example.com>'), '&lt;foo\\+@bar.example.com&gt;')
+  })
 })
