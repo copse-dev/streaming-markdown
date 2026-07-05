@@ -41,6 +41,20 @@ export {
   stripAppCodeDecorations,
 } from './highlight.ts'
 export { mermaidSourceCandidates, prepareMermaidSource } from './mermaid-source.ts'
+// Diagram rendering is a pluggable backend, like highlighting. The core emits
+// inert `mermaid-diagram--pending` scaffolding and `hydratePendingDiagrams` swaps
+// in SVG once a renderer is registered; the mermaid backend stays behind the
+// `@copse/streaming-markdown/diagrams/mermaid` entry so its library is only
+// fetched when a host opts in — see docs/LAZY-LOADING.md.
+export {
+  type DiagramRenderer,
+  type DiagramRenderResult,
+  getDiagramRenderer,
+  type HydrateDiagramsOptions,
+  hydratePendingDiagrams,
+  PENDING_DIAGRAM_SELECTOR,
+  setDiagramRenderer,
+} from './mermaid.ts'
 export {
   appLinkDecorator,
   DEFAULT_SAFE_HREF_SCHEMES,

@@ -72,18 +72,44 @@ rerender()
 Until either runs, code fences render as safe, escaped plain text with the correct
 `hljs lang-*` class.
 
-## Mermaid — already lazy, same hook shape
+## Mermaid — same shape, applied to a host-injected library
 
 Mermaid is **not** bundled by this package: `mermaid-source.ts` is pure string
 preparation, and the generator only emits inert scaffolding
 (`<div class="mermaid-diagram mermaid-diagram--pending"><pre class="mermaid">…`).
 The heavy `mermaid` library is host-injected and rendered *after* sanitization, so
-it is lazy by construction — the host decides when to
-`const mermaid = await import('mermaid')` and hydrate the pending diagrams.
+it is already lazy by construction. What the package was missing is an **official
+hook** so every host stops hand-rolling the "find pending diagrams, load mermaid,
+inject SVG, retry on the aggressive source candidate" dance.
 
-If we ever want the generator to *trigger* that load (as it now can for
-highlighting), the same registry shape drops in: a `setDiagramRenderer(backend)`
-hook the DOM emitter calls when it commits a `mermaid` fence, with a
-`loadMermaid()` convenience behind a `@copse/streaming-markdown/diagrams/mermaid`
-subpath. Not built here — the highlight.js path is the working proof of the
-pattern.
+The same registry shape as highlighting now ships for it:
+
+- **`mermaid.ts` (core)** carries no mermaid code. It holds the registry
+  (`setDiagramRenderer` / `getDiagramRenderer`), the `DiagramRenderer` interface,
+  and `hydratePendingDiagrams(root, opts?)` — which finds every
+  `mermaid-diagram--pending` container under `root`, tries the gentle then
+  aggressive `mermaidSourceCandidates()` until one renders, and flips the container
+  to `--rendered` (SVG injected) or `--error`.
+- **`mermaid-mermaidjs.ts` (backend)** is the only module that references
+  `mermaid`. It lives behind `@copse/streaming-markdown/diagrams/mermaid` and
+  exports `mermaidDiagramRenderer`, `installMermaid()`, and `loadMermaid()`.
+  `mermaid` is an **optional peer dependency** — the host installs it, the package
+  never bundles it. The dynamic import uses a variable specifier so the package
+  builds and type-checks even when the peer isn't installed.
+
+```ts
+import { hydratePendingDiagrams } from '@copse/streaming-markdown'
+
+const { loadMermaid } = await import('@copse/streaming-markdown/diagrams/mermaid')
+await loadMermaid()                 // registers the backend; library loads lazily
+await hydratePendingDiagrams(messageEl) // pending → rendered SVG
+```
+
+**Trust boundary:** mermaid SVG is produced by the trusted library *after* the sink
+sanitizer runs and is injected without re-sanitization (matching the existing
+design invariant). A safety-conscious host can pass `hydratePendingDiagrams(root,
+{ transformSvg })` to run the SVG through its own sanitizer first.
+
+The mechanism is covered by `src/mermaid-lazy.test.ts` with a stub renderer (the
+real mermaid library needs a browser DOM it can't get in jsdom); the backend module
+is the thin adapter over `mermaid.render`.

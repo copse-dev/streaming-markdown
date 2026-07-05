@@ -40,6 +40,17 @@ When extending the renderer or its CSS, preserve these rules:
   stable across the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the backend
   registers. `highlight.js` must not be imported outside `highlight-hljs.ts`, or it
   re-enters the default bundle. See [`LAZY-LOADING.md`](LAZY-LOADING.md).
+- **Pluggable diagram renderer.** Mermaid is never bundled — the generator emits inert
+  `mermaid-diagram--pending` scaffolding and `mermaid-source.ts` is pure string prep.
+  `mermaid.ts` adds the registry (`setDiagramRenderer`) plus `hydratePendingDiagrams`,
+  which walks pending containers, tries the gentle then aggressive
+  `mermaidSourceCandidates`, and injects the backend's SVG (or marks `--error`). The
+  mermaid backend (`mermaid-mermaidjs.ts`, `mermaidDiagramRenderer` / `loadMermaid`) is
+  imported only via the `@copse/streaming-markdown/diagrams/mermaid` entry, with `mermaid`
+  an optional peer dependency. Mermaid SVG is injected after the sink sanitizer and not
+  re-sanitized (see the sanitize-at-the-sink note); `hydratePendingDiagrams`'s `transformSvg`
+  option is the seam for a host that wants to. `mermaid` must not be imported outside
+  `mermaid-mermaidjs.ts`. See [`LAZY-LOADING.md`](LAZY-LOADING.md).
 - **Package boundary.** The core stays app-independent so it can version and ship on
   its own, so host-specific behaviour is **injected, not hard-coded**:
   - `setLinkDecorator` (`inline-links.ts`) — a `LinkDecorator` returns the attributes
