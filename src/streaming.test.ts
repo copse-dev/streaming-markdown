@@ -150,8 +150,19 @@ describe('pendingHoldIndex (defer unresolved inline markup)', () => {
 })
 
 describe('splitForStreaming (block-granularity emphasis)', () => {
+  // Drop the deterministic `blocks` token array so these assertions stay
+  // focused on the commit boundary (#21).
+  const splitCore = (
+    content: string,
+  ): { complete: string; pending: string; openListItemFirstLine?: string } => {
+    const s = splitForStreaming(content)
+    return s.openListItemFirstLine === undefined
+      ? { complete: s.complete, pending: s.pending }
+      : { complete: s.complete, pending: s.pending, openListItemFirstLine: s.openListItemFirstLine }
+  }
+
   it('holds an open emphasis span across a soft line break', () => {
-    assert.deepEqual(splitForStreaming('intro **bold\ntext'), {
+    assert.deepEqual(splitCore('intro **bold\ntext'), {
       complete: 'intro ',
       pending: '**bold\ntext',
     })
@@ -165,7 +176,7 @@ describe('splitForStreaming (block-granularity emphasis)', () => {
   })
 
   it('falls back to line split when emphasis is resolved', () => {
-    assert.deepEqual(splitForStreaming('done\nplain tail'), {
+    assert.deepEqual(splitCore('done\nplain tail'), {
       complete: 'done\n',
       pending: 'plain tail',
     })

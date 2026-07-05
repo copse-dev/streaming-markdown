@@ -162,3 +162,60 @@ for (const { name, text } of fixtures) {
     ].join('  '),
   )
 }
+
+// Scaling section (#21): stream a plain-prose document at a FIXED chunk size so
+// the number of updates grows with the input. Doubling the paragraph count shows
+// how the DOM path scales. With the frozen/tail split (Layer 2) plus tail-scoped
+// pending queries, per-commit work is O(tail) and per-frame DOM work is O(1), so
+// this grows ~1.7×/doubling across the range (down from ~4× for the unoptimized
+// full-re-render path). The residual super-linearity is the per-update tokenize
+// + link-ref string scans (limitation K), ~1% of wall-clock here.
+function prose(paras: number): string {
+  return (
+    Array.from(
+      { length: paras },
+      (_, i) =>
+        `Paragraph ${String(i)} has some **bold**, \`code\`, *emphasis* and a [link](https://example.com/${String(i)}) plus a few trailing words.`,
+    ).join('\n\n') + '\n'
+  )
+}
+
+console.log('\nscaling — DOM path, fixed 32-byte chunk (updates grow with size)\n')
+const scaleCols = [pad('paras', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
+console.log(scaleCols.join('  '))
+console.log('-'.repeat(scaleCols.join('  ').length))
+let prevScaleMs = 0
+const growthFactors: number[] = []
+for (const paras of [25, 50, 100]) {
+  const text = prose(paras)
+  const updates = chunkBoundaries(text.length, 32).length
+  const domMs = measure(() => benchDomPath(text, 32), args.iters, args.warmup)
+  const factor = prevScaleMs > 0 ? domMs / prevScaleMs : 0
+  if (factor > 0) growthFactors.push(factor)
+  console.log(
+    [
+      pad(String(paras), 8),
+      padLeft(String(text.length), 8),
+      padLeft(String(updates), 9),
+      padLeft(domMs.toFixed(2), 10),
+      padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
+    ].join('  '),
+  )
+  prevScaleMs = domMs
+}
+
+// Regression guard (#21 acceptance criterion). Doubling the input roughly
+// doubles the DOM streaming time once the committed prefix is frozen; the
+// unoptimized full-re-render path grew ~4×/doubling. Assert the mean stays well
+// under that. Generous (< 3×) so ordinary jsdom timing noise never trips it; a
+// return to O(prefix)-per-commit committed rendering would push it back toward
+// 4× and fail here. Bench is a manual script, so this gates local regressions,
+// not CI.
+const meanGrowth = growthFactors.reduce((a, x) => a + x, 0) / growthFactors.length
+console.log(`\nmean growth per doubling: ${meanGrowth.toFixed(2)}× (regression guard: < 3.0×)`)
+if (meanGrowth >= 3.0) {
+  throw new Error(
+    `DOM streaming scaled ${meanGrowth.toFixed(2)}×/doubling — expected sub-quadratic (< 3×). ` +
+      `A committed-prefix re-render regression (#21) is the likely cause.`,
+  )
+}

@@ -1,4 +1,4 @@
-import { tokenizeBlocks } from './block-tokenizer.ts'
+import { tokenizeBlocks, type BlockToken } from './block-tokenizer.ts'
 import { parseLinkReferenceDefinitions } from './link-references.ts'
 import { renderBlocks } from './render-blocks.ts'
 
@@ -12,6 +12,12 @@ export interface RenderMarkdownOptions {
    * intentional divergence; see docs/ARCHITECTURE.md "Indented code blocks").
    */
   indentedCode?: boolean
+  /**
+   * Pre-computed `tokenizeBlocks(raw)` result. Supplying it lets the streaming
+   * hot path reuse a single tokenization instead of re-scanning `raw` (#21).
+   * Must correspond exactly to `raw`; ignored (re-tokenized) if omitted.
+   */
+  tokens?: BlockToken[]
 }
 
 /**
@@ -24,7 +30,7 @@ export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {})
   // htmlFromIndent is set only here (the top-level entry) so indented raw HTML
   // follows the raw-HTML policy instead of becoming a <pre> code block (#616);
   // recursive list/blockquote rendering keeps CommonMark indented-code semantics.
-  return renderBlocks(raw, tokenizeBlocks(raw), {
+  return renderBlocks(raw, options.tokens ?? tokenizeBlocks(raw), {
     linkRefs,
     htmlFromIndent: true,
     indentedCode: options.indentedCode ?? true,

@@ -49,17 +49,18 @@ function canReuse(node: Node, next: Node): boolean {
 }
 
 /**
- * Reconcile `parent`'s children in place so they match `template`'s children,
- * reusing existing nodes wherever `canReuse` holds. Nodes taken from `template`
- * are moved into `parent`; `template` is left partially emptied and discarded by
- * the caller.
+ * Reconcile `parent`'s children in place so those from `offset` onward match
+ * `template`'s children, reusing existing nodes wherever `canReuse` holds. Nodes
+ * before `offset` are left untouched (used to protect a frozen prefix, #21).
+ * Nodes taken from `template` are moved into `parent`; `template` is left
+ * partially emptied and discarded by the caller.
  */
-function morphChildren(parent: Node, template: Node): void {
+function morphChildren(parent: Node, template: Node, offset = 0): void {
   const nextChildren = Array.from(template.childNodes)
   for (let i = 0; i < nextChildren.length; i++) {
     const next = nextChildren[i]
     if (!next) continue
-    const current = parent.childNodes[i]
+    const current = parent.childNodes[offset + i]
     if (!current) {
       parent.appendChild(next)
       continue
@@ -76,7 +77,7 @@ function morphChildren(parent: Node, template: Node): void {
       parent.replaceChild(next, current)
     }
   }
-  while (parent.childNodes.length > nextChildren.length) {
+  while (parent.childNodes.length > offset + nextChildren.length) {
     parent.lastChild?.remove()
   }
 }
@@ -96,4 +97,20 @@ export function morphInnerHtml(container: HTMLElement, html: string): void {
   const template = container.cloneNode(false) as HTMLElement
   template.innerHTML = html
   morphChildren(container, template)
+}
+
+/**
+ * Like {@link morphInnerHtml} but reconciles only the children from `startIndex`
+ * onward, leaving the first `startIndex` children (a frozen prefix) untouched.
+ * The resulting serialization of the `[startIndex, …)` region is identical to
+ * having assigned that region via `innerHTML` (#21).
+ */
+export function morphInnerHtmlFrom(container: HTMLElement, startIndex: number, html: string): void {
+  if (html === '') {
+    while (container.childNodes.length > startIndex) container.lastChild?.remove()
+    return
+  }
+  const template = container.cloneNode(false) as HTMLElement
+  template.innerHTML = html
+  morphChildren(container, template, startIndex)
 }
