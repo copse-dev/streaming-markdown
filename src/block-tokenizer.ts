@@ -551,20 +551,31 @@ export function streamingHoldStart(blocks: BlockToken[]): number {
   return commitEnd
 }
 
-/** True when `complete` ends inside a GFM table that may still receive body rows. */
-export function completeEndsInOpenTable(complete: string): boolean {
-  const blocks = tokenizeBlocks(complete)
+/**
+ * True when `complete` ends inside a GFM table that may still receive body rows.
+ * Pass `tokens` (the result of `tokenizeBlocks(complete)`) to reuse an existing
+ * tokenization instead of re-scanning the string (streaming hot path, #21).
+ */
+export function completeEndsInOpenTable(complete: string, tokens?: BlockToken[]): boolean {
+  const blocks = tokens ?? tokenizeBlocks(complete)
   const last = blocks.at(-1)
   return last?.kind === 'table' && last.status === 'complete'
 }
 
-export function pendingLineBelongsInTable(complete: string, pending: string): boolean {
-  return pending.includes('|') && completeEndsInOpenTable(complete)
+export function pendingLineBelongsInTable(
+  complete: string,
+  pending: string,
+  completeTokens?: BlockToken[],
+): boolean {
+  return pending.includes('|') && completeEndsInOpenTable(complete, completeTokens)
 }
 
-/** Source slice for a table block that is not yet `complete` (forming or open body). */
-export function getIncompleteTableSource(content: string): string | null {
-  const blocks = tokenizeBlocks(content)
+/**
+ * Source slice for a table block that is not yet `complete` (forming or open body).
+ * Pass `tokens` (`tokenizeBlocks(content)`) to reuse an existing tokenization (#21).
+ */
+export function getIncompleteTableSource(content: string, tokens?: BlockToken[]): string | null {
+  const blocks = tokens ?? tokenizeBlocks(content)
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i]
     if (block?.kind === 'table' && block.status !== 'complete') {
@@ -574,9 +585,12 @@ export function getIncompleteTableSource(content: string): string | null {
   return null
 }
 
-/** Source slice for a fenced code block that is not yet `complete`. */
-export function getIncompleteFenceSource(content: string): string | null {
-  const blocks = tokenizeBlocks(content)
+/**
+ * Source slice for a fenced code block that is not yet `complete`.
+ * Pass `tokens` (`tokenizeBlocks(content)`) to reuse an existing tokenization (#21).
+ */
+export function getIncompleteFenceSource(content: string, tokens?: BlockToken[]): string | null {
+  const blocks = tokens ?? tokenizeBlocks(content)
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i]
     if (block?.kind === 'fence' && block.status !== 'complete') {

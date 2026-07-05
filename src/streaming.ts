@@ -4,6 +4,8 @@ import {
   getIncompleteTableSource,
   isAmbiguousBlockLine,
   pendingLineBelongsInTable,
+  tokenizeBlocks,
+  type BlockToken,
 } from './block-tokenizer.ts'
 import {
   isListContinuationPending,
@@ -15,6 +17,7 @@ import {
   renderPendingLine,
 } from './render-pending-line.ts'
 import { splitForStreaming, type StreamingSplit } from './streaming-split.ts'
+export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import {
@@ -356,9 +359,10 @@ function renderPendingTail(
   split: StreamingSplit,
   complete: string,
   formingActive: boolean,
+  completeTokens?: BlockToken[],
 ): { pendingInner: string; pendingVisible: boolean } {
   const { pending, openListItemFirstLine } = split
-  const pendingInTable = pendingLineBelongsInTable(complete, pending)
+  const pendingInTable = pendingLineBelongsInTable(complete, pending, completeTokens)
   const pendingInner =
     pending && !pendingInTable && !formingActive
       ? sanitizeRenderedMarkdown(renderPendingInlineMarkdown(pending, openListItemFirstLine))
@@ -374,10 +378,19 @@ function renderPendingTail(
  */
 export function renderStreamingMarkdown(content: string): string {
   const split = splitForStreaming(content)
-  const { complete, pending, openListItemFirstLine } = split
-  const rendered = complete ? sanitizeRenderedMarkdown(renderMarkdown(complete)) : ''
-  const fenceSource = formingFenceSource(content)
-  const tableSource = fenceSource ? null : formingTableSource(complete, content, pending)
+  const { complete, pending, openListItemFirstLine, blocks } = split
+  // Tokenize `complete` at most once and reuse it for the render and the
+  // table checks (Layer 1, #21). `blocks` is `tokenizeBlocks(content)`.
+  let completeTokensCache: BlockToken[] | null = null
+  const completeTokens = (): BlockToken[] => (completeTokensCache ??= tokenizeBlocks(complete))
+  const completeTokensForPending = pending.includes('|') ? completeTokens() : undefined
+  const rendered = complete
+    ? sanitizeRenderedMarkdown(renderMarkdown(complete, { tokens: completeTokens() }))
+    : ''
+  const fenceSource = formingFenceSource(content, blocks)
+  const tableSource = fenceSource
+    ? null
+    : formingTableSource(complete, content, pending, blocks, completeTokensForPending)
   const formingHtml = fenceSource
     ? buildFormingFenceHtml(fenceSource)
     : tableSource
@@ -388,7 +401,7 @@ export function renderStreamingMarkdown(content: string): string {
     return `${rendered}${formingHtml}`
   }
   if (!pending) return rendered
-  if (pendingLineBelongsInTable(complete, pending)) {
+  if (pendingLineBelongsInTable(complete, pending, completeTokensForPending)) {
     return appendPendingTableRowHtml(rendered, pending)
   }
   const pendingInner = sanitizeRenderedMarkdown(
@@ -433,19 +446,29 @@ export class StreamingMarkdownRenderer {
   /** Render `content` (the full message text so far) into the host incrementally. */
   update(content: string): void {
     const split = splitForStreaming(content)
-    const { complete, pending, openListItemFirstLine } = split
+    const { complete, pending, openListItemFirstLine, blocks } = split
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
+
+    // Tokenize `complete` at most once per update, and only when a consumer
+    // actually needs it — pending-only frames with no table pipe never do, so
+    // Layer 1 stays a pure reduction over today's tokenization count (#21).
+    let completeTokensCache: BlockToken[] | null = null
+    const completeTokens = (): BlockToken[] => (completeTokensCache ??= tokenizeBlocks(complete))
+    const completeTokensForPending = pending.includes('|') ? completeTokens() : undefined
 
     if (complete !== this.lastComplete) {
       // Reconcile in place instead of `innerHTML = …`: already-committed blocks
       // keep their node identity so a pending→committed promotion patches only
       // the promoting block, never tearing down the whole committed subtree.
-      morphInnerHtml(completedEl, complete ? sanitizeRenderedMarkdown(renderMarkdown(complete)) : '')
+      morphInnerHtml(
+        completedEl,
+        complete ? sanitizeRenderedMarkdown(renderMarkdown(complete, { tokens: completeTokens() })) : '',
+      )
       this.lastComplete = complete
     }
 
-    const fenceSource = formingFenceSource(content)
-    const tableSource = formingTableSource(complete, content, pending)
+    const fenceSource = formingFenceSource(content, blocks)
+    const tableSource = formingTableSource(complete, content, pending, blocks, completeTokensForPending)
     if (fenceSource) {
       syncFormingFenceDom(formingEl, fenceSource)
       formingEl.hidden = false
@@ -459,11 +482,16 @@ export class StreamingMarkdownRenderer {
     } else {
       clearFormingDom(formingEl)
       formingEl.hidden = true
-      this.syncCommittedTableRow(complete, pending)
+      this.syncCommittedTableRow(complete, pending, completeTokensForPending)
     }
 
     const formingActive = fenceSource !== null || tableSource !== null
-    const { pendingInner, pendingVisible } = renderPendingTail(split, complete, formingActive)
+    const { pendingInner, pendingVisible } = renderPendingTail(
+      split,
+      complete,
+      formingActive,
+      completeTokensForPending,
+    )
 
     if (pendingVisible && isBlockLevelPending(pending, openListItemFirstLine)) {
       syncBlockPendingDom(completedEl, pending, pendingInner, true, openListItemFirstLine)
@@ -474,11 +502,15 @@ export class StreamingMarkdownRenderer {
     }
   }
 
-  private syncCommittedTableRow(complete: string, pending: string): void {
+  private syncCommittedTableRow(
+    complete: string,
+    pending: string,
+    completeTokens?: BlockToken[],
+  ): void {
     const table = this.findLastCommittedTable()
     if (!table) return
 
-    if (pendingLineBelongsInTable(complete, pending)) {
+    if (pendingLineBelongsInTable(complete, pending, completeTokens)) {
       syncPendingTableRowDom(table, pending)
       return
     }
@@ -529,18 +561,24 @@ export class StreamingMarkdownRenderer {
   }
 }
 
-function formingTableSource(complete: string, content: string, pending: string): string | null {
-  if (getIncompleteFenceSource(content)) return null
-  if (pendingLineBelongsInTable(complete, pending)) return null
-  const fromTokens = getIncompleteTableSource(content)
+function formingTableSource(
+  complete: string,
+  content: string,
+  pending: string,
+  contentTokens?: BlockToken[],
+  completeTokens?: BlockToken[],
+): string | null {
+  if (getIncompleteFenceSource(content, contentTokens)) return null
+  if (pendingLineBelongsInTable(complete, pending, completeTokens)) return null
+  const fromTokens = getIncompleteTableSource(content, contentTokens)
   if (fromTokens) return fromTokens
   const trimmed = pending.trimStart()
   if (trimmed.startsWith('|') && trimmed.includes('|', 1)) return pending
   return null
 }
 
-function formingFenceSource(content: string): string | null {
-  return getIncompleteFenceSource(content)
+function formingFenceSource(content: string, contentTokens?: BlockToken[]): string | null {
+  return getIncompleteFenceSource(content, contentTokens)
 }
 
 function clearFormingDom(container: HTMLElement): void {

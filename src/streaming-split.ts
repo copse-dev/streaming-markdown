@@ -16,6 +16,16 @@ export interface StreamingSplit {
   openListItemFirstLine?: string
 }
 
+/**
+ * A `StreamingSplit` that also carries the `tokenizeBlocks(content)` result
+ * computed while deciding the commit boundary. Callers thread these tokens back
+ * into the block helpers so a single `update()` tokenizes `content` once (#21).
+ */
+export interface StreamingSplitWithTokens extends StreamingSplit {
+  /** `tokenizeBlocks(content)` — the tokens of the *full* streamed content. */
+  blocks: BlockToken[]
+}
+
 /** Split streamed content at the last newline (legacy helper). */
 export function splitAtLastNewline(content: string): StreamingSplit {
   const lastNl = content.lastIndexOf('\n')
@@ -99,8 +109,13 @@ function splitOpenTable(block: BlockToken, content: string): StreamingSplit {
  * Split streaming content at a tokenizer-safe commit boundary. Completed blocks
  * are committed; open, ambiguous, or partially-resolved inline regions stay pending.
  */
-export function splitForStreaming(content: string): StreamingSplit {
+export function splitForStreaming(content: string): StreamingSplitWithTokens {
   const blocks = tokenizeBlocks(content)
+  return { ...splitForStreamingCore(content, blocks), blocks }
+}
+
+/** Commit-boundary decision, given the already-computed `content` tokens (#21). */
+function splitForStreamingCore(content: string, blocks: BlockToken[]): StreamingSplit {
   const firstOpen = blocks.find((b) => b.status !== 'complete')
 
   if (!firstOpen) {
