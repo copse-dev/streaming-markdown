@@ -5,6 +5,17 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-05
+
+### Other Changes
+
+- Fix attribute injection via fenceCodeClass in the string emitter (#25) (`dc6560d`)
+- Release workflow: version dropdown + publish to public npm with provenance (#24) (`ce3c896`)
+- Make the HTML sanitizer backend pluggable (native Sanitizer API / DOMPurify) (#19) (`85f75c3`)
+- Fix safeLinkHref scheme check running before entity decoding (#22) (`128c47b`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v0.1.1...v0.2.0
+
 ## [0.1.1] - 2026-07-05
 
 ### Features
