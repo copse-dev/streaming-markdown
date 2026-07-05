@@ -4,6 +4,16 @@ import { renderBlocks } from './render-blocks.ts'
 
 export { escapeHtml } from './escape.ts'
 
+/**
+ * Render options for a top-level document entry point. `htmlFromIndent` makes an
+ * indented raw-HTML block follow the raw-HTML policy instead of becoming a
+ * `<pre>` code block (#616); it is set only at the top level, never in recursive
+ * list/blockquote rendering. Shared so the streaming frozen/tail path renders
+ * slices byte-identically to `renderMarkdown` (its full-morph fallback) — the two
+ * must not drift (#21).
+ */
+export const TOP_LEVEL_RENDER_OPTS = { htmlFromIndent: true, indentedCode: true } as const
+
 export interface RenderMarkdownOptions {
   /**
    * Recognize 4-column (space or tab) indented lines as CommonMark indented code
@@ -27,12 +37,9 @@ export interface RenderMarkdownOptions {
  */
 export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {}): string {
   const linkRefs = parseLinkReferenceDefinitions(raw)
-  // htmlFromIndent is set only here (the top-level entry) so indented raw HTML
-  // follows the raw-HTML policy instead of becoming a <pre> code block (#616);
-  // recursive list/blockquote rendering keeps CommonMark indented-code semantics.
   return renderBlocks(raw, options.tokens ?? tokenizeBlocks(raw), {
     linkRefs,
-    htmlFromIndent: true,
-    indentedCode: options.indentedCode ?? true,
+    htmlFromIndent: TOP_LEVEL_RENDER_OPTS.htmlFromIndent,
+    indentedCode: options.indentedCode ?? TOP_LEVEL_RENDER_OPTS.indentedCode,
   })
 }
