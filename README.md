@@ -21,6 +21,29 @@ Indented code blocks are supported by default (`    code` → `<pre><code>`); pa
 prose paragraphs instead. See the design note in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+### Sanitizer backend
+
+`sanitizeRenderedMarkdown` runs through a **pluggable sanitizer backend**. By
+default it uses the browser's native [Sanitizer API](https://developer.mozilla.org/en-US/docs/Web/API/Element/setHTML)
+(`Element.setHTML`) — a zero-dependency backend that pulls no sanitizer code into
+your bundle. To use it, no setup is needed in a modern browser.
+
+For Node/jsdom/SSR or older browsers without the native API, opt into the bundled
+[DOMPurify](https://github.com/cure53/DOMPurify) backend (a peer dependency you
+install yourself). Because it lives behind its own entry point, bundlers drop
+DOMPurify entirely unless you import it:
+
+```ts
+import { setSanitizerBackend } from '@copse/streaming-markdown'
+import { dompurifyBackend } from '@copse/streaming-markdown/sanitizers/dompurify'
+
+setSanitizerBackend(dompurifyBackend) // once, before the first render
+```
+
+You can also supply your own `SanitizerBackend`. If no backend is set and the
+native API is unavailable, `sanitizeRenderedMarkdown` throws rather than emit
+unsanitized HTML.
+
 Streaming, syntax highlighting, Mermaid source preparation, and an injectable
 `LinkDecorator` for host-specific `<a>` routing are also exported — see the
 public surface in [`src/index.ts`](src/index.ts).
