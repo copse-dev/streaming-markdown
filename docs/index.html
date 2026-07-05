@@ -771,7 +771,15 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
 import {
   renderStreamingMarkdown,
   StreamingMarkdownRenderer,
-} from './dist/index.js';
+  setSanitizerBackend,
+  isBrowserSanitizerSupported,
+  dompurifyBackend,
+} from './streaming-markdown.browser.mjs';
+
+// Firefox and older browsers lack the native Sanitizer API (Element.setHTML).
+if (!isBrowserSanitizerSupported()) {
+  setSanitizerBackend(dompurifyBackend);
+}
 
 // ── Presets ────────────────────────────────────────────────────────────────
 const PRESETS = {
