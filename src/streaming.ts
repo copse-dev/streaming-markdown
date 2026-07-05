@@ -33,7 +33,7 @@ import {
   clearFormingFenceDom,
   syncFormingFenceDom,
 } from './streaming-fence-dom.ts'
-import { morphInnerHtml } from './streaming-dom-morph.ts'
+import { FrozenTailRenderer } from './streaming-frozen-tail.ts'
 
 export { pendingHoldIndex } from './inline-emphasis.ts'
 export { splitAtLastNewline, splitForStreaming } from './streaming-split.ts'
@@ -437,6 +437,7 @@ export class StreamingMarkdownRenderer {
   private formingEl: HTMLElement | null = null
   private pendingEl: HTMLSpanElement | null = null
   private lastComplete = ''
+  private readonly frozenTail = new FrozenTailRenderer()
   private readonly host: HTMLElement
 
   constructor(host: HTMLElement) {
@@ -457,32 +458,31 @@ export class StreamingMarkdownRenderer {
     const completeTokensForPending = pending.includes('|') ? completeTokens() : undefined
 
     if (complete !== this.lastComplete) {
-      // Reconcile in place instead of `innerHTML = …`: already-committed blocks
-      // keep their node identity so a pending→committed promotion patches only
-      // the promoting block, never tearing down the whole committed subtree.
-      morphInnerHtml(
-        completedEl,
-        complete ? sanitizeRenderedMarkdown(renderMarkdown(complete, { tokens: completeTokens() })) : '',
-      )
+      // Freeze the settled prefix and re-render only the tail group (#21). Blocks
+      // that can never change again keep their node identity permanently; the
+      // fast path degrades to a full in-place morph on any uncertainty, so output
+      // is byte-identical to re-rendering the whole committed prefix.
+      this.frozenTail.update(completedEl, complete, completeTokens())
       this.lastComplete = complete
     }
 
+    // A committed GFM table always contains `|`; without one there is no table
+    // to sync or clean up, so skip the whole-subtree `querySelectorAll('table')`
+    // scan `findLastCommittedTable` would otherwise run on every update — the
+    // last O(prefix)-per-commit DOM cost after the frozen/tail split (#21).
+    const mayHaveCommittedTable = complete.includes('|')
     const fenceSource = formingFenceSource(content, blocks)
     const tableSource = formingTableSource(complete, content, pending, blocks, completeTokensForPending)
-    if (fenceSource) {
-      syncFormingFenceDom(formingEl, fenceSource)
+    if (fenceSource || tableSource) {
+      if (fenceSource) syncFormingFenceDom(formingEl, fenceSource)
+      else if (tableSource) syncFormingTableDom(formingEl, tableSource)
       formingEl.hidden = false
-      const committed = this.findLastCommittedTable()
-      if (committed) removePendingTableRow(committed)
-    } else if (tableSource) {
-      syncFormingTableDom(formingEl, tableSource)
-      formingEl.hidden = false
-      const committed = this.findLastCommittedTable()
+      const committed = mayHaveCommittedTable ? this.findLastCommittedTable() : null
       if (committed) removePendingTableRow(committed)
     } else {
       clearFormingDom(formingEl)
       formingEl.hidden = true
-      this.syncCommittedTableRow(complete, pending, completeTokensForPending)
+      if (mayHaveCommittedTable) this.syncCommittedTableRow(complete, pending, completeTokensForPending)
     }
 
     const formingActive = fenceSource !== null || tableSource !== null
@@ -557,6 +557,9 @@ export class StreamingMarkdownRenderer {
     this.formingEl = formingEl
     this.pendingEl = pendingEl
     this.lastComplete = ''
+    // The committed subtree was just rebuilt, so any frozen bookkeeping now
+    // dangles against a fresh element (gap D) — start it over.
+    this.frozenTail.reset()
     return { completedEl, formingEl, pendingEl }
   }
 }
