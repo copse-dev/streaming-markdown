@@ -21,6 +21,13 @@ import { renderStreamingMarkdown, StreamingMarkdownRenderer, splitForStreaming }
 
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
+// Absolute throughput floors are meaningless under coverage instrumentation
+// (c8 sets NODE_V8_COVERAGE and slows execution by roughly an order of
+// magnitude), so skip those floor checks in that mode. The relative scaling
+// ratio test still runs — instrumentation slows base and doubled equally, so
+// the ratio it asserts stays valid.
+const UNDER_COVERAGE = Boolean(process.env['NODE_V8_COVERAGE'])
+
 function readFixture(name: string): string {
   return readFileSync(resolve(pkgRoot, 'tests/fixtures', name), 'utf8')
 }
@@ -272,7 +279,7 @@ describe('performance: throughput does not degrade super-linearly', () => {
     )
   })
 
-  it('string emitter: throughput on base document is at least 5 KB/s', () => {
+  it('string emitter: throughput on base document is at least 5 KB/s', { skip: UNDER_COVERAGE }, () => {
     // The string emitter is O(n²) by design — each call re-renders the full
     // accumulated string — so we assert a throughput floor rather than a
     // scaling ratio.
@@ -291,7 +298,7 @@ describe('performance: throughput does not degrade super-linearly', () => {
     )
   })
 
-  it('DOM emitter: throughput on terms-of-service fixture is at least 5 KB/s', () => {
+  it('DOM emitter: throughput on terms-of-service fixture is at least 5 KB/s', { skip: UNDER_COVERAGE }, () => {
     const text = readFixture('terms-of-service-streaming.md')
     const chunkSize = 32
     const bytes = text.length

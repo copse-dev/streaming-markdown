@@ -81,8 +81,21 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
+      # Runs the full unit suite under c8, then the coverage-baseline.json
+      # ratchet (fails if line coverage drops below the committed baseline). The
+      # two absolute throughput-floor perf checks self-skip under instrumentation
+      # — the relative O(n²) scaling-regression guard still runs. See
+      # scripts/coverage-gate.mts.
+      - name: Test + coverage
+        run: npm run coverage:ci
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/lcov-report
+          if-no-files-found: ignore
 
       - name: Build
         run: npm run build
