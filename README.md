@@ -25,6 +25,14 @@ Streaming, syntax highlighting, Mermaid source preparation, and an injectable
 `LinkDecorator` for host-specific `<a>` routing are also exported — see the
 public surface in [`src/index.ts`](src/index.ts).
 
+Link destinations are validated against a scheme allowlist
+(`DEFAULT_SAFE_HREF_SCHEMES`: `http`, `https`, `mailto`, `tel`, `sms`, `ftp`,
+`ftps`, plus scheme-less relative/fragment/path forms); any other scheme —
+including `javascript:` and `data:` — is dropped. Override it with
+`setSafeHrefSchemes([...])` (case-insensitive; pass `null` to restore the
+default). Narrowing the list is always safe; only widen it with schemes that are
+inert as an `href`, never `javascript`/`data`/`vbscript`/`file`.
+
 ## Development
 
 ```bash

@@ -22,10 +22,13 @@ export { fenceCodeClass, highlightFenceCode, stripAppCodeDecorations } from './h
 export { mermaidSourceCandidates, prepareMermaidSource } from './mermaid-source.ts'
 export {
   appLinkDecorator,
+  DEFAULT_SAFE_HREF_SCHEMES,
+  getSafeHrefSchemes,
   type LinkDecoration,
   type LinkDecorator,
   renderAnchor,
   setLinkDecorator,
+  setSafeHrefSchemes,
   stripAppImageAttributes,
   stripAppLinkAttributes,
 } from './inline-links.ts'

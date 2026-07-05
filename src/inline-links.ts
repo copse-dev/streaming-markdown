@@ -13,20 +13,54 @@ import {
 export type LinkLabelRenderer = (label: string, refs: LinkReferenceMap) => string
 
 /**
- * URL schemes permitted on a link/image destination. Anything carrying a scheme
- * outside this set — `javascript:`, `data:`, `vbscript:`, `file:`, and every
- * unknown scheme — is rejected. An allowlist fails *closed*: a new dangerous
- * scheme is blocked by default, unlike a denylist that only knows the three it
- * was told about. Relative/absolute paths, fragments, and query-only
- * destinations carry no scheme and are always allowed.
+ * Default URL schemes permitted on a link/image destination. Anything carrying
+ * a scheme outside the active set — `javascript:`, `data:`, `vbscript:`,
+ * `file:`, and every unknown scheme — is rejected. An allowlist fails *closed*:
+ * a new dangerous scheme is blocked by default, unlike a denylist that only
+ * knows the three it was told about. Relative/absolute paths, fragments, and
+ * query-only destinations carry no scheme and are always allowed.
  */
-const SAFE_HREF_SCHEMES = new Set(['http', 'https', 'mailto', 'tel', 'sms', 'ftp', 'ftps'])
+export const DEFAULT_SAFE_HREF_SCHEMES: readonly string[] = [
+  'http',
+  'https',
+  'mailto',
+  'tel',
+  'sms',
+  'ftp',
+  'ftps',
+]
+
 const HREF_SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):/
+
+let activeSafeHrefSchemes: ReadonlySet<string> = new Set(DEFAULT_SAFE_HREF_SCHEMES)
+
+/**
+ * Override the scheme allowlist {@link safeLinkHref} enforces; pass `null` to
+ * restore {@link DEFAULT_SAFE_HREF_SCHEMES}. Scheme names are matched
+ * case-insensitively (normalized on the way in), so `['HTTPS']` allows
+ * `https:`.
+ *
+ * This allowlist is the security gate against `javascript:`/`data:` XSS in link
+ * destinations. Narrowing it (e.g. `['https', 'mailto']`) is always safe;
+ * widening it re-opens that class of attack, so add only schemes that are inert
+ * as an `href` — never `javascript`, `data`, `vbscript`, or `file`.
+ */
+export function setSafeHrefSchemes(schemes: Iterable<string> | null): void {
+  activeSafeHrefSchemes =
+    schemes === null
+      ? new Set(DEFAULT_SAFE_HREF_SCHEMES)
+      : new Set(Array.from(schemes, (scheme) => scheme.toLowerCase()))
+}
+
+/** The scheme allowlist currently enforced by {@link safeLinkHref}. */
+export function getSafeHrefSchemes(): string[] {
+  return [...activeSafeHrefSchemes]
+}
 
 /** True when `href` is a relative destination or carries an allowlisted scheme. */
 function isAllowedHref(href: string): boolean {
   const scheme = HREF_SCHEME_RE.exec(href)?.[1]
-  return scheme === undefined || SAFE_HREF_SCHEMES.has(scheme.toLowerCase())
+  return scheme === undefined || activeSafeHrefSchemes.has(scheme.toLowerCase())
 }
 
 /** Allowed link destinations: http(s), mailto, and relative/path forms. Rejects dangerous schemes. */

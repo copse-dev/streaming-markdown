@@ -1,7 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseLinkReferenceDefinitions } from './link-references.ts'
-import { renderInlineLinks, safeLinkHref } from './inline-links.ts'
+import {
+  getSafeHrefSchemes,
+  renderInlineLinks,
+  safeLinkHref,
+  setSafeHrefSchemes,
+} from './inline-links.ts'
 import { renderInlineSpans } from './inline-spans.ts'
 
 describe('renderInlineLinks', () => {
@@ -117,5 +122,46 @@ describe('safeLinkHref scheme validation', () => {
   it('does not link an entity-encoded javascript: reference definition (#SECURITY)', () => {
     const refs = parseLinkReferenceDefinitions('[r]: &#x6a;avascript:alert(1)\n')
     assert.equal(renderInlineSpans('[click][r]', refs), '[click][r]')
+  })
+})
+
+describe('setSafeHrefSchemes', () => {
+  it('narrows the allowlist and restores it with null', () => {
+    try {
+      setSafeHrefSchemes(['https', 'mailto'])
+      assert.equal(safeLinkHref('https://example.com'), 'https://example.com')
+      assert.equal(safeLinkHref('mailto:a@b.com'), 'mailto:a@b.com')
+      // Now outside the narrowed set:
+      assert.equal(safeLinkHref('http://example.com'), null)
+      assert.equal(safeLinkHref('tel:+15551234'), null)
+      // Relative destinations remain allowed regardless of the scheme set.
+      assert.equal(safeLinkHref('/some/path.ts'), '/some/path.ts')
+    } finally {
+      setSafeHrefSchemes(null)
+    }
+    assert.equal(safeLinkHref('http://example.com'), 'http://example.com')
+    assert.equal(safeLinkHref('tel:+15551234'), 'tel:+15551234')
+  })
+
+  it('matches configured scheme names case-insensitively', () => {
+    try {
+      setSafeHrefSchemes(['HTTPS'])
+      assert.equal(safeLinkHref('https://example.com'), 'https://example.com')
+      assert.deepEqual(getSafeHrefSchemes(), ['https'])
+    } finally {
+      setSafeHrefSchemes(null)
+    }
+  })
+
+  it('cannot be widened to smuggle a dangerous scheme past decoding (#SECURITY)', () => {
+    try {
+      // Even a caller that (unwisely) allows `javascript` only enables the
+      // literal scheme; an entity-encoded destination still resolves and is
+      // checked against the decoded scheme, so nothing bypasses validation.
+      setSafeHrefSchemes(['https'])
+      assert.equal(safeLinkHref('&#x6a;avascript:alert(1)'), null)
+    } finally {
+      setSafeHrefSchemes(null)
+    }
   })
 })
