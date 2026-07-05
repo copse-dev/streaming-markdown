@@ -355,6 +355,11 @@
       font-size: 0.8rem;
       color: var(--text-muted);
       font-family: 'SF Mono', 'Fira Code', monospace;
+      /* Yield to the (nowrap) stats on narrow panels instead of wrapping. */
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
     }
 
     .compare-panel-title span {
@@ -369,6 +374,10 @@
       display: flex;
       gap: 0.75rem;
       align-items: center;
+      /* Stats update every frame; wrapping to a second line would bounce the
+         header height and shift both panels mid-stream. */
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .panel-stats .stat-val {
@@ -377,8 +386,9 @@
 
     .compare-panel-body {
       padding: 1rem;
-      min-height: 240px;
-      max-height: 380px;
+      /* Fixed height (not min/max): the pane scrolls internally, so streaming
+         growth never shifts the page content below the panels. */
+      height: 380px;
       overflow-y: auto;
       font-size: 0.9rem;
     }
@@ -439,20 +449,30 @@
       margin: 0.75rem 0;
     }
 
-    /* ── Pending state styles (shown during streaming) ───── */
-    .stream-pending-paragraph {
+    /* ── Pending state styles (shown during streaming) ─────
+       Jank contract (#11): pending chrome must not move text. Every pending
+       block keeps the exact metrics (position, font size/weight, margins) of
+       the element it will commit to, so promotion only changes color. The
+       accent bar hangs in the left gutter via a negative margin that exactly
+       cancels its border + padding. */
+    /* `p.…` (not bare class) so this outranks `.compare-panel-body p`'s
+       margin shorthand, which would otherwise reset margin-left to 0. */
+    p.stream-pending-paragraph {
       background: var(--pending-bg);
       border-left: 3px solid var(--pending-border);
       padding-left: 0.6rem;
+      margin: 0.4rem 0 0.4rem calc(-0.6rem - 3px);
       color: var(--pending-text);
       border-radius: 0 3px 3px 0;
     }
 
+    /* No bar/indent on pending list items — the tinted background and accent
+       marker are the pending cue; the text sits where the committed <li>'s
+       text will land. */
     .stream-pending-list-item {
       background: var(--pending-bg);
-      border-left: 3px solid var(--pending-border);
-      padding-left: 0.5rem;
       color: var(--pending-text);
+      border-radius: 3px;
     }
 
     .stream-pending-list-item::marker { color: var(--accent); }
@@ -461,13 +481,17 @@
       background: var(--pending-bg);
       border-left: 3px solid var(--pending-border);
       padding-left: 0.6rem;
+      margin-left: calc(-0.6rem - 3px);
       color: var(--pending-text);
       border-radius: 0 3px 3px 0;
+      font-weight: 700;
     }
 
-    .stream-pending-h1 { font-size: 1.4rem; }
-    .stream-pending-h2 { font-size: 1.15rem; }
-    .stream-pending-h3 { font-size: 1rem; }
+    /* Match the committed h1–h3 font-size AND margins so the promotion to a
+       real heading tag causes zero layout shift. */
+    .stream-pending-h1 { font-size: 1.4rem; margin: 0.5rem 0 0.5rem calc(-0.6rem - 3px); }
+    .stream-pending-h2 { font-size: 1.15rem; margin: 0.75rem 0 0.4rem calc(-0.6rem - 3px); }
+    .stream-pending-h3 { font-size: 1rem; margin: 0.6rem 0 0.3rem calc(-0.6rem - 3px); }
 
     .stream-pending-blockquote {
       background: var(--pending-bg);
@@ -493,24 +517,44 @@
 
     .stream-table-forming th { background: var(--surface2); }
 
-    .stream-table-forming tr.pending-row {
+    /* The emitter marks the still-streaming body row with
+       `tr.stream-pending-row` — both inside a forming table and when appended
+       to an already-committed table. Background/color only: the row is
+       already a real <tr>, so committing just recolors it. */
+    tr.stream-pending-row td {
       background: var(--pending-bg);
       color: var(--pending-text);
     }
 
+    /* A forming fence is a real <pre><code> — it inherits the committed pre
+       rules above (background, padding, margins, and the code font metrics),
+       so closing the fence only changes the border color. Re-declaring fonts
+       here would compound with the `pre code` font-size and make the text
+       grow on commit. */
     .stream-fence-forming {
-      background: var(--code-bg);
-      border: 1px solid var(--pending-border);
-      border-radius: 6px;
-      padding: 0.75rem;
-      overflow-x: auto;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: 0.85em;
-      margin: 0.5rem 0;
+      border-color: var(--pending-border);
     }
 
     .stream-pending {
       color: var(--pending-text);
+    }
+
+    /* Subtle settle-in for blocks the incremental DOM emitter commits: new
+       nodes fade up from the pending tint instead of popping. Scoped to
+       .stream-complete so the string emitter (which rebuilds innerHTML every
+       token) never re-animates its whole output. Opacity only — no transform,
+       no layout. */
+    @media (prefers-reduced-motion: no-preference) {
+      .stream-complete > :not(.stream-pending-block),
+      .stream-complete li:not(.stream-pending-block),
+      .stream-complete tbody tr:not(.stream-pending-row) {
+        animation: stream-settle 0.25s ease-out;
+      }
+    }
+
+    @keyframes stream-settle {
+      from { opacity: 0.55; }
+      to { opacity: 1; }
     }
 
     /* ── Code snippet section ────────────────────────────── */
@@ -574,6 +618,8 @@
 
     /* ── Fidelity indicator ──────────────────────────────── */
     .fidelity-badge {
+      /* Toggled via `visibility` (not display) so appearing at stream end
+         doesn't reflow the action bar — the slot is always reserved. */
       display: inline-flex;
       align-items: center;
       gap: 0.35rem;
@@ -678,7 +724,7 @@
       <input type="checkbox" id="speed-check" checked>
       Fast
     </label>
-    <span id="fidelity-badge" class="fidelity-badge" style="display:none">&#10003; outputs match</span>
+    <span id="fidelity-badge" class="fidelity-badge" style="visibility:hidden">&#10003; outputs match</span>
   </div>
 
   <div class="compare-panels">
@@ -830,7 +876,7 @@ their final appearance once the next newline arrives.
 ## Features
 
 - **Headings** recognised as they form — h1 through h6
-- *Lists* show pending items with a distinctive left border
+- *Lists* show pending items with a tinted highlight until the line commits
 - Tables detect the separator line (\`|---|---|\`) to switch display mode
 - Code fences apply syntax highlighting in real-time
 
@@ -884,7 +930,7 @@ for num in fibonacci(10):
 
 Tables are progressively rendered: the header row appears immediately,
 the separator line triggers the table layout, and body rows appear one by one.
-The pending row gets a \`pending-row\` class until the next \`|\\n\` arrives.`,
+The pending row gets a \`stream-pending-row\` class until the next \`|\\n\` arrives.`,
 
   code: `## Code Examples
 
@@ -1062,7 +1108,7 @@ document.getElementById('preset-bar').addEventListener('click', (e) => {
   btn.classList.add('active');
   currentPreset = btn.dataset.preset;
   compareInput.value = PRESETS[currentPreset];
-  fidelityBadge.style.display = 'none';
+  fidelityBadge.style.visibility = 'hidden';
 });
 
 document.getElementById('btn-stream').addEventListener('click', startCompare);
@@ -1079,7 +1125,7 @@ function clearCompare() {
   domOutput.innerHTML = '';
   stringStats.innerHTML = '<span>—</span>';
   domStats.innerHTML = '<span>—</span>';
-  fidelityBadge.style.display = 'none';
+  fidelityBadge.style.visibility = 'hidden';
 }
 
 function startCompare() {
@@ -1089,7 +1135,7 @@ function startCompare() {
 
   stringOutput.innerHTML = '';
   domOutput.innerHTML = '';
-  fidelityBadge.style.display = 'none';
+  fidelityBadge.style.visibility = 'hidden';
   domRenderer = new StreamingMarkdownRenderer(domOutput);
 
   comparePos = 0;
@@ -1123,6 +1169,11 @@ function startCompare() {
     const t1 = performance.now();
     domRenderer.update(partial);
     const domMs = performance.now() - t1;
+
+    // Keep the newest content in view; each panel is its own scroll container,
+    // so this never moves the page.
+    stringOutput.scrollTop = stringOutput.scrollHeight;
+    domOutput.scrollTop = domOutput.scrollHeight;
 
     compareUpdates++;
     const elapsed = performance.now() - compareStart;
@@ -1158,7 +1209,7 @@ function checkFidelity(text) {
   // differs, which normalizeStreamOutput() removes before comparing.
   const stringHtml = normalizeStreamOutput(stringOutput.innerHTML);
   const domHtml = normalizeStreamOutput(domOutput.innerHTML);
-  fidelityBadge.style.display = 'inline-flex';
+  fidelityBadge.style.visibility = 'visible';
   if (stringHtml === domHtml) {
     fidelityBadge.className = 'fidelity-badge';
     fidelityBadge.textContent = '✓ outputs match';

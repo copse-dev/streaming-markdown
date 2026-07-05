@@ -191,6 +191,30 @@ When extending the renderer or its CSS, preserve these rules:
   render sink. The stylesheets are the visible companion to this table — renaming a
   class here means updating them.
 
+### Pending→committed motion contract (#11)
+
+The emitter guarantees each pending→committed transition is a **minimal DOM patch**
+(no full-subtree replacement — asserted by `streaming-minimal-patch.test.ts`), so a
+theme can make promotion visually smooth. The promoting node itself changes tag or
+class, which is why the styling rule is: **pending chrome must never move text** —
+a pending block carries the exact metrics (font size/weight, line-height, margins,
+text x-position) of the element it commits to, and promotion changes *color only*.
+Per jank scenario:
+
+| Scenario                        | Strategy                                                                                                                                                              |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Heading promotion (`div` → `hN`)| Metric parity in CSS: `.stream-pending-hN` carries the committed `hN` font-size, weight, and margins (`default.css` does this); only color/background change.        |
+| Paragraph commit (`p` → `p`)    | Same tag either side. Accent chrome must not indent text — hang a bar in the gutter with a negative margin that cancels its border+padding, or use background only.  |
+| List marker reveal              | Pending items are real `<li>` in a real `<ul>/<ol>` from the first frame, so the marker column is already reserved; style with background/marker color only.         |
+| Table row commit                | Rows stream as real `<tr class="stream-pending-row">` cells; commit removes the class in place — color-only.                                                         |
+| Fence close + hljs              | The forming fence is a real `<pre><code>` with highlight.js already applied, so closing only swaps `stream-fence-forming` off. Don't re-declare font metrics on the forming class (they'd compound with `pre code` rules). Highlight classes appearing is color-only — **instant is OK**. |
+| Table column re-measure         | **Instant is OK** — `table-layout: auto` re-negotiates column widths as cell text streams. Pinning it (`fixed`) would change how committed tables render arbitrary content, a worse trade. |
+| Long-paragraph soft breaks      | **Instant is OK** — new text re-wrapping the trailing line is content growth, not chrome; there is no state change to animate.                                       |
+| Subtle motion                   | Because committed nodes keep identity, a theme can animate *new* nodes only: `default.css` ships an opacity-only, `prefers-reduced-motion`-guarded settle fade scoped to `.stream-complete` (never the string emitter, which recreates all nodes per token). |
+
+  `docs/index.html` (the live demo) implements the same contract with its own
+  theme and doubles as the visual regression bed for it.
+
 ### Streaming architecture (intentional duplication)
 
 The streaming layer maintains **two parallel emitters** for the same decisions:
