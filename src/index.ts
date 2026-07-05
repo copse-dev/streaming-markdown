@@ -26,8 +26,35 @@ export {
 export { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize-browser.ts'
 export { setRawImageRenderer, type RawImageRenderer, type RawImageTag } from './raw-images.ts'
 export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './escape.ts'
-export { fenceCodeClass, highlightFenceCode, stripAppCodeDecorations } from './highlight.ts'
+// Syntax highlighting is a pluggable backend. The core (`highlight.ts`) carries
+// no highlight.js code and renders escaped plain text until a backend is
+// registered; the highlight.js backend stays behind the
+// `@copse/streaming-markdown/highlighters/highlightjs` entry so it is only bundled
+// (or lazily fetched) when a host opts in — see README / docs/LAZY-LOADING.md.
+export {
+  type CodeHighlighter,
+  fenceCodeClass,
+  getCodeHighlighter,
+  highlightFenceCode,
+  KNOWN_LANGUAGES,
+  setCodeHighlighter,
+  stripAppCodeDecorations,
+} from './highlight.ts'
 export { mermaidSourceCandidates, prepareMermaidSource } from './mermaid-source.ts'
+// Diagram rendering is a pluggable backend, like highlighting. The core emits
+// inert `mermaid-diagram--pending` scaffolding and `hydratePendingDiagrams` swaps
+// in SVG once a renderer is registered; the mermaid backend stays behind the
+// `@copse/streaming-markdown/diagrams/mermaid` entry so its library is only
+// fetched when a host opts in — see docs/LAZY-LOADING.md.
+export {
+  type DiagramRenderer,
+  type DiagramRenderResult,
+  getDiagramRenderer,
+  type HydrateDiagramsOptions,
+  hydratePendingDiagrams,
+  PENDING_DIAGRAM_SELECTOR,
+  setDiagramRenderer,
+} from './mermaid.ts'
 export {
   appLinkDecorator,
   DEFAULT_SAFE_HREF_SCHEMES,

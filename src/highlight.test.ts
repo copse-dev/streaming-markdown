@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { fenceCodeClass, highlightFenceCode, stripAppCodeDecorations } from './highlight.ts'
+import { installHighlightjs } from './highlight-hljs.ts'
+
+// These tests assert highlighted (hljs span) output, so register the backend the
+// core now lazy-loads. See highlight-lazy.test.ts for the plain-until-loaded path.
+installHighlightjs()
 
 describe('highlightFenceCode', () => {
   it('highlights TypeScript keywords and types', () => {

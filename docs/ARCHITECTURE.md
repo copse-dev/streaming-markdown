@@ -28,6 +28,29 @@ When extending the renderer or its CSS, preserve these rules:
   native API is missing, `sanitizeRenderedMarkdown` throws rather than return
   unsanitized HTML. DOMPurify is an optional peer dependency; `dompurify` must not be
   imported outside `sanitize-dompurify.ts`, or it re-enters the default bundle.
+- **Pluggable syntax highlighter.** `highlight.ts` holds only cheap string work
+  (language aliases, `KNOWN_LANGUAGES`, `fenceCodeClass`) and a registry
+  (`setCodeHighlighter`); it imports no highlight.js. The highlight.js grammars live
+  in `highlight-hljs.ts`, imported only via the
+  `@copse/streaming-markdown/highlighters/highlightjs` entry (`highlightjsHighlighter`,
+  `installHighlightjs`, `loadHighlightjs`), so they stay out of bundles that don't opt
+  in — the same split as the sanitizer backend. With no backend registered,
+  `highlightFenceCode` returns escaped plain text; a later `setCodeHighlighter` + re-render
+  upgrades fence interiors to token spans while `fenceCodeClass` keeps the element's class
+  stable across the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the backend
+  registers. `highlight.js` must not be imported outside `highlight-hljs.ts`, or it
+  re-enters the default bundle. See [`LAZY-LOADING.md`](LAZY-LOADING.md).
+- **Pluggable diagram renderer.** Mermaid is never bundled — the generator emits inert
+  `mermaid-diagram--pending` scaffolding and `mermaid-source.ts` is pure string prep.
+  `mermaid.ts` adds the registry (`setDiagramRenderer`) plus `hydratePendingDiagrams`,
+  which walks pending containers, tries the gentle then aggressive
+  `mermaidSourceCandidates`, and injects the backend's SVG (or marks `--error`). The
+  mermaid backend (`mermaid-mermaidjs.ts`, `mermaidDiagramRenderer` / `loadMermaid`) is
+  imported only via the `@copse/streaming-markdown/diagrams/mermaid` entry, with `mermaid`
+  an optional peer dependency. Mermaid SVG is injected after the sink sanitizer and not
+  re-sanitized (see the sanitize-at-the-sink note); `hydratePendingDiagrams`'s `transformSvg`
+  option is the seam for a host that wants to. `mermaid` must not be imported outside
+  `mermaid-mermaidjs.ts`. See [`LAZY-LOADING.md`](LAZY-LOADING.md).
 - **Package boundary.** The core stays app-independent so it can version and ship on
   its own, so host-specific behaviour is **injected, not hard-coded**:
   - `setLinkDecorator` (`inline-links.ts`) — a `LinkDecorator` returns the attributes

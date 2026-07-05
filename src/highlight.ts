@@ -1,32 +1,57 @@
-import hljs from 'highlight.js/lib/core'
-import bash from 'highlight.js/lib/languages/bash'
-import css from 'highlight.js/lib/languages/css'
-import go from 'highlight.js/lib/languages/go'
-import javascript from 'highlight.js/lib/languages/javascript'
-import json from 'highlight.js/lib/languages/json'
-import markdown from 'highlight.js/lib/languages/markdown'
-import python from 'highlight.js/lib/languages/python'
-import rust from 'highlight.js/lib/languages/rust'
-import shell from 'highlight.js/lib/languages/shell'
-import sql from 'highlight.js/lib/languages/sql'
-import typescript from 'highlight.js/lib/languages/typescript'
-import xml from 'highlight.js/lib/languages/xml'
-import yaml from 'highlight.js/lib/languages/yaml'
 import { escapeHtml } from './escape.ts'
 
-hljs.registerLanguage('typescript', typescript)
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('bash', bash)
-hljs.registerLanguage('shell', shell)
-hljs.registerLanguage('json', json)
-hljs.registerLanguage('python', python)
-hljs.registerLanguage('css', css)
-hljs.registerLanguage('xml', xml)
-hljs.registerLanguage('markdown', markdown)
-hljs.registerLanguage('yaml', yaml)
-hljs.registerLanguage('rust', rust)
-hljs.registerLanguage('go', go)
-hljs.registerLanguage('sql', sql)
+// PROTOTYPE (#lazy-load): this module is the *core* of syntax highlighting and
+// deliberately imports **no** highlight.js code. highlight.js (core + a dozen
+// language grammars) is the single heaviest dependency in the package, and
+// because `render-blocks.ts` pulls this module in, it used to land in every
+// consumer's bundle — even one that never renders a code fence.
+//
+// The heavy grammars now live behind a pluggable {@link CodeHighlighter} backend
+// (`highlight-hljs.ts`), mirroring the pluggable-sanitizer-backend split. Until a
+// backend is registered (`setCodeHighlighter`, or the lazy `loadHighlightjs()`),
+// fenced code renders as escaped plain text with the correct `hljs lang-*` class,
+// and upgrades to token spans once the backend arrives. Language *resolution*
+// (aliases + the known-language set) stays here because it is cheap string work
+// and keeps `fenceCodeClass` stable across the plain → highlighted upgrade, so a
+// streaming re-render never has to churn the element's className.
+
+/**
+ * Pluggable syntax highlighter. A backend receives already-resolved input from
+ * the core: `highlight` is called with a language id the core has confirmed the
+ * backend registered, and `highlightAuto` is called only for an empty fence info
+ * string. Both return an HTML token string (highlight.js `.value`-shaped).
+ *
+ * Register one with {@link setCodeHighlighter}, or lazily via `loadHighlightjs()`
+ * / `installHighlightjs()` from `@copse/streaming-markdown/highlighters/highlightjs`.
+ */
+export interface CodeHighlighter {
+  /** Highlight `code` as `language` (a resolved id from {@link KNOWN_LANGUAGES}). */
+  highlight(code: string, language: string): string
+  /** Auto-detect and highlight `code` (used only for an empty fence info string). */
+  highlightAuto(code: string): string
+}
+
+/**
+ * Language ids the core knows how to resolve to. This MUST stay in sync with the
+ * grammars the {@link CodeHighlighter} backend registers (`highlight-hljs.ts`) —
+ * the core owns it so `fenceCodeClass` resolves `ts → typescript` before the
+ * backend has loaded, giving a stable class across the plain → highlighted swap.
+ */
+export const KNOWN_LANGUAGES: ReadonlySet<string> = new Set([
+  'typescript',
+  'javascript',
+  'bash',
+  'shell',
+  'json',
+  'python',
+  'css',
+  'xml',
+  'markdown',
+  'yaml',
+  'rust',
+  'go',
+  'sql',
+])
 
 /** Map common fence info strings to highlight.js language ids. */
 const LANG_ALIASES: Record<string, string> = {
@@ -48,19 +73,51 @@ const LANG_ALIASES: Record<string, string> = {
   plaintext: 'plaintext',
 }
 
+/** Resolve a fence info string to a known language id, or `null` (plain/auto). */
 function resolveLanguage(lang: string): string | null {
   const key = lang.trim().toLowerCase()
   if (!key) return null
   const resolved = LANG_ALIASES[key] ?? key
   if (resolved === 'plaintext') return null
-  return hljs.getLanguage(resolved) ? resolved : null
+  return KNOWN_LANGUAGES.has(resolved) ? resolved : null
+}
+
+let codeHighlighter: CodeHighlighter | null = null
+
+/**
+ * Register the active {@link CodeHighlighter} (or `null` to fall back to escaped
+ * plain text). Set it once, before the first render that should show token spans —
+ * synchronously from `@copse/streaming-markdown/highlighters/highlightjs`:
+ *
+ * ```ts
+ * import { setCodeHighlighter } from '@copse/streaming-markdown'
+ * import { highlightjsHighlighter } from '@copse/streaming-markdown/highlighters/highlightjs'
+ * setCodeHighlighter(highlightjsHighlighter)
+ * ```
+ *
+ * or lazily (highlight.js is fetched as a separate chunk only when this resolves):
+ *
+ * ```ts
+ * import { loadHighlightjs } from '@copse/streaming-markdown/highlighters/highlightjs'
+ * await loadHighlightjs() // internally calls setCodeHighlighter
+ * ```
+ */
+export function setCodeHighlighter(highlighter: CodeHighlighter | null): void {
+  codeHighlighter = highlighter
+}
+
+/** The active {@link CodeHighlighter}, or `null` when none has been registered. */
+export function getCodeHighlighter(): CodeHighlighter | null {
+  return codeHighlighter
 }
 
 /**
- * Highlight fenced code for HTML injection; falls back to escaped plain text.
- * The code is rendered verbatim — leading/trailing blank lines and the first
- * line's indentation are preserved (#598); only the block-final newline is
- * dropped for display (the fence parser already omits it).
+ * Highlight fenced code for HTML injection. With no backend registered, falls
+ * back to escaped plain text (safe, and the pre-highlight state a streaming UI
+ * shows while the grammar chunk loads); with a backend, delegates to it. The code
+ * is rendered verbatim — leading/trailing blank lines and the first line's
+ * indentation are preserved (#598); only the block-final newline is dropped for
+ * display (the fence parser already omits it).
  */
 export function highlightFenceCode(code: string, lang: string): string {
   if (code === '') return ''
@@ -68,16 +125,16 @@ export function highlightFenceCode(code: string, lang: string): string {
   // fed to the highlighter, which would otherwise collapse or mis-detect them.
   if (code.trim() === '') return escapeHtml(code)
 
+  const highlighter = codeHighlighter
   const language = resolveLanguage(lang)
-  if (language) {
-    return hljs.highlight(code, { language }).value
-  }
 
-  if (!lang.trim()) {
-    const { value } = hljs.highlightAuto(code)
-    return value
-  }
+  // No backend yet: plain-text fallback. The `hljs lang-*` class is still applied
+  // by `fenceCodeClass`, so a later `setCodeHighlighter` + re-render upgrades the
+  // interior to token spans without changing the surrounding element.
+  if (!highlighter) return escapeHtml(code)
 
+  if (language) return highlighter.highlight(code, language)
+  if (!lang.trim()) return highlighter.highlightAuto(code)
   return escapeHtml(code)
 }
 

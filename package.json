@@ -26,6 +26,14 @@
       "types": "./dist/sanitize-dompurify.d.ts",
       "import": "./dist/sanitize-dompurify.js"
     },
+    "./highlighters/highlightjs": {
+      "types": "./dist/highlight-hljs.d.ts",
+      "import": "./dist/highlight-hljs.js"
+    },
+    "./diagrams/mermaid": {
+      "types": "./dist/mermaid-mermaidjs.d.ts",
+      "import": "./dist/mermaid-mermaidjs.js"
+    },
     "./sanitizers/browser": {
       "types": "./dist/sanitize-browser.d.ts",
       "import": "./dist/sanitize-browser.js"
@@ -60,10 +68,14 @@
     "highlight.js": "^11.11.1"
   },
   "peerDependencies": {
-    "dompurify": "^3.4.11"
+    "dompurify": "^3.4.11",
+    "mermaid": "^11.0.0"
   },
   "peerDependenciesMeta": {
     "dompurify": {
+      "optional": true
+    },
+    "mermaid": {
       "optional": true
     }
   },

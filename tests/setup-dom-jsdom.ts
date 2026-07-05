@@ -25,3 +25,10 @@ Object.assign(globalThis, {
 // evaluation time.
 const { dompurifyBackend } = await import('../src/sanitize-dompurify.ts')
 setSanitizerBackend(dompurifyBackend)
+
+// Syntax highlighting is now a lazily-loaded backend (see docs/LAZY-LOADING.md):
+// the core renders plain text until one is registered. Tests assert highlighted
+// (hljs span) output, so register the highlight.js backend up front — the
+// deployment analogue of a host calling `loadHighlightjs()` at startup.
+const { installHighlightjs } = await import('../src/highlight-hljs.ts')
+installHighlightjs()

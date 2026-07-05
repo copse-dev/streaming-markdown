@@ -48,6 +48,31 @@ Streaming, syntax highlighting, Mermaid source preparation, and an injectable
 `LinkDecorator` for host-specific `<a>` routing are also exported — see the
 public surface in [`src/index.ts`](src/index.ts).
 
+### Syntax highlighting (lazy backend)
+
+Highlighting is a **pluggable backend**, like the sanitizer. The core carries no
+[highlight.js](https://highlightjs.org/) code and renders fenced code as escaped
+plain text (with the correct `hljs lang-*` class) until you register one — so
+highlight.js is only in your bundle if you ask for it:
+
+```ts
+import { setCodeHighlighter } from '@copse/streaming-markdown'
+import { highlightjsHighlighter } from '@copse/streaming-markdown/highlighters/highlightjs'
+
+setCodeHighlighter(highlightjsHighlighter) // once, before the first render
+```
+
+Or lazily — the grammars load as a separate chunk only when first needed, and a
+re-render upgrades already-rendered fences from plain to highlighted:
+
+```ts
+const { loadHighlightjs } = await import('@copse/streaming-markdown/highlighters/highlightjs')
+await loadHighlightjs()
+```
+
+See [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md) for the bundle-size rationale
+and how the same shape applies to Mermaid.
+
 Link destinations are validated against a scheme allowlist
 (`DEFAULT_SAFE_HREF_SCHEMES`: `http`, `https`, `mailto`, `tel`, `sms`, `ftp`,
 `ftps`, plus scheme-less relative/fragment/path forms); any other scheme —
