@@ -8,9 +8,12 @@
     "type": "git",
     "url": "git+https://github.com/copse-dev/streaming-markdown.git"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "**/*.css"
+  ],
   "files": [
     "dist",
+    "styles",
     "README.md",
     "LICENSE"
   ],
@@ -26,7 +29,9 @@
     "./sanitizers/browser": {
       "types": "./dist/sanitize-browser.d.ts",
       "import": "./dist/sanitize-browser.js"
-    }
+    },
+    "./styles/core.css": "./styles/core.css",
+    "./styles/default.css": "./styles/default.css"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",

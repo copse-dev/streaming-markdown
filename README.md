@@ -56,6 +56,35 @@ including `javascript:` and `data:` — is dropped. Override it with
 default). Narrowing the list is always safe; only widen it with schemes that are
 inert as an `href`, never `javascript`/`data`/`vbscript`/`file`.
 
+## Styling
+
+The renderer emits a documented set of class hooks (`stream-pending-*`,
+`contains-task-list`, `mermaid-diagram`, `hljs-*`, … — see the class contract in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)) but ships no styles by default, so
+it stays host-independent. Two optional stylesheets are provided; both scope every
+rule under a `.streaming-markdown` class, so add that class to the element you
+render into:
+
+```ts
+import '@copse/streaming-markdown/styles/default.css'
+el.classList.add('streaming-markdown')
+```
+
+- **`styles/core.css`** — structural only: the rules the emitter's output needs to
+  render *correctly* regardless of theme (pending-state whitespace, task-list
+  marker suppression, code-block whitespace, layout-blowout guards). No colours,
+  spacing, or typography. Pair it with your own theme.
+- **`styles/default.css`** — imports `core.css` and adds a batteries-included look
+  (spacing, typography, tables, links, and a highlight.js VS Code Dark+ palette).
+
+Retheme `default.css` by setting `--sm-*` custom properties on `.streaming-markdown`
+(or any ancestor) — each has a fallback, so the sheet also stands alone. See the
+header comment in [`styles/default.css`](styles/default.css) for the full list
+(`--sm-space-sm`, `--sm-border`, `--sm-accent`, `--sm-code-bg`, …).
+
+The stylesheets are authored with native CSS nesting; bundle with a target that
+supports it (any current engine) or let your bundler lower it.
+
 ## Development
 
 ```bash
