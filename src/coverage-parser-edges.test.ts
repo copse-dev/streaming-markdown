@@ -87,11 +87,11 @@ describe('emphasis with mismatched delimiter-run lengths', () => {
 
 describe('reference links whose labels carry inline markup', () => {
   it('matches a definition and reference label after inline rendering', () => {
-    // The label contains emphasis, so a direct string lookup misses and the
-    // renderer must compare the *rendered* labels (rendered-label index).
-    const html = renderMarkdown('[**bold ref**]: https://example.com\n\nSee [**bold ref**].')
+    // The label contains a code span, so a direct string lookup misses and the
+    // renderer must compare the *rendered* labels (the rendered-label index).
+    const html = renderMarkdown('[a `code` b]: https://example.com\n\nSee [a `code` b].')
     assert.match(html, /href="https:\/\/example\.com"/)
-    assert.match(html, /<strong>bold ref<\/strong>/)
+    assert.match(html, /<code>code<\/code>/)
   })
 
   it('resolves a reference label containing an escaped bracket', () => {
