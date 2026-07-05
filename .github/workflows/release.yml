@@ -1,0 +1,128 @@
+name: Release
+
+# Manual, one-button release. Pick a version (a semver bump keyword or an exact
+# version), and this workflow: runs the full CI gate, bumps package.json,
+# writes the changelog from the commits since the last tag, commits + tags,
+# publishes to GitHub Packages, and cuts a GitHub Release whose body is that
+# changelog. Run `dry_run: true` first to preview without pushing anything.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version: a bump keyword (patch | minor | major | prepatch | preminor | premajor | prerelease) or an exact version (e.g. 1.2.0)'
+        required: true
+        default: patch
+        type: string
+      prerelease:
+        description: 'Mark the GitHub Release as a pre-release'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: 'Build the release notes and version bump but do not commit, tag, publish, or release'
+        required: false
+        default: false
+        type: boolean
+
+# Least privilege: write to repo (commit + tag + release) and packages (publish).
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history + tags so the changelog can diff against the last tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: '@copse'
+
+      - run: npm ci
+
+      # Release gate: never cut a release from a red tree.
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Normalizer parity
+        run: npm run check:normalizer-parity
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          # `npm version` accepts both bump keywords and exact versions, and
+          # prints the resulting `vX.Y.Z`. --no-git-tag-version edits
+          # package.json + package-lock.json without tagging (we tag ourselves).
+          TAG=$(npm version "${{ inputs.version }}" --no-git-tag-version)
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
+
+      - name: Generate changelog
+        run: npx tsx scripts/gen-changelog.mts "${{ steps.version.outputs.version }}" > RELEASE_NOTES.md
+
+      - name: Update CHANGELOG.md
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%Y-%m-%d)
+          npx tsx scripts/update-changelog.mts "${{ steps.version.outputs.version }}" "$DATE" RELEASE_NOTES.md
+
+      - name: Preview release notes
+        run: |
+          {
+            echo "## Release ${{ steps.version.outputs.tag }}"
+            echo
+            cat RELEASE_NOTES.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit, tag, and push
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -m "chore(release): ${{ steps.version.outputs.tag }}"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "${{ steps.version.outputs.tag }}"
+          git push origin HEAD
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Publish to GitHub Packages
+        if: ${{ !inputs.dry_run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # `private: true` in package.json is a safety net against accidental
+          # publishes; strip it here (uncommitted) so this deliberate, authed
+          # publish to GitHub Packages can proceed. publishConfig in
+          # package.json pins the registry.
+          npm pkg delete private
+          npm publish
+
+      - name: Create GitHub Release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes-file RELEASE_NOTES.md \
+            ${{ inputs.prerelease && '--prerelease' || '' }}
