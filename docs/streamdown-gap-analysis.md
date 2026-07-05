@@ -86,16 +86,22 @@ The right move:
 
 ### Follow-up checklist (gap discovery from the remend corpus)
 
-- [ ] Port the remend streaming input corpus into a convergence / no-flash test (inputs only,
-      copse invariants as assertions).
-- [ ] **KaTeX / `$$…$$` math** — currently unsupported. Decide: known-gap vs. implement.
-- [ ] **Single tilde** (`20~25`) — confirm lone `~` stays literal while streaming (documented in
-      the README; add explicit coverage).
-- [ ] **Comparison operators** (`20 < 30`) — confirm no spurious tag/entity mid-stream.
-- [ ] **Images** (`![alt](partial`) — confirm graceful reveal, paralleling `revealFormingLink`.
-- [ ] **Underscore-in-identifier** (`foo_bar_baz`) — not italicised mid-stream.
-- [ ] Document the divergence policy (label-only forming links vs. remend's placeholder href) so it
-      is not "fixed" later by mistake.
+Ported in `src/remend-corpus.test.ts` — the remend input scenarios run through our own
+convergence / no-flash / literal-safe / known-gap invariants. Findings recorded below.
+
+- [x] Port the remend streaming input corpus into a convergence / no-flash test (inputs only,
+      copse invariants as assertions). → `src/remend-corpus.test.ts`.
+- [x] **Single tilde** (`20~25`) — confirmed: lone `~` stays literal while streaming; no `<del>`.
+- [x] **Comparison operators** (`20 < 30`) — confirmed: `<`/`>` escape to entities, never open a
+      tag mid-stream.
+- [x] **Images** (`![alt](partial`) — confirmed **already handled**: forming images reveal `alt`
+      and hide `![` + partial URL, paralleling `revealFormingLink`. Not a gap.
+- [x] **Underscore-in-identifier** (`foo_bar_baz`) — confirmed: intraword `_` is not emphasis.
+- [x] Document the divergence policy (label-only forming links vs. remend's placeholder href) —
+      captured in this doc and pinned by `forbidHtml: [/streamdown:incomplete-link/]` in the test.
+- [ ] **KaTeX / `$$…$$` math** — confirmed **genuine gap**: `$$…` passes through as literal text
+      (no math support). Pinned as a `known-gap` case so implementing KaTeX trips the test on
+      purpose. Decision still open: implement vs. leave out of scope.
 
 ## Rationale sharpening (for the pitch / README)
 
