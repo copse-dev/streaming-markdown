@@ -11,7 +11,12 @@ export {
   splitForStreaming,
   StreamingMarkdownRenderer,
 } from './streaming.ts'
-export { sanitizeRenderedMarkdown } from './sanitize.ts'
+export {
+  sanitizeRenderedMarkdown,
+  setSanitizeExtension,
+  type SanitizeExtension,
+} from './sanitize.ts'
+export { setRawImageRenderer, type RawImageRenderer, type RawImageTag } from './raw-images.ts'
 export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './escape.ts'
 export { fenceCodeClass, highlightFenceCode, stripAppCodeDecorations } from './highlight.ts'
 export { mermaidSourceCandidates, prepareMermaidSource } from './mermaid-source.ts'

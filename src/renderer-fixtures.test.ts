@@ -141,7 +141,7 @@ describe('renderMarkdown fixture structure: bold after glob table (markdown-bold
     '- **Persistence** via `electron-store` (JSON config under `~/Library/Application Support/copse-panel/` on macOS)',
     '- **LLM fallback**: `MockLLMProvider` when no API keys are set',
     '- **Shell permissions**: `src/main/services/permission-policy.ts` — macOS-only sandbox; other platforms use static analysis',
-    '- **MCP host**: connects to MCP servers via `.cursor/mcp.json` or `~/.cursor/mcp.json`',
+    '- **MCP host**: connects to MCP servers via `.mcp.json` or `~/.mcp.json`',
   ].join('\n')
 
   it('renders a glob path inside a bold table cell without breaking on the **/* tokens', () => {

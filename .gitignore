@@ -4,3 +4,7 @@ dist/
 .DS_Store
 # fetched at check time by scripts/fetch-reference-normalizer.mts
 scripts/.reference-normalizer/
+
+# fetched at check time by scripts/fetch-reference-normalizer.mts
+tests/commonmark/normalize.py
+tests/commonmark/__pycache__/

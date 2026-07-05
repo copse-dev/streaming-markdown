@@ -7,7 +7,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jonathanKingston/streaming-markdown.git"
+    "url": "git+https://github.com/copse-dev/streaming-markdown.git"
   },
   "sideEffects": false,
   "files": [
@@ -31,6 +31,7 @@
     "check:conformance": "node --import tsx --test src/commonmark-conformance.test.ts",
     "check:normalizer-parity": "tsx scripts/fetch-reference-normalizer.mts && tsx scripts/check-normalizer-parity.mts",
     "bench": "tsx scripts/bench-streaming.mts",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
@@ -42,6 +43,7 @@
     "@types/jsdom": "^21.1.7",
     "@types/node": "^22.10.0",
     "commonmark-spec": "0.31.2",
+    "esbuild": "^0.25.0",
     "jsdom": "^29.1.1",
     "tsx": "^4.19.2",
     "typescript": "^6.0.3"
