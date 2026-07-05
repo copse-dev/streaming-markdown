@@ -67,4 +67,19 @@ describe('renderInlineLinks', () => {
       '<img src="/url2" alt="foo bar" data-md-rendered="1" />',
     )
   })
+
+  it('falls back to a shortcut reference when the parens are not a destination (spec 568)', () => {
+    const refs = parseLinkReferenceDefinitions('[foo]: /url1\n')
+    assert.equal(
+      renderInlineSpans('[foo](not a link)', refs),
+      '<a href="/url1" class="workspace-markdown-link" data-workspace-link="true">foo</a>(not a link)',
+    )
+  })
+
+  it('does not resolve empty or bracket-nesting reference labels (spec 551/590)', () => {
+    const refs = parseLinkReferenceDefinitions('[[foo]]: /url\n')
+    assert.equal(refs.size, 0)
+    assert.equal(renderInlineSpans('[]', refs), '[]')
+    assert.equal(renderInlineSpans('![[foo]]', refs), '![[foo]]')
+  })
 })

@@ -46,6 +46,31 @@ describe('parseLinkReferenceDefinitions', () => {
     assert.equal(lookupLinkReference(refs, 'Baz')?.href, undefined)
     assert.equal(lookupLinkReference(refs, 'Foo bar')?.href, '/url')
   })
+
+  it('rejects definitions with an empty or whitespace-only label (spec 551, 552)', () => {
+    assert.equal(parseLinkReferenceDefinitions('[]: /uri\n').size, 0)
+    assert.equal(parseLinkReferenceDefinitions('[\n ]: /uri\n').size, 0)
+  })
+
+  it('rejects definitions whose label nests unescaped brackets (spec 547, 548)', () => {
+    assert.equal(parseLinkReferenceDefinitions('[ref[bar]]: /uri\n').size, 0)
+    assert.equal(parseLinkReferenceDefinitions('[[[foo]]]: /url\n').size, 0)
+  })
+
+  it('keeps definitions whose label has escaped brackets (spec 194)', () => {
+    const refs = parseLinkReferenceDefinitions('[Foo*bar\\]]: /url\n')
+    assert.equal(lookupLinkReference(refs, 'Foo*bar\\]')?.href, '/url')
+  })
+})
+
+describe('lookupLinkReference label validity', () => {
+  it('never resolves empty, whitespace-only, or bracket-nesting labels', () => {
+    const refs = parseLinkReferenceDefinitions('[foo]: /url\n')
+    assert.equal(lookupLinkReference(refs, ''), undefined)
+    assert.equal(lookupLinkReference(refs, '   '), undefined)
+    assert.equal(lookupLinkReference(refs, '[foo]'), undefined)
+    assert.equal(lookupLinkReference(refs, 'foo')?.href, '/url')
+  })
 })
 
 describe('parseInlineLinkDestination', () => {

@@ -179,15 +179,19 @@ function tryParseLinkOrImage(
   const j = labelPart.end
   if (text[j] === '(') {
     const dest = parseInlineLinkDestination(text, j)
-    if (!dest) return null
-    const href = safeLinkHref(dest.href)
-    if (href === null) return null
-    if (!image && labelContainsNestedLink(labelPart.label, refs)) return null
-    const label = renderLinkLabel(labelPart.label, refs, renderLabel)
-    const html = image
-      ? renderedImage(label, href, dest.title)
-      : renderedLink(label, href, dest.title)
-    return { html, end: dest.end }
+    if (dest) {
+      const href = safeLinkHref(dest.href)
+      if (href === null) return null
+      if (!image && labelContainsNestedLink(labelPart.label, refs)) return null
+      const label = renderLinkLabel(labelPart.label, refs, renderLabel)
+      const html = image
+        ? renderedImage(label, href, dest.title)
+        : renderedLink(label, href, dest.title)
+      return { html, end: dest.end }
+    }
+    // A `(` that is not a valid inline destination does not disqualify the
+    // label; fall through and try to resolve it as a shortcut reference so
+    // `[foo](not a link)` still links `[foo]` and keeps the parens as text (#568).
   }
 
   if (text[j] === '[') {
