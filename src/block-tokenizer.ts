@@ -45,8 +45,10 @@ export interface ScannedLine {
 
 const THEMATIC_BREAK_RE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
 const UNORDERED_LIST_ITEM_RE = /^ {0,3}[-*+](?:\s|$)/
-const ORDERED_LIST_MARKER_RE = /^ {0,3}(\d{1,9})([.)])\s/
-const LIST_ITEM_RE = /^ {0,3}(?:(?:[-*+])(?:\s|$)|(?:\d{1,9}[.)]\s))/
+// A marker may be followed by whitespace or end the line (empty item, #281/#283).
+const ORDERED_LIST_MARKER_RE = /^ {0,3}(\d{1,9})([.)])(?:\s|$)/
+const LIST_ITEM_RE = /^ {0,3}(?:(?:[-*+])(?:\s|$)|(?:\d{1,9}[.)](?:\s|$)))/
+const EMPTY_LIST_ITEM_RE = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)/
 const BLOCKQUOTE_RE = /^ {0,3}> ?/
 const SETEXT_UNDERLINE_RE = /^ {0,3}(=+|-+)\s*$/
 export const TABLE_SEP_RE = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/
@@ -74,25 +76,36 @@ export function isListItemLine(line: string): boolean {
 }
 
 export function unorderedListMarkerChar(line: string): '-' | '*' | '+' | null {
-  const m = line.match(/^ {0,3}([-*+])\s/)
+  const m = line.match(/^ {0,3}([-*+])(?:\s|$)/)
   const ch = m?.[1]
   if (ch === '-' || ch === '*' || ch === '+') return ch
   return null
 }
 
-/** Column of the first content character in a list item line (#255 vs #256, #276). */
+/** True when a list marker line has no content after the marker (empty item, #281/#283/#315). */
+export function isEmptyListItemLine(line: string): boolean {
+  const m = line.match(EMPTY_LIST_ITEM_RE)
+  if (!m) return false
+  return line.slice(m[0].length).trim() === ''
+}
+
+/**
+ * Column of the first content character in a list item line (#255 vs #256, #276).
+ *
+ * CommonMark: content begins at the marker width plus the number of following
+ * spaces N when 1 ≤ N ≤ 4. If N ≥ 5 (or the item is empty) only one space counts
+ * and the rest is indented code, so the content column is markerWidth + 1
+ * (#273/#274/#278).
+ */
 export function listItemContentColumn(line: string): number {
-  const ordered = line.match(/^ {0,3}\d{1,9}[.)]\s*/)
-  if (ordered) {
-    const rest = line.slice(ordered[0].length)
-    const leadingSpaces = rest.match(/^ */)?.[0].length ?? 0
-    return ordered[0].length + leadingSpaces
-  }
-  const marker = line.match(/^ {0,3}[-*+]\s*/)
-  if (!marker) return Infinity
-  const rest = line.slice(marker[0].length)
-  const leadingSpaces = rest.match(/^ */)?.[0].length ?? 0
-  return marker[0].length + leadingSpaces
+  const m = line.match(/^( {0,3})(\d{1,9}[.)]|[-*+])( *)(.*)$/)
+  if (!m) return Infinity
+  const indent = m[1]?.length ?? 0
+  const markerWidth = m[2]?.length ?? 0
+  const spaces = m[3]?.length ?? 0
+  const hasContent = (m[4]?.length ?? 0) > 0
+  const n = hasContent && spaces >= 1 && spaces <= 4 ? spaces : 1
+  return indent + markerWidth + n
 }
 
 function lazyContinuationIndent(line: string): number {
@@ -506,6 +519,8 @@ export function tokenizeBlocks(source: string): BlockToken[] {
         ATX_HEADING_RE.test(next.text) ||
         THEMATIC_BREAK_RE.test(next.text) ||
         (LIST_ITEM_RE.test(next.text) &&
+          // An empty list item cannot interrupt a paragraph (#285).
+          !isEmptyListItemLine(next.text) &&
           !orderedMarkerContinuesParagraph(lines[j - 1]?.text ?? '', next.text)) ||
         BLOCKQUOTE_RE.test(next.text) ||
         fenceMarker(next.text) ||
