@@ -34,6 +34,9 @@ const EXPECTED_FUNCTIONS = [
   'getDiagramRenderer',
   'hydratePendingDiagrams',
   'setDiagramRenderer',
+  'getMathRenderer',
+  'hydratePendingMath',
+  'setMathRenderer',
   'appLinkDecorator',
   'getSafeHrefSchemes',
   'renderAnchor',
@@ -61,6 +64,7 @@ describe('public API barrel (index.ts)', () => {
   it('re-exports the constructor and value constants', () => {
     assert.equal(typeof api.StreamingMarkdownRenderer, 'function')
     assert.equal(typeof api.PENDING_DIAGRAM_SELECTOR, 'string')
+    assert.equal(typeof api.PENDING_MATH_SELECTOR, 'string')
     assert.ok(Array.isArray(api.DEFAULT_SAFE_HREF_SCHEMES))
     assert.ok(api.DEFAULT_SAFE_HREF_SCHEMES.includes('https'))
     assert.ok(api.KNOWN_LANGUAGES instanceof Set || Array.isArray(api.KNOWN_LANGUAGES))
@@ -76,6 +80,7 @@ describe('public API barrel (index.ts)', () => {
       'StreamingMarkdownRenderer',
       'FORMING_FENCE_PRE_CLASS',
       'PENDING_DIAGRAM_SELECTOR',
+      'PENDING_MATH_SELECTOR',
       'DEFAULT_SAFE_HREF_SCHEMES',
       'KNOWN_LANGUAGES',
       'browserSanitizerBackend',

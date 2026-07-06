@@ -5,6 +5,7 @@
 import { trailingEntityHoldStart } from './backslash-escapes.ts'
 import { scanCodeSpans } from './inline-code-spans.ts'
 import { linkOrImageEndAt, linkOrImageStartsAt } from './inline-links.ts'
+import { mathHoldStart } from './inline-math.ts'
 import { getInlinePasses } from './inline-passes.ts'
 import { strikethroughHoldStart } from './inline-strikethrough.ts'
 import { type LinkReferenceMap } from './link-references.ts'
@@ -348,8 +349,10 @@ function delimitersToSkip(s: string, matches: DelimiterMatch[]): boolean[] {
  * inline scope (the label renderer runs emphasis inside it separately), and its
  * destination is not inline text at all — so no delimiter read here may sit
  * inside a link, and none may pair across a link boundary (spec 474/522/535).
+ * Exported for the inline-math pass, which needs the same protection so a `$`
+ * inside a destination (`[a](/x?p=$q$)`) never opens math (#70).
  */
-function maskLinkSpans(s: string, mask: boolean[], linkRefs: LinkReferenceMap): boolean[] {
+export function maskLinkSpans(s: string, mask: boolean[], linkRefs: LinkReferenceMap): boolean[] {
   let extended: boolean[] | null = null
   let i = 0
   while (i < s.length) {
@@ -440,6 +443,9 @@ export function pendingHoldIndex(s: string): number {
   if (entityStart < cut && !mask[entityStart]) cut = entityStart
 
   cut = Math.min(cut, strikethroughHoldStart(s, mask))
+
+  // Inline math (#70): a half-open `$x+` / `\(a` holds like a half-open `~~`.
+  cut = Math.min(cut, mathHoldStart(s, mask))
 
   // Registered inline passes contribute their own holds (#53), composing the
   // same way the strikethrough hold does — a half-open `[@doe` or `==foo`

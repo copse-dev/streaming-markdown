@@ -16,9 +16,10 @@ import { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize
 // bundle.
 //
 // The allowlist is intentionally narrow: it mirrors exactly what the renderer
-// outputs (prose + GFM tables + highlighted code + mermaid scaffolding). Mermaid
-// SVG is generated later, directly by the mermaid library, so it never passes
-// through here.
+// outputs (prose + GFM tables + highlighted code + mermaid/math scaffolding —
+// the math forms need only div/pre/span + class, already below). Mermaid SVG
+// and KaTeX HTML are generated later, directly by their libraries, so they
+// never pass through here.
 const ALLOWED_TAGS = [
   'a',
   'p',

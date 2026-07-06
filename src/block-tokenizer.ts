@@ -18,6 +18,11 @@ import {
   leadingIndentWidth,
   stripBlockquoteMarker,
 } from './block-patterns.ts'
+import {
+  mathBlockCloses,
+  mathBlockDelimiterLine,
+  mathBlockOpenCandidate,
+} from './math-block.ts'
 
 export type BlockKind =
   | 'blank'
@@ -27,6 +32,7 @@ export type BlockKind =
   | 'setext_heading'
   | 'thematic_break'
   | 'fence'
+  | 'math_block'
   | 'blockquote'
   | 'list_item'
   | 'table'
@@ -176,6 +182,15 @@ export function tableColumnsMatch(headerLine: string, sepLine: string): boolean 
 }
 
 /**
+ * A display-math delimiter line interrupts open block constructs the way a
+ * fence opener does (`$$` / `\[` on its own line, or a complete one-line
+ * `$$…$$` block — see math-block.ts).
+ */
+function isMathBlockInterruptLine(line: string): boolean {
+  return mathBlockDelimiterLine(line) !== null
+}
+
+/**
  * A GFM table body is broken by a blank line or the start of another block-level
  * structure (spec 202); any other non-blank line — even one without pipes — is a
  * body row (rendered as a single cell, padded to the header's column count).
@@ -186,6 +201,7 @@ function endsTableBody(line: string): boolean {
     ATX_HEADING_RE.test(line) ||
     THEMATIC_BREAK_RE.test(line) ||
     FENCE_OPEN_RE.test(line) ||
+    isMathBlockInterruptLine(line) ||
     LIST_ITEM_RE.test(line) ||
     BLOCKQUOTE_RE.test(line)
   )
@@ -264,6 +280,7 @@ function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
         LIST_ITEM_RE.test(line.text) ||
         BLOCKQUOTE_RE.test(line.text) ||
         fenceMarker(line.text) ||
+        isMathBlockInterruptLine(line.text) ||
         THEMATIC_BREAK_RE.test(line.text))
     ) {
       break
@@ -355,6 +372,7 @@ function breaksUnorderedListItem(lines: ScannedLine[], itemStart: number, j: num
     ATX_HEADING_RE.test(next.text) ||
     THEMATIC_BREAK_RE.test(next.text) ||
     fenceMarker(next.text) ||
+    isMathBlockInterruptLine(next.text) ||
     BLOCKQUOTE_RE.test(next.text) ||
     tryLinkRefDefBlock(lines, j) !== null ||
     (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
@@ -433,6 +451,47 @@ export function tokenizeBlocks(source: string): BlockToken[] {
       continue
     }
 
+    // Display-math block (#70): `$$` / `\[` on its own line opens one (closed
+    // by the matching own-line delimiter, or by end of input like a fence); a
+    // complete one-line `$$…$$` / `\[…\]` is a whole block. A still-streaming
+    // final line that starts with an opener is held `open` until its newline
+    // decides between a one-line block and ordinary prose (`$$ x` terminated
+    // without a closer is a paragraph line, never math).
+    const math = line.terminated
+      ? mathBlockDelimiterLine(line.text)
+      : mathBlockOpenCandidate(line.text)
+    if (math) {
+      if (!line.terminated) {
+        // Necessarily the final line: hold it as an open math block.
+        pushBlock(blocks, 'math_block', 'open', line.start, line.end)
+        break
+      }
+      if (math.oneline) {
+        pushBlock(blocks, 'math_block', 'complete', line.start, line.end)
+        i++
+        continue
+      }
+      let j = i + 1
+      let closed = false
+      while (j < lines.length) {
+        const next = lines[j]
+        // An unterminated closer line still closes, matching fence behaviour.
+        if (next && mathBlockCloses(math.delimiter, next.text)) {
+          closed = true
+          pushBlock(blocks, 'math_block', 'complete', line.start, next.end)
+          i = j + 1
+          break
+        }
+        j++
+      }
+      if (!closed) {
+        const end = lines.at(-1)?.end ?? source.length
+        pushBlock(blocks, 'math_block', 'open', line.start, end)
+        break
+      }
+      continue
+    }
+
     if (ATX_HEADING_RE.test(line.text)) {
       const status: BlockStatus = line.terminated ? 'complete' : 'ambiguous'
       pushBlock(blocks, 'atx_heading', status, line.start, line.end)
@@ -488,6 +547,7 @@ export function tokenizeBlocks(source: string): BlockToken[] {
             ATX_HEADING_RE.test(next.text) ||
             THEMATIC_BREAK_RE.test(next.text) ||
             fenceMarker(next.text) ||
+            isMathBlockInterruptLine(next.text) ||
             BLOCKQUOTE_RE.test(next.text) ||
             tryLinkRefDefBlock(lines, j) !== null ||
             (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
@@ -521,6 +581,7 @@ export function tokenizeBlocks(source: string): BlockToken[] {
             ATX_HEADING_RE.test(next.text) ||
             LIST_ITEM_RE.test(next.text) ||
             fenceMarker(next.text) ||
+            isMathBlockInterruptLine(next.text) ||
             THEMATIC_BREAK_RE.test(next.text)
           ) {
             break
@@ -644,6 +705,7 @@ export function tokenizeBlocks(source: string): BlockToken[] {
           !orderedMarkerContinuesParagraph(lines[j - 1]?.text ?? '', next.text)) ||
         BLOCKQUOTE_RE.test(next.text) ||
         fenceMarker(next.text) ||
+        isMathBlockInterruptLine(next.text) ||
         // NOTE: a link reference definition cannot interrupt a paragraph
         // (spec 213) — a `[label]: dest` line here is a lazy continuation.
         (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
@@ -758,6 +820,21 @@ export function getIncompleteFenceSource(content: string, tokens?: BlockToken[])
   return null
 }
 
+/**
+ * Source slice for a display-math block that is not yet `complete` (#70).
+ * Pass `tokens` (`tokenizeBlocks(content)`) to reuse an existing tokenization (#21).
+ */
+export function getIncompleteMathSource(content: string, tokens?: BlockToken[]): string | null {
+  const blocks = tokens ?? tokenizeBlocks(content)
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i]
+    if (block?.kind === 'math_block' && block.status !== 'complete') {
+      return content.slice(block.start, block.end)
+    }
+  }
+  return null
+}
+
 /** Split a GFM table row into cell strings (leading/trailing pipes optional). */
 /** GFM table column alignment from the delimiter row's `:` markers. */
 export type TableAlign = 'left' | 'right' | 'center' | null
@@ -817,6 +894,7 @@ export function isAmbiguousBlockLine(line: string): boolean {
   if (ATX_HEADING_RE.test(line)) return true
   if (THEMATIC_BREAK_RE.test(line)) return true
   if (FENCE_OPEN_RE.test(line)) return true
+  if (mathBlockOpenCandidate(line) !== null) return true
   if (LIST_ITEM_RE.test(line)) return true
   if (BLOCKQUOTE_RE.test(line)) return true
   if (isGfmTableRowLine(line)) return true

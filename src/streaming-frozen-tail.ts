@@ -100,6 +100,7 @@ type SettleClass = 'immutable' | 'settled-after-blank' | 'grouping' | 'separator
 function settleClassOf(kind: BlockKind): SettleClass {
   switch (kind) {
     case 'fence':
+    case 'math_block':
     case 'atx_heading':
     case 'setext_heading':
     case 'thematic_break':
