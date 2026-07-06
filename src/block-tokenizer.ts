@@ -167,6 +167,30 @@ function isTableRow(line: string): boolean {
   return isGfmTableRowLine(line)
 }
 
+/**
+ * GFM requires the header row and the delimiter row to have the same number of
+ * columns; otherwise the construct is not a table at all (spec 203).
+ */
+export function tableColumnsMatch(headerLine: string, sepLine: string): boolean {
+  return splitTableRow(headerLine).length === splitTableRow(sepLine).length
+}
+
+/**
+ * A GFM table body is broken by a blank line or the start of another block-level
+ * structure (spec 202); any other non-blank line — even one without pipes — is a
+ * body row (rendered as a single cell, padded to the header's column count).
+ */
+function endsTableBody(line: string): boolean {
+  if (line.trim() === '') return true
+  return (
+    ATX_HEADING_RE.test(line) ||
+    THEMATIC_BREAK_RE.test(line) ||
+    FENCE_OPEN_RE.test(line) ||
+    LIST_ITEM_RE.test(line) ||
+    BLOCKQUOTE_RE.test(line)
+  )
+}
+
 /** Separator line still streaming (e.g. `| -` before the full `| - | - |`). */
 function isPartialTableSeparatorLine(line: string): boolean {
   const trimmed = line.trim()
@@ -183,7 +207,12 @@ export function isPotentialTableStart(lines: ScannedLine[], i: number): boolean 
   const line = lines[i]
   if (!line || !isTableRow(line.text)) return false
   const next = lines[i + 1]
-  if (next && TABLE_SEP_RE.test(next.text)) return true
+  // A terminated separator line is definitive: it's a table iff the column counts
+  // match (spec 203). An unterminated one is still streaming and may yet gain
+  // columns (`| - |` → `| - | - |`), so hold it as a potential table.
+  if (next && TABLE_SEP_RE.test(next.text)) {
+    return next.terminated ? tableColumnsMatch(line.text, next.text) : true
+  }
   if (next && isPartialTableSeparatorLine(next.text)) return true
   if (next && isTableRow(next.text)) return true
   return line.text.trimStart().startsWith('|')
@@ -518,12 +547,16 @@ export function tokenizeBlocks(source: string): BlockToken[] {
 
     if (isTableRow(line.text)) {
       const nextLine = lines[i + 1]
-      if (nextLine && TABLE_SEP_RE.test(nextLine.text)) {
+      if (
+        nextLine &&
+        TABLE_SEP_RE.test(nextLine.text) &&
+        tableColumnsMatch(line.text, nextLine.text)
+      ) {
         const tableStart = line.start
         let j = i + 2
         while (j < lines.length) {
           const row = lines[j]
-          if (!row || !isTableRow(row.text)) break
+          if (!row || endsTableBody(row.text)) break
           j++
         }
         const last = lines[j - 1] ?? lines[i + 1] ?? line
@@ -726,11 +759,54 @@ export function getIncompleteFenceSource(content: string, tokens?: BlockToken[])
 }
 
 /** Split a GFM table row into cell strings (leading/trailing pipes optional). */
+/** GFM table column alignment from the delimiter row's `:` markers. */
+export type TableAlign = 'left' | 'right' | 'center' | null
+
+/**
+ * Split a GFM table row into trimmed cell strings. Splits on unescaped `|` only
+ * — a backslash-escaped pipe (`\|`) is literal cell text, and its escaping
+ * backslash is removed so inline parsing sees a bare `|` (spec 200) — and drops
+ * the empty cells produced by an optional leading/trailing pipe.
+ */
 export function splitTableRow(line: string): string[] {
-  let s = line.trim()
-  if (s.startsWith('|')) s = s.slice(1)
-  if (s.endsWith('|')) s = s.slice(0, -1)
-  return s.split('|').map((c) => c.trim())
+  const s = line.trim()
+  const cells: string[] = []
+  let cur = ''
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (ch === '\\' && (s[i + 1] === '|' || s[i + 1] === '\\')) {
+      // `\|` → literal pipe (drop the backslash); `\\` stays an escaped backslash
+      // for inline parsing. Either way the next char can't be a delimiter.
+      cur += s[i + 1] === '|' ? '|' : '\\\\'
+      i++
+      continue
+    }
+    if (ch === '|') {
+      cells.push(cur)
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  cells.push(cur)
+  if (cells.length > 1 && cells[0]!.trim() === '' && s.startsWith('|')) cells.shift()
+  if (cells.length > 1 && cells.at(-1)!.trim() === '' && s.endsWith('|')) cells.pop()
+  return cells.map((c) => c.trim())
+}
+
+/**
+ * Per-column alignment for a GFM table, parsed from its delimiter row
+ * (`:--` left, `--:` right, `:-:` center, `---` none).
+ */
+export function parseTableAlignments(sepLine: string): TableAlign[] {
+  return splitTableRow(sepLine).map((cell) => {
+    const left = cell.startsWith(':')
+    const right = cell.endsWith(':')
+    if (left && right) return 'center'
+    if (right) return 'right'
+    if (left) return 'left'
+    return null
+  })
 }
 
 /** Whether the pending tail should stay escaped plain text (block not yet safe). */

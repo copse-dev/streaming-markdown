@@ -178,9 +178,12 @@ describe('Terms of Service streaming fixture', () => {
   it('renders the committed fee table with all tier columns when complete', () => {
     const html = renderStreamingMarkdown(TERMS)
     assert.match(html, /<table>/)
+    // The delimiter row centre-aligns every column except the first
+    // (`|---------|:---------:|:--------:|:---------------:|`), so the aligned
+    // cells carry a GFM `align="center"` attribute.
     assert.match(html, /<th>Feature<\/th>/)
-    assert.match(html, /<th>Enterprise Plan<\/th>/)
-    assert.match(html, /<td>\$19 \/ month<\/td>/)
+    assert.match(html, /<th align="center">Enterprise Plan<\/th>/)
+    assert.match(html, /<td align="center">\$19 \/ month<\/td>/)
     assertNoPartialTables(htmlRootAt(TERMS), 'complete document')
   })
 
