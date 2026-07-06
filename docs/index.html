@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>@copse/streaming-markdown — Live Demo</title>
+  <!-- Shared Copse "wave" mark (from copse-dev/agent-pane, assets/icon-app-wave.svg).
+       SVG is primary; PNG sizes are legacy/apple/manifest fallbacks. -->
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="./favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="./favicon-16.png" sizes="16x16" type="image/png">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="manifest" href="./site.webmanifest">
+  <meta name="theme-color" content="#0F172A">
   <!-- Mermaid is an OPTIONAL PEER of the package — never bundled. The lazy
        backend does `import('mermaid')` at first render; this import map is the
        demo's stand-in for `npm install mermaid` in a real host. -->
@@ -45,6 +53,15 @@
       color: var(--text);
       line-height: 1.6;
     }
+
+    /* Prose links. The section bodies have no link styling of their own, so
+       without this they fall back to the browser defaults — an unreadably dark
+       blue when unvisited and purple when visited on the dark theme. Both states
+       use the accent so they stay legible; more specific rules
+       (.compare-panel-body a, .site-footer a) still win where they apply. */
+    a { color: var(--accent); }
+    a:visited { color: var(--accent); }
+    a:hover { text-decoration: underline; }
 
     /* ── Header ─────────────────────────────────────────── */
     .site-header {
