@@ -21,7 +21,7 @@
 // escaped plain text); only `renderMarkdown` is measured here.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { renderMarkdown } from './renderer.ts'
 import { stripAppCodeDecorations } from './highlight.ts'
@@ -32,6 +32,7 @@ import {
   gfmSpecVersion,
   loadGfmSpec,
   GFM_EXTENSION_SECTIONS,
+  GFM_SPEC_PATH,
   type SpecExample,
 } from '../tests/gfm/load-spec.ts'
 
@@ -47,6 +48,16 @@ interface GfmConformanceBaseline {
 
 const BASELINE_PATH = resolve(process.cwd(), 'tests/fixtures/gfm/gfm-conformance-baseline.json')
 
+// The GFM spec.txt is fetched on demand (not vendored — see tests/gfm/load-spec.ts),
+// so a bare offline `npm test` may not have it. Skip cleanly with a pointer rather
+// than hard-fail; CI runs `npm run check:gfm-spec` first, so it always has the spec.
+if (!existsSync(GFM_SPEC_PATH)) {
+  describe('GFM conformance (at rest)', () => {
+    it('is skipped — GFM spec not fetched (run `npm run check:gfm-spec`)', { skip: true }, () => {})
+  })
+} else runGfmConformance()
+
+function runGfmConformance(): void {
 // The baseline was recorded with highlighting on; register the backend so the
 // conformance render matches it (span decorations are stripped before comparison).
 installHighlightjs()
@@ -86,7 +97,7 @@ describe('GFM conformance (at rest)', () => {
   if (process.env['UPDATE_GFM_BASELINE'] === '1') {
     const baseline: GfmConformanceBaseline = {
       specVersion: SPEC_VERSION,
-      source: `github/cmark-gfm spec.txt @ 0.29.0.gfm.13 (vendored: tests/fixtures/gfm/spec.txt)`,
+      source: `github/cmark-gfm spec.txt @ 0.29.0.gfm.13 (fetched to tests/fixtures/gfm/spec.txt)`,
       note: 'Examples from the official GitHub Flavored Markdown spec that renderMarkdown() satisfies at rest, after the spec normalizer. GFM is a superset of CommonMark, so the base sections mirror the CommonMark baseline; the GFM-only sections are broken out in extensionSummary. This is a regression baseline, not a conformance goal — the renderer escapes untrusted HTML (sanitize-at-the-sink) and implements a subset of the autolink/strikethrough grammar, so HTML blocks, Raw HTML, and parts of the extension sections fail by design.',
       total: spec.length,
       passing,
@@ -102,7 +113,7 @@ describe('GFM conformance (at rest)', () => {
 
   const baseline = JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) as GfmConformanceBaseline
 
-  it('pins the vendored GFM spec version', () => {
+  it('pins the fetched GFM spec version', () => {
     assert.equal(baseline.specVersion, SPEC_VERSION)
     assert.equal(baseline.total, spec.length)
   })
@@ -134,3 +145,4 @@ describe('GFM conformance (at rest)', () => {
     )
   })
 })
+}

@@ -1,16 +1,17 @@
-// Verify (or refresh) the vendored GitHub Flavored Markdown `spec.txt`.
+// Fetch (or verify) the GitHub Flavored Markdown `spec.txt`.
 //
 // Unlike CommonMark — whose spec ships as the `commonmark-spec` npm
-// devDependency — GFM's spec is not published to npm, so `spec.txt` is vendored
-// into the repo at `tests/fixtures/gfm/spec.txt`. This script pins its
-// provenance: it fetches the file from a pinned upstream tag and verifies the
-// SHA-256, exactly like `fetch-reference-normalizer.mts` does for normalize.py.
+// devDependency — GFM's spec is not published to npm. Rather than vendoring its
+// ~10k-line `spec.txt`, this script fetches it on demand into
+// `tests/fixtures/gfm/spec.txt` (gitignored) from a pinned upstream tag and
+// verifies the SHA-256, exactly like `fetch-reference-normalizer.mts` does for
+// normalize.py.
 //
-// Default (CI-friendly): assert the checked-in file matches the pinned SHA-256,
-// downloading only if the file is missing. Pass `--refresh` to re-download and
-// overwrite (used when bumping the pinned tag: update `GFM_SPEC_SOURCE` in
-// tests/gfm/load-spec.ts, run with --refresh, then re-baseline with
-// `UPDATE_GFM_BASELINE=1 npm test`).
+// Default: if the file is present, assert it matches the pinned SHA-256; if it is
+// missing (fresh checkout / CI), download and verify it. Pass `--refresh` to
+// re-download and overwrite (used when bumping the pinned tag: update
+// `GFM_SPEC_SOURCE` in tests/gfm/load-spec.ts, run with --refresh, then re-baseline
+// with `UPDATE_GFM_BASELINE=1 npm test`).
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { GFM_SPEC_PATH, GFM_SPEC_SOURCE } from '../tests/gfm/load-spec.ts'
@@ -34,11 +35,11 @@ async function download(): Promise<Uint8Array> {
 if (!refresh && existsSync(GFM_SPEC_PATH)) {
   const actual = sha256(readFileSync(GFM_SPEC_PATH))
   if (actual === GFM_SPEC_SOURCE.sha256) {
-    console.log('fetch-gfm-spec: vendored spec.txt matches the pinned SHA-256.')
+    console.log('fetch-gfm-spec: spec.txt matches the pinned SHA-256.')
     process.exit(0)
   }
   die(
-    `vendored spec.txt SHA-256 mismatch\n  expected ${GFM_SPEC_SOURCE.sha256}\n  actual   ${actual}\n` +
+    `spec.txt SHA-256 mismatch\n  expected ${GFM_SPEC_SOURCE.sha256}\n  actual   ${actual}\n` +
       `Run with --refresh to re-download, or restore the file.`,
   )
 }

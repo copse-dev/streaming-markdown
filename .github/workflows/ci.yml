@@ -86,11 +86,10 @@ jobs:
       # two absolute throughput-floor perf checks self-skip under instrumentation
       # — the relative O(n²) scaling-regression guard still runs. See
       # scripts/coverage-gate.mts.
-      # Tamper-check the vendored GFM spec.txt against its pinned SHA-256 (the
-      # GFM spec is not on npm, so unlike the CommonMark spec it is checked in;
-      # this asserts it still matches the pinned upstream tag). Offline when the
-      # file is present — it only re-downloads if the fixture is missing.
-      - name: Verify vendored GFM spec
+      # Fetch the GFM spec.txt (gitignored, not on npm) from its pinned upstream
+      # tag and verify its SHA-256 — the GFM conformance test in the suite below
+      # needs it present. Same fetch-and-verify pattern as the reference normalizer.
+      - name: Fetch + verify GFM spec
         run: npm run check:gfm-spec
 
       - name: Test + coverage

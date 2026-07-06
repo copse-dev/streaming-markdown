@@ -9,3 +9,6 @@ scripts/.reference-normalizer/
 # fetched at check time by scripts/fetch-reference-normalizer.mts
 tests/commonmark/normalize.py
 tests/commonmark/__pycache__/
+
+# fetched at check time by scripts/fetch-gfm-spec.mts (not published to npm; too large to vendor)
+tests/fixtures/gfm/spec.txt

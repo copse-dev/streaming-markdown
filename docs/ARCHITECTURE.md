@@ -358,11 +358,13 @@ re-baseline with `UPDATE_GFM_BASELINE=1 npm test`). The baseline JSON also carri
 `extensionSummary` block isolating the five GFM-only sections.
 
 Unlike CommonMark — which ships as the `commonmark-spec` devDependency — the GFM
-spec is **not published to npm**, so its `spec.txt` is **vendored** at
-`tests/fixtures/gfm/spec.txt` (from `github/cmark-gfm`, tag `0.29.0.gfm.13`). Its
-provenance is pinned by SHA-256 in `tests/gfm/load-spec.ts` and enforced by
-`scripts/fetch-gfm-spec.mts` (`npm run check:gfm-spec`, a CI step) — the same
-tamper-evident, pin-by-hash pattern used for the reference normalizer. Both specs
+spec is **not published to npm**. Rather than vendor its ~10k-line `spec.txt`, it is
+**fetched on demand** into `tests/fixtures/gfm/spec.txt` (gitignored) from
+`github/cmark-gfm` tag `0.29.0.gfm.13`. Its provenance is pinned by SHA-256 in
+`tests/gfm/load-spec.ts` and enforced by `scripts/fetch-gfm-spec.mts`
+(`npm run check:gfm-spec`, a CI step that runs before the suite) — the same
+fetch-and-verify pattern used for the reference normalizer. A bare offline
+`npm test` without the fetched spec skips the GFM suite cleanly. Both specs
 share one example parser (`parseSpecExamples` in `tests/commonmark/load-spec.ts`);
 GFM tags its extension examples with a category word on the fence (`example table`),
 which the parser tolerates. To bump the spec: edit `GFM_SPEC_SOURCE` in
