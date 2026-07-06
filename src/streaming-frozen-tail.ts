@@ -53,7 +53,7 @@ import {
   type ListGroupSignature,
 } from './render-blocks.ts'
 import { type LinkReferenceMap } from './link-references.ts'
-import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml, setSanitizedHtml } from './html-sink.ts'
 import { renderMarkdown, TOP_LEVEL_RENDER_OPTS } from './renderer.ts'
 import {
@@ -411,14 +411,15 @@ export class FrozenTailRenderer {
     // frame's leftover tail nodes and any block-level pending elements.
     // Seam rule: `renderBlocks` joins non-empty top-level blocks with '\n'
     // (gap B) — empty parts get neither a seam nor an append.
-    const parts: string[] = []
+    const parts: SanitizedHtml[] = []
     if (deltaHtml !== '') parts.push(sanitizeRenderedMarkdown(deltaHtml))
     if (tailHtml !== '') parts.push(sanitizeRenderedMarkdown(tailHtml))
     const lead = this.frozenHasHtml && parts.length > 0 ? '\n' : ''
     morphInnerHtmlFrom(
       completedEl,
       this.frozenNodeCount,
-      parts.length > 0 ? lead + parts.join('\n') : '',
+      // Sanitized parts joined with literal '\n' seams — sanitizer-equivalent.
+      parts.length > 0 ? asSanitizedHtml(lead + parts.join('\n')) : '',
     )
 
     // Advance the frozen bookkeeping over the delta's nodes. The count comes
@@ -429,7 +430,8 @@ export class FrozenTailRenderer {
     // runs collapse to one element).
     if (deltaHtml !== '') {
       const probe = completedEl.cloneNode(false) as HTMLElement
-      setPresanitizedHtml(probe, lead + (parts[0] ?? ''))
+      // Same sanitized delta + literal seam the morph above just consumed.
+      setPresanitizedHtml(probe, asSanitizedHtml(lead + (parts[0] ?? '')))
       this.frozenNodeCount += probe.childNodes.length
       this.frozenHasHtml = true
     }

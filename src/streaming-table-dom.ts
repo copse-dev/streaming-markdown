@@ -3,7 +3,7 @@ import { dropTrailingNewline } from './block-patterns.ts'
 import { escapeHtml } from './escape.ts'
 import { pendingHoldIndex } from './inline-emphasis.ts'
 import { renderStreamingInline } from './render-pending-line.ts'
-import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import { sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml } from './html-sink.ts'
 
 const FORMING_TABLE_CLASS = 'stream-table-forming'
@@ -20,7 +20,7 @@ function visibleCellSource(raw: string): string {
   return raw.slice(0, pendingHoldIndex(raw))
 }
 
-function renderStreamingTableCell(raw: string): string {
+function renderStreamingTableCell(raw: string): SanitizedHtml | '' {
   const visible = visibleCellSource(raw)
   return visible ? sanitizeRenderedMarkdown(renderStreamingInline(visible)) : ''
 }

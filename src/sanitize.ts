@@ -247,12 +247,39 @@ function buildSanitizerConfig(): SanitizerConfig {
   return { allowedTags, allowedAttr, onElement: gateElement }
 }
 
+declare const SANITIZED_HTML_BRAND: unique symbol
+
+/**
+ * HTML that is safe to hand to the presanitized sink: it came out of
+ * {@link sanitizeRenderedMarkdown}, or was composed from such output plus
+ * literal allowlisted markup at an audited {@link asSanitizedHtml} site.
+ *
+ * The brand is compile-time only (a `SanitizedHtml` IS a `string` at runtime
+ * and assignable wherever a string is expected); its purpose is the reverse
+ * direction — an arbitrary string cannot flow into `setPresanitizedHtml`
+ * without either passing through the sanitizer or an explicit, greppable
+ * `asSanitizedHtml` assertion.
+ */
+export type SanitizedHtml = string & { readonly [SANITIZED_HTML_BRAND]: true }
+
+/**
+ * Assert that `html` is sanitizer-equivalent without re-sanitizing. Internal
+ * escape hatch for the audited composition sites — wrapping sanitized
+ * fragments in literal allowlisted tags, or joining sanitized parts with
+ * literal seams. Every call site must be justifiable as "sanitizer output +
+ * markup this codebase wrote"; new call sites are a review flag. Not exported
+ * from the package entry point.
+ */
+export function asSanitizedHtml(html: string): SanitizedHtml {
+  return html as SanitizedHtml
+}
+
 /** Sanitize rendered-markdown HTML before it is assigned to `innerHTML`. */
-export function sanitizeRenderedMarkdown(html: string): string {
+export function sanitizeRenderedMarkdown(html: string): SanitizedHtml {
   const sanitized = resolveBackend().sanitize(html, buildSanitizerConfig())
   // Any path that escaped a model-emitted &nbsp; before decode would surface literal
   // "&nbsp;" text; normalize those back to real NBSP before innerHTML assignment.
-  return sanitized.replace(DOUBLE_ENCODED_NBSP_RE, '\u00a0')
+  return asSanitizedHtml(sanitized.replace(DOUBLE_ENCODED_NBSP_RE, '\u00a0'))
 }
 
 /**

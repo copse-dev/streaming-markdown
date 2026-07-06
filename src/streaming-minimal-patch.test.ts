@@ -21,6 +21,11 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { StreamingMarkdownRenderer } from './streaming.ts'
 import { morphInnerHtml } from './streaming-dom-morph.ts'
+import { asSanitizedHtml } from './sanitize.ts'
+
+// morph accepts audited sanitizer-equivalent markup; these literals are
+// hand-written test fixtures, asserted as such.
+const html = asSanitizedHtml
 
 function completeEl(host: HTMLElement): HTMLElement {
   const el = host.querySelector('.stream-complete')
@@ -165,11 +170,11 @@ describe('streaming pending→committed transitions are minimal DOM patches', ()
 describe('morphInnerHtml (minimal-patch primitive)', () => {
   it('reuses unchanged nodes and serializes identically to innerHTML assignment', () => {
     const el = document.createElement('div')
-    morphInnerHtml(el, '<p>one</p>\n<p>two</p>')
+    morphInnerHtml(el, html('<p>one</p>\n<p>two</p>'))
     const first = el.children[0]
     const second = el.children[1]
 
-    morphInnerHtml(el, '<p>one</p>\n<p>two</p>\n<h3>three</h3>')
+    morphInnerHtml(el, html('<p>one</p>\n<p>two</p>\n<h3>three</h3>'))
     assert.equal(el.children[0], first, 'unchanged leading node reused')
     assert.equal(el.children[1], second, 'unchanged middle node reused')
 
@@ -180,24 +185,24 @@ describe('morphInnerHtml (minimal-patch primitive)', () => {
 
   it('replaces a node whose tag changes while keeping its siblings', () => {
     const el = document.createElement('div')
-    morphInnerHtml(el, '<p>keep</p>\n<div class="stream-pending-heading">x</div>')
+    morphInnerHtml(el, html('<p>keep</p>\n<div class="stream-pending-heading">x</div>'))
     const keep = el.children[0]
 
-    morphInnerHtml(el, '<p>keep</p>\n<h3>x</h3>')
+    morphInnerHtml(el, html('<p>keep</p>\n<h3>x</h3>'))
     assert.equal(el.children[0], keep, 'sibling preserved when the neighbour changes tag')
     assert.equal(el.children[1]?.tagName, 'H3', 'changed node replaced with the new tag')
   })
 
   it('replaces a node whose attributes change so serialization stays correct', () => {
     const el = document.createElement('div')
-    morphInnerHtml(el, '<ol><li>a</li></ol>')
-    morphInnerHtml(el, '<ol start="2"><li>a</li></ol>')
+    morphInnerHtml(el, html('<ol><li>a</li></ol>'))
+    morphInnerHtml(el, html('<ol start="2"><li>a</li></ol>'))
     assert.equal(el.innerHTML, '<ol start="2"><li>a</li></ol>', 'attribute change reflected exactly')
   })
 
   it('clears content when given empty html', () => {
     const el = document.createElement('div')
-    morphInnerHtml(el, '<p>x</p>')
+    morphInnerHtml(el, html('<p>x</p>'))
     morphInnerHtml(el, '')
     assert.equal(el.innerHTML, '', 'empty html empties the container')
   })

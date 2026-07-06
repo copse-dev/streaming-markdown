@@ -20,7 +20,7 @@ import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from '.
 import { IncrementalSourceScanner } from './incremental-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
-import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml } from './html-sink.ts'
 import {
   appendPendingTableRowHtml,
@@ -138,7 +138,7 @@ function pendingListTag(pending: string): 'ul' | 'ol' {
 
 function blockPendingLiHtml(
   pending: string,
-  pendingInner: string,
+  pendingInner: SanitizedHtml | '',
   openListItemFirstLine?: string,
 ): string {
   const inner = wrapBlockPendingInner(pending, pendingInner)
@@ -148,7 +148,7 @@ function blockPendingLiHtml(
 function appendListPendingHtml(
   rendered: string,
   pending: string,
-  pendingInner: string,
+  pendingInner: SanitizedHtml | '',
   openListItemFirstLine?: string,
 ): string {
   const listTag = pendingListTag(pending)
@@ -186,7 +186,7 @@ function findTrailingListHost(completedEl: HTMLElement, listTag: 'ul' | 'ol'): H
 function syncListPendingDom(
   completedEl: HTMLElement,
   pending: string,
-  pendingInner: string,
+  pendingInner: SanitizedHtml | '',
   active: boolean,
   openListItemFirstLine?: string,
 ): void {
@@ -289,16 +289,20 @@ function blockPendingAttrs(pending: string): string {
   return attrs
 }
 
-function wrapBlockPendingInner(pending: string, pendingInner: string): string {
+function wrapBlockPendingInner(
+  pending: string,
+  pendingInner: SanitizedHtml | '',
+): SanitizedHtml | '' {
   if (isPendingBlockquoteLine(pending)) {
-    return pendingInner ? `<p>${pendingInner}</p>` : ''
+    // Sanitized inner wrapped in a literal allowlisted <p> — sanitizer-equivalent.
+    return pendingInner ? asSanitizedHtml(`<p>${pendingInner}</p>`) : ''
   }
   return pendingInner
 }
 
 function blockPendingHtml(
   pending: string,
-  pendingInner: string,
+  pendingInner: SanitizedHtml | '',
   openListItemFirstLine?: string,
 ): string {
   const tag = blockPendingTag(pending, openListItemFirstLine)
@@ -389,7 +393,7 @@ function clearParagraphContinuationDom(completedEl: HTMLElement): void {
 
 function syncParagraphContinuationDom(
   completedEl: HTMLElement,
-  pendingInner: string,
+  pendingInner: SanitizedHtml | '',
   active: boolean,
 ): boolean {
   const host = findTrailingParagraphHost(completedEl)
@@ -419,7 +423,7 @@ function syncParagraphContinuationDom(
 
 function syncListContinuationDom(
   completedEl: HTMLElement,
-  pendingInner: string,
+  pendingInner: SanitizedHtml | '',
   active: boolean,
 ): boolean {
   const li = findOpenListItemHost(completedEl)
@@ -441,14 +445,18 @@ function syncListContinuationDom(
     li.append(el)
   }
   el.className = `stream-pending ${LIST_CONTINUATION_CLASS} ${BLOCK_PENDING_CLASS}`
-  setPresanitizedHtml(el, pendingInner.startsWith(' ') ? pendingInner : ` ${pendingInner}`)
+  // Literal leading-space seam on sanitized inner — sanitizer-equivalent.
+  setPresanitizedHtml(
+    el,
+    pendingInner.startsWith(' ') ? pendingInner : asSanitizedHtml(` ${pendingInner}`),
+  )
   return true
 }
 
 function syncBlockPendingDom(
   completedEl: HTMLElement,
   split: StreamingSplit,
-  pendingInner: string,
+  pendingInner: SanitizedHtml | '',
   active: boolean,
 ): void {
   const { pending, openListItemFirstLine } = split
@@ -504,7 +512,7 @@ function syncBlockPendingDom(
 
 function syncInlinePendingDom(
   pendingEl: HTMLSpanElement,
-  pendingInner: string,
+  pendingInner: SanitizedHtml | '',
   active: boolean,
 ): void {
   setPresanitizedHtml(pendingEl, pendingInner)
@@ -518,7 +526,7 @@ function renderPendingTail(
   complete: string,
   formingActive: boolean,
   completeTokens?: BlockToken[],
-): { pendingInner: string; pendingVisible: boolean } {
+): { pendingInner: SanitizedHtml | ''; pendingVisible: boolean } {
   const { pending, openListItemFirstLine } = split
   const pendingInTable = pendingLineBelongsInTable(complete, pending, completeTokens)
   const pendingInner =

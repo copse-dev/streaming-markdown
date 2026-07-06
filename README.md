@@ -13,14 +13,20 @@ npm install @copse/streaming-markdown
 
 ## Quick start
 
-**At rest** — render a complete string, then sanitize at the sink:
+**At rest** — render a complete string into an element. `setSanitizedHtml` is
+the reference sink: it sanitizes for you (and is Trusted Types-safe), so
+sanitization can't be forgotten at the call site:
 
 ```ts
-import { renderMarkdown, sanitizeRenderedMarkdown } from '@copse/streaming-markdown'
+import { renderMarkdown, setSanitizedHtml } from '@copse/streaming-markdown'
 
-// renderMarkdown returns UNTRUSTED HTML — sanitize at every innerHTML sink.
-el.innerHTML = sanitizeRenderedMarkdown(renderMarkdown('# Hi\n\n**bold** and ~~strike~~'))
+setSanitizedHtml(el, renderMarkdown('# Hi\n\n**bold** and ~~strike~~'))
 ```
+
+Working with strings end-to-end (SSR, snapshots, non-DOM pipelines)?
+`renderMarkdown` returns **untrusted** HTML — pass it through
+`sanitizeRenderedMarkdown` before it reaches any `innerHTML` sink you manage
+yourself.
 
 **Streaming** — feed the growing string on each token. The string emitter is the
 simplest; the DOM emitter patches incrementally instead of replacing `innerHTML`:
@@ -100,4 +106,6 @@ npm install
 npm run typecheck   # tsc (strict, exactOptionalPropertyTypes)
 npm test            # node:test via tsx — unit + CommonMark & GFM conformance
 npm run build       # emit dist/ (ESM JS + .d.ts)
+npm run test:e2e    # Trusted Types enforcement e2e in real Chromium (skips without a browser)
+npm run bench:browser  # sink-path throughput in real Chromium, incl. a TT-enforced page
 ```
