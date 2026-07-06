@@ -11,6 +11,7 @@ it unless you import it. Register each once, before your first render.
 | Syntax highlighter | `setCodeHighlighter` | `…/highlighters/highlightjs` |
 | Diagram renderer | `setDiagramRenderer` | `…/diagrams/mermaid` |
 | Custom fenced blocks | `setFenceHandler` | — (you supply the handler) |
+| Custom inline syntax | `setInlinePasses` | — (you supply the pass) |
 | `<a>` routing | `setLinkDecorator` | — |
 | Raw `<img>` handling | `setRawImageRenderer` | — |
 | Sanitizer allowlist | `setSanitizeExtension` | — |
@@ -154,6 +155,48 @@ KaTeX, …) **after** the HTML is sanitized at the sink — mermaid's hydrator i
 `hydratePendingDiagrams`. Fences are opaque to the parser, so handlers change
 emission only. `setFenceHandler('mermaid', null)` removes the built-in and
 renders mermaid fences as ordinary code blocks.
+
+## Custom inline syntax (inline passes)
+
+Fence handlers extend *block* syntax; **inline passes** extend *inline* syntax —
+Pandoc-style citations `[@key]`, `==highlights==`, emoji shortcodes — without
+forking the fixed inline pipeline. Register ordered passes with `setInlinePasses`:
+
+```ts
+import { setInlinePasses, escapeHtml } from '@copse/streaming-markdown'
+
+setInlinePasses([
+  {
+    name: 'citations',
+    stage: 'before-links', // consume [@key] before it parses as a link label (Pandoc order)
+    apply: (text, ctx) =>
+      text.replace(/\[@([\w.-]+)\]/g, (_m, key) =>
+        // ctx.emit shields trusted HTML from later passes and the escape step.
+        ctx.emit(`<cite class="citation">@${escapeHtml(key)}</cite>`)),
+    // Optional streaming hold: don't flash a half-open `[@doe` mid-stream.
+    holdStart: (line) => {
+      const i = line.lastIndexOf('[@')
+      return i === -1 ? line.length : i
+    },
+  },
+])
+```
+
+- **Stage.** `before-links` (default) runs after emphasis/strikethrough and before
+  markdown-link resolution — required for bracket syntaxes that must beat link
+  labels. `after-links` runs last, over text with `<a>`/`<code>` already rendered.
+- **Shielded and escaped for you.** A pass only sees text *outside* rendered
+  `<code>`/`<a>`/`<img>` spans, and backslash escapes are already inert — so
+  `` `[@key]` `` and `\[@key]` never fire. Emit HTML through `ctx.emit(html)`: it's
+  parked behind an inert placeholder and restored *after* the escape step, so your
+  markup survives instead of being escaped away.
+- **Streaming hold.** An optional `holdStart` keeps a half-open construct (`[@doe`,
+  `==foo`) from flashing raw mid-stream — the same mechanism as the built-in
+  strikethrough hold.
+- **The sanitizer is still the gate.** Emitted tags/attributes outside the core
+  allowlist need `setSanitizeExtension` (below).
+
+With no passes registered the pipeline is unchanged and output is byte-identical.
 
 ## Link routing (`LinkDecorator`)
 

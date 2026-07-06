@@ -47,14 +47,15 @@ for await (const chunk of stream) {
   DOMPurify, and mermaid are **optional and lazy** — never in your bundle unless
   you opt in. See [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md).
 - **Pluggable everything** — sanitizer, syntax highlighter, mermaid & custom
-  fenced blocks, and `<a>` routing are all injectable.
+  fenced blocks, custom inline syntax (citations, highlights), and `<a>` routing
+  are all injectable.
 
 ## Extending
 
-The sanitizer, syntax highlighter, diagram/fenced-block renderers, link routing,
-and raw-image handling are all plug points — register a backend once and it stays
-out of your bundle until you do. The full guide, with code for each, is in
-**[`docs/EXTENDING.md`](docs/EXTENDING.md)**:
+The sanitizer, syntax highlighter, diagram/fenced-block renderers, custom inline
+syntax, link routing, and raw-image handling are all plug points — register a
+backend once and it stays out of your bundle until you do. The full guide, with
+code for each, is in **[`docs/EXTENDING.md`](docs/EXTENDING.md)**:
 
 ```ts
 import { setSanitizerBackend } from '@copse/streaming-markdown'

@@ -103,3 +103,14 @@ export {
   workspaceLinkTargetFromHref,
   type WorkspaceLinkTarget,
 } from './workspace-link-href.ts'
+// Inline syntax is extensible via registered passes (#53): citations `[@key]`,
+// highlights `==x==`, and friends run inside the inline pipeline with code-span
+// shielding, escape-safe HTML emission (ctx.emit), and streaming-hold support.
+// Emitted HTML still passes the sanitizer sink — widen via setSanitizeExtension.
+export {
+  getInlinePasses,
+  type InlinePass,
+  type InlinePassContext,
+  type InlinePassStage,
+  setInlinePasses,
+} from './inline-passes.ts'
