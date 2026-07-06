@@ -5,6 +5,42 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-07-06
+
+### Features
+
+- land pluggable inline syntax passes (setInlinePasses) on main (#66) (`d28e2b2`)
+- pluggable fence-handler registry for mermaid-style custom blocks (#53) (#54) (`8431595`)
+
+### Bug Fixes
+
+- validate content of preserved raw-HTML tags before emit (#57) (`920ee52`)
+- remove ReDoS in the angle-autolink verbatim regex (#56) (`0bd15d7`)
+
+### Documentation
+
+- readable prose-link colors + wave favicon set (#64) (`78a3e93`)
+- slim the README, add an extending guide, tidy the site (#63) (`9c3df98`)
+
+### Continuous Integration
+
+- deploy demo to GitHub Pages instead of committing built bundles (#61) (`1dc36e5`)
+- scope CI token to read, harden the release workflow (#59) (`67712ee`)
+
+### Chores
+
+- optional highlight.js peer, require(esm) support, sane maps (#58) (`fee8a7f`)
+
+### Other Changes
+
+- Trusted Types e2e suite, browser sink benchmark, and compile-time SanitizedHtml brand (#67) (`fcc33d9`)
+- Add Trusted Types support with innerHTML chokepoint (#65) (`70ce784`)
+- docs,scripts: fix changelog-gen bugs, cwd-independent loaders, stale refs (#60) (`b3de187`)
+- Full GFM table conformance (Tables extension 8/8) (#62) (`85ab15b`)
+- Add GFM spec conformance harness + refresh conformance docs (#52) (`a856d95`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v0.4.0...v0.5.0
+
 ## [0.4.0] - 2026-07-06
 
 ### Documentation
