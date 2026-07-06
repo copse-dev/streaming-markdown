@@ -119,3 +119,38 @@ design invariant). A safety-conscious host can pass `hydratePendingDiagrams(root
 The mechanism is covered by `src/mermaid-lazy.test.ts` with a stub renderer (the
 real mermaid library needs a browser DOM it can't get in jsdom); the backend module
 is the thin adapter over `mermaid.render`.
+
+## KaTeX — the same shape again, for math
+
+Math (#70) mirrors mermaid exactly. The generator emits inert scaffolding for
+every math form — ```` ```math ```` fences, `$$ … $$` / `\[ … \]` display
+blocks, and `$…$` / `\(…\)` inline spans
+(`math-block--pending` / `math-inline--pending`, escaped TeX source inside) —
+so the KaTeX payload is never needed at render time:
+
+- **`math.ts` (core)** carries no KaTeX code: the registry (`setMathRenderer` /
+  `getMathRenderer`), the `MathRenderer` interface, and
+  `hydratePendingMath(root, opts?)` — which finds every pending block/span under
+  `root`, renders it (display mode for blocks, inline for spans), and flips the
+  element to `--rendered` (HTML injected) or `--error` (escaped source kept
+  visible).
+- **`math-katex.ts` (backend)** is the only module that references `katex`. It
+  lives behind `@copse/streaming-markdown/math/katex` and exports
+  `katexMathRenderer`, `installKatex()`, and `loadKatex()`. `katex` is an
+  **optional peer dependency**, imported through a variable-specifier dynamic
+  import so the package builds and type-checks without it.
+
+```ts
+import { hydratePendingMath } from '@copse/streaming-markdown'
+
+const { loadKatex } = await import('@copse/streaming-markdown/math/katex')
+await loadKatex()                   // registers the backend; library loads lazily
+await hydratePendingMath(messageEl) // pending → rendered KaTeX HTML
+```
+
+The host also loads KaTeX's stylesheet/fonts (`katex/dist/katex.min.css`).
+
+**Trust boundary:** KaTeX HTML is injected *after* the sink sanitizer and not
+re-sanitized, matching the mermaid invariant; `hydratePendingMath(root,
+{ transformHtml })` is the seam for a host that wants to (and the required hook
+under Trusted Types enforcement).

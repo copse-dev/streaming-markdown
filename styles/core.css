@@ -71,6 +71,16 @@
     padding: 0;
   }
 
+  /* Pending math shows its TeX source verbatim; wrap instead of blowing out.
+     Rendered KaTeX (display mode) scrolls inside its own block. */
+  & .math-block--pending pre.math,
+  & .math-block--error pre.math {
+    white-space: pre-wrap;
+  }
+  & .math-block--rendered {
+    overflow-x: auto;
+  }
+
   /* Blowout guards: keep wide tables and rendered diagrams inside the column. */
   & table {
     max-width: 100%;
