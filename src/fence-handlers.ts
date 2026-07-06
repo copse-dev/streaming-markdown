@@ -33,9 +33,11 @@ export interface FenceHandlerForming {
    * container holding foreign content (the fence may have been reclassified
    * from another language mid-stream) — recreate its own scaffolding when its
    * root selector is missing. When omitted, the emitter falls back to
-   * sanitizing {@link FenceHandlerForming.html} into `container.innerHTML`
-   * each update — correct, but a full-subtree replacement per token; provide
-   * `sync` for minimal patches.
+   * sanitizing {@link FenceHandlerForming.html} into the container via
+   * `setSanitizedHtml` each update — correct, but a full-subtree replacement
+   * per token; provide `sync` for minimal patches. Implementations that write
+   * HTML themselves should use `setSanitizedHtml` (not raw `innerHTML`) so
+   * they inherit sanitization and Trusted Types support.
    */
   sync?(container: HTMLElement, code: string, lang: string): void
 }

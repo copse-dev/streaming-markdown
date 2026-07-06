@@ -64,6 +64,11 @@ import { dompurifyBackend } from '@copse/streaming-markdown/sanitizers/dompurify
 setSanitizerBackend(dompurifyBackend) // e.g. for Node/jsdom/SSR
 ```
 
+Pages that enforce [Trusted Types](https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API)
+(`require-trusted-types-for 'script'`) are supported out of the box with any
+backend — see [Trusted Types in `docs/EXTENDING.md`](docs/EXTENDING.md#trusted-types)
+for the CSP policy names and the `setTrustedTypesPolicy` hook.
+
 ## Styling
 
 The renderer emits documented class hooks but ships no styles by default.

@@ -13,6 +13,8 @@
 // is structurally interchangeable with its counterpart, which keeps the
 // serialization byte-for-byte identical to a fresh parse.
 
+import { setPresanitizedHtml } from './html-sink.ts'
+
 const TEXT_NODE = 3
 const ELEMENT_NODE = 1
 const COMMENT_NODE = 8
@@ -110,8 +112,10 @@ export function morphInnerHtmlFrom(container: HTMLElement, startIndex: number, h
   }
   // Shallow-clone the container so `html` parses in an identical context to
   // `container.innerHTML = html`, guaranteeing byte-identical serialization.
+  // Callers pass sanitized markup; the sink helper only routes the assignment
+  // through the Trusted Types policy when one is active.
   const template = container.cloneNode(false) as HTMLElement
-  template.innerHTML = html
+  setPresanitizedHtml(template, html)
   morphChildren(container, template, startIndex)
 }
 

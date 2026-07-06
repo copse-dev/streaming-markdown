@@ -27,17 +27,53 @@ function installHook(): void {
   })
 }
 
+// Arm the per-call element gate around a DOMPurify run so the hook/teardown
+// lifecycle lives in one place for both the string and node paths.
+function withGate<T>(config: SanitizerConfig, run: () => T): T {
+  installHook()
+  activeOnElement = config.onElement
+  try {
+    return run()
+  } finally {
+    activeOnElement = undefined
+  }
+}
+
 export const dompurifyBackend: SanitizerBackend = {
   sanitize(html: string, config: SanitizerConfig): string {
-    installHook()
-    activeOnElement = config.onElement
-    try {
-      return DOMPurify.sanitize(html, {
+    return withGate(config, () =>
+      DOMPurify.sanitize(html, {
         ALLOWED_TAGS: [...config.allowedTags],
         ALLOWED_ATTR: [...config.allowedAttr],
-      })
-    } finally {
-      activeOnElement = undefined
+      }),
+    )
+  },
+  // Node path: hand the sanitized fragment's nodes to the target directly, so a
+  // sink write costs one parse (DOMPurify's) with no serialize→re-parse round
+  // trip — and no `innerHTML` write, which also sidesteps Trusted Types sinks.
+  // DOMPurify parses in body context, so content must be body-context-safe
+  // (see the sanitizeInto contract in sanitize.ts).
+  sanitizeInto(target: Element, html: string, config: SanitizerConfig): void {
+    const fragment = withGate(config, () =>
+      DOMPurify.sanitize(html, {
+        ALLOWED_TAGS: [...config.allowedTags],
+        ALLOWED_ATTR: [...config.allowedAttr],
+        RETURN_DOM_FRAGMENT: true,
+      }),
+    )
+    /* c8 ignore start -- only reachable in a real browser: when DOMPurify
+       cannot parse at all (its internal DOMParser is a Trusted Types sink and
+       the page's CSP does not allowlist DOMPurify's own 'dompurify' policy),
+       its string path returns '' and its fragment path returns null. Mirror
+       the string path's empty result instead of crashing on the null. */
+    if (!fragment) {
+      target.replaceChildren()
+      return
     }
+    /* c8 ignore stop */
+    const doc = target.ownerDocument
+    target.replaceChildren(
+      fragment.ownerDocument === doc ? fragment : doc.importNode(fragment, true),
+    )
   },
 }

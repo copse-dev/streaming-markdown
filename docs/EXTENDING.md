@@ -42,6 +42,61 @@ You can also supply your own `SanitizerBackend`. If no backend is set and the
 native API is unavailable, `sanitizeRenderedMarkdown` throws rather than emit
 unsanitized HTML.
 
+Backends may implement an optional **node path** (`SanitizerBackend.sanitizeInto`):
+the sanitized nodes are placed into the target element directly — one parse per
+write instead of the string path's parse -> serialize -> re-parse, and no
+`innerHTML` sink at all. Both bundled backends implement it; custom backends may
+omit it and sinks fall back to the string path. The node path must parse in a
+neutral (body/div) context so both paths serialize identically, and if you wrap
+a bundled backend to customize `sanitize`, either override `sanitizeInto`
+consistently or omit it — a spread copies the bundled node path, which sinks
+prefer, silently bypassing your custom `sanitize`.
+
+## Trusted Types
+
+The package works on pages that enforce
+[Trusted Types](https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API)
+(`Content-Security-Policy: require-trusted-types-for 'script'`). Every internal
+DOM write goes through a single sink chokepoint that sanitizes first and then
+blesses the markup through a Trusted Types policy — a lazily created policy
+named `streaming-markdown` by default. This does not depend on the native
+Sanitizer API: with the DOMPurify (or any custom) backend, sanitized HTML is
+still assigned via `innerHTML` as policy-minted `TrustedHTML`. (When the active
+backend provides the node path above, most writes bypass `innerHTML` entirely
+and need no policy at all.)
+
+If your CSP restricts policy names (`trusted-types` directive), either
+allowlist `streaming-markdown` or inject your own policy:
+
+```ts
+import { setTrustedTypesPolicy } from '@copse/streaming-markdown'
+
+setTrustedTypesPolicy(
+  window.trustedTypes.createPolicy('my-app#markdown', { createHTML: (s) => s }),
+)
+```
+
+The injected policy always receives markup that has already been through
+`sanitizeRenderedMarkdown`, so an identity `createHTML` is sound — the hook
+exists for CSP policy-name control, not to replace the sanitizer.
+
+Edges to know about:
+
+- **DOMPurify backend under enforcement.** DOMPurify's internal parser is
+  itself a Trusted Types sink, and DOMPurify guards it with its own policy
+  named `dompurify`. If your CSP restricts policy names, allowlist both:
+  `trusted-types streaming-markdown dompurify` — otherwise DOMPurify cannot
+  parse and every render comes out empty.
+- **Your own sinks.** `renderMarkdown`/`renderStreamingMarkdown` return plain
+  strings; assigning them to `innerHTML` yourself still needs your own policy.
+  Prefer the exported `setSanitizedHtml(el, html)` — the package's reference
+  sink — which sanitizes and blesses in one call (also the right tool inside a
+  custom `FenceHandler.sync`).
+- **Mermaid SVG** bypasses the markdown sanitizer by design, so the package
+  never blesses it. Under enforcement, pass `transformSvg` to
+  `hydratePendingDiagrams` and return a `TrustedHTML` minted by your own policy
+  (e.g. `DOMPurify.sanitize(svg, { RETURN_TRUSTED_TYPE: true })`).
+
 ## Syntax highlighting
 
 Highlighting is a pluggable backend, like the sanitizer. The core carries no

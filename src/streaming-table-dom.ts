@@ -4,6 +4,7 @@ import { escapeHtml } from './escape.ts'
 import { pendingHoldIndex } from './inline-emphasis.ts'
 import { renderStreamingInline } from './render-pending-line.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import { setPresanitizedHtml } from './html-sink.ts'
 
 const FORMING_TABLE_CLASS = 'stream-table-forming'
 const PENDING_ROW_CLASS = 'stream-pending-row'
@@ -25,7 +26,7 @@ function renderStreamingTableCell(raw: string): string {
 }
 
 function setStreamingCellContent(cell: HTMLTableCellElement, raw: string): void {
-  cell.innerHTML = renderStreamingTableCell(raw)
+  setPresanitizedHtml(cell, renderStreamingTableCell(raw))
 }
 
 function ensureRow(parent: HTMLTableSectionElement, index: number): HTMLTableRowElement {

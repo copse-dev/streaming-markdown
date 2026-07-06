@@ -161,6 +161,21 @@ describe('browserSanitizerBackend (native setHTML path)', () => {
     )
   })
 
+  it('sanitizeInto parses in a detached div host and moves the nodes into the target', () => {
+    withSetHTML(
+      function (html) {
+        this.innerHTML = html
+      },
+      () => {
+        const target = document.createElement('code')
+        target.innerHTML = 'stale'
+        browserSanitizerBackend.sanitizeInto?.(target, input, config)
+        // Serializes exactly like the string path (same div-host parse context).
+        assert.equal(target.innerHTML, browserSanitizerBackend.sanitize(input, config))
+      },
+    )
+  })
+
   it('falls back to plain setHTML when the options argument is rejected', () => {
     let plainCalls = 0
     withSetHTML(

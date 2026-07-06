@@ -112,4 +112,30 @@ describe('lazy diagram hydration (prototype)', () => {
     assert.ok(!host.querySelector('script'), 'transformSvg ran before injection')
     assert.ok(host.querySelector('svg'))
   })
+
+  it('marks the diagram errored without retrying candidates when injection fails', async () => {
+    // An injection failure (e.g. Trusted Types rejecting a plain-string SVG)
+    // is candidate-independent — re-rendering the aggressive candidate would
+    // only hit the same sink error.
+    let renders = 0
+    const stub: DiagramRenderer = {
+      render: () => {
+        renders++
+        return Promise.resolve({ svg: '<svg></svg>' })
+      },
+    }
+    setDiagramRenderer(stub)
+
+    const host = renderToDom(MERMAID_MD)
+    const count = await hydratePendingDiagrams(host, {
+      transformSvg: () => {
+        throw new TypeError('TrustedHTML required')
+      },
+    })
+
+    assert.equal(count, 0)
+    assert.equal(renders, 1, 'no candidate retry after an injection failure')
+    const diagram = host.querySelector('.mermaid-diagram')
+    assert.ok(diagram?.classList.contains('mermaid-diagram--error'))
+  })
 })

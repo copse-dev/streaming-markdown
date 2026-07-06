@@ -2,6 +2,7 @@ import { parseOpenFenceContent } from './block-patterns.ts'
 import { FORMING_FENCE_PRE_CLASS, getFenceHandler } from './fence-handlers.ts'
 import { fenceCodeClass, highlightFenceCode } from './highlight.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import { setSanitizedHtml } from './html-sink.ts'
 
 function renderFormingFenceInner(lang: string, code: string): string {
   const handler = getFenceHandler(lang)
@@ -36,7 +37,7 @@ export function syncFormingFenceDom(container: HTMLElement, source: string): voi
     }
     // No incremental sync from the handler: fall back to replacing the
     // container's HTML with the (sanitized) forming markup each update.
-    container.innerHTML = sanitizeRenderedMarkdown(renderFormingFenceInner(lang, code))
+    setSanitizedHtml(container, renderFormingFenceInner(lang, code))
     return
   }
 
@@ -52,7 +53,7 @@ export function syncFormingFenceDom(container: HTMLElement, source: string): voi
   const codeEl = pre.querySelector('code')
   if (codeEl) {
     codeEl.className = fenceCodeClass(lang)
-    codeEl.innerHTML = sanitizeRenderedMarkdown(highlightFenceCode(code, lang))
+    setSanitizedHtml(codeEl, highlightFenceCode(code, lang))
   }
 }
 
