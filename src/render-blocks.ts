@@ -487,6 +487,10 @@ function renderSingleBlock(
       return '<hr>'
     case 'table':
       return renderTable(slice, linkRefs)
+    /* c8 ignore start -- unreachable in practice: renderBlocks routes
+       blockquote / list_item groups and skips blank / link_ref_def tokens before
+       ever calling renderSingleBlock, and every BlockToken kind is enumerated
+       above, so `default` never runs. Kept so the dispatch is total. */
     case 'blockquote':
       return renderBlockquote(slice, linkRefs)
     case 'list_item':
@@ -494,8 +498,10 @@ function renderSingleBlock(
     case 'link_ref_def':
     case 'blank':
       return ''
+    /* c8 ignore stop */
     case 'paragraph':
       return renderParagraph(slice, linkRefs, tightParagraphs)
+    /* c8 ignore next 2 -- unreachable: all kinds are enumerated above */
     default:
       return renderParagraph(slice, linkRefs, tightParagraphs)
   }

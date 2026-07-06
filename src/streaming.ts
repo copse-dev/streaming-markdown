@@ -195,6 +195,11 @@ function syncListPendingDom(
   const indent = listPendingIndent(pending)
   const existingPendingLi = tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)
 
+  /* c8 ignore start -- unreachable defensive guard: the only caller (update)
+     enters the block-pending path solely when `pendingVisible`, and
+     renderPendingTail sets `pendingVisible` only when `pendingInner !== ''`;
+     `active` is always passed `true`. Kept so this helper stays correct if ever
+     driven directly. */
   if (!active || !pendingInner) {
     existingPendingLi?.remove()
     const last = completedEl.lastElementChild
@@ -203,6 +208,7 @@ function syncListPendingDom(
     }
     return
   }
+  /* c8 ignore stop */
 
   let list: HTMLElement | null = null
   if (indent > 0) {
@@ -389,10 +395,14 @@ function syncParagraphContinuationDom(
   if (!host) return false
 
   const existing = host.querySelector(`:scope > .${PARAGRAPH_CONTINUATION_CLASS}`)
+  /* c8 ignore start -- unreachable defensive guard: `active` is always `true`
+     here and `pendingInner` is non-empty whenever this path runs (see the note
+     in syncListPendingDom). */
   if (!active || !pendingInner) {
     removeParagraphContinuationNode(existing)
     return true
   }
+  /* c8 ignore stop */
 
   let el: Element | null = existing
   if (!el) {
@@ -415,10 +425,14 @@ function syncListContinuationDom(
   if (!li) return false
 
   const existing = li.querySelector(`:scope > .${LIST_CONTINUATION_CLASS}`)
+  /* c8 ignore start -- unreachable defensive guard: `active` is always `true`
+     here and `pendingInner` is non-empty whenever this path runs (see the note
+     in syncListPendingDom). */
   if (!active || !pendingInner) {
     existing?.remove()
     return true
   }
+  /* c8 ignore stop */
 
   let el: Element | null = existing
   if (!el) {
@@ -462,10 +476,14 @@ function syncBlockPendingDom(
 
   clearBlockPendingDom(completedEl, ['continuation', 'paragraph-continuation', 'list-items'])
   const existing = tailDirectPendingBlock(completedEl, false)
+  /* c8 ignore start -- unreachable defensive guard: `active` is always `true`
+     here and `pendingInner` is non-empty whenever this path runs (see the note
+     in syncListPendingDom). */
   if (!active || !pendingInner) {
     existing?.remove()
     return
   }
+  /* c8 ignore stop */
   const tag = blockPendingTag(pending, openListItemFirstLine)
   let el: Element | null = existing
   if (!el || el.tagName.toLowerCase() !== tag) {

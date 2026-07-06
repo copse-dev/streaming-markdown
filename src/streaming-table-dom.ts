@@ -114,7 +114,11 @@ export function syncPendingTableRowDom(table: HTMLTableElement, pendingRow: stri
 
   let row: HTMLTableRowElement | null = tbody.querySelector(`tr.${PENDING_ROW_CLASS}`)
   if (!(row instanceof Element) || row.tagName !== 'TR') {
+    // This block runs only when the querySelector above found no pending row, so
+    // the querySelectorAll sweep is empty and its callback never fires — kept as
+    // a defensive cleanup in case a malformed pending row ever slips in.
     tbody.querySelectorAll(`tr.${PENDING_ROW_CLASS}`).forEach((r) => {
+      /* c8 ignore next -- unreachable: sweep is empty when this block runs */
       r.remove()
     })
     row = tbody.insertRow()

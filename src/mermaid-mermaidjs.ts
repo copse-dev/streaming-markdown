@@ -25,16 +25,27 @@ interface MermaidLike {
 let mermaidLib: MermaidLike | null = null
 let diagramSeq = 0
 
+// The specifier is held in a const so the compiler treats it as a runtime-only
+// dynamic import — the package builds and type-checks without the optional
+// `mermaid` peer installed, and bundlers still code-split it into its own chunk.
+const MERMAID_SPECIFIER = 'mermaid'
+type MermaidImporter = () => Promise<unknown>
+let importMermaid: MermaidImporter = () => import(MERMAID_SPECIFIER)
+
 /**
- * Import and one-time-initialize the mermaid library. The specifier is held in a
- * variable so the compiler treats it as a runtime-only dynamic import — the
- * package builds and type-checks without the optional `mermaid` peer installed,
- * and bundlers still code-split it into its own chunk.
+ * @internal Test seam. The real mermaid library needs a browser-grade DOM and
+ * can't render under Node/jsdom, so the suite injects a fake module here to
+ * exercise the load-and-render path. Passing `null` restores the real importer.
  */
+export function __setMermaidImporterForTests(fn: MermaidImporter | null): void {
+  importMermaid = fn ?? (() => import(MERMAID_SPECIFIER))
+  mermaidLib = null
+}
+
+/** Import and one-time-initialize the mermaid library. */
 async function loadMermaidLib(): Promise<MermaidLike> {
   if (mermaidLib) return mermaidLib
-  const specifier = 'mermaid'
-  const mod = (await import(specifier)) as { default?: MermaidLike } & Partial<MermaidLike>
+  const mod = (await importMermaid()) as { default?: MermaidLike } & Partial<MermaidLike>
   const lib = (mod.default ?? mod) as MermaidLike
   // startOnLoad:false — hydration is driven explicitly by hydratePendingDiagrams,
   // never by mermaid's global DOM scan.

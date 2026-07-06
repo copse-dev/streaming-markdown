@@ -77,10 +77,15 @@ function mapTextOutsideHtmlTags(text: string, mapSegment: (segment: string) => s
     }
     if (lt > i) parts.push(mapSegment(text.slice(i, lt)))
     const gt = text.indexOf('>', lt)
+    /* c8 ignore start -- unreachable: this runs on already-rendered inline HTML
+       (renderInlineSpans output), where every emitted `<` belongs to a
+       well-formed tag/entity and is matched by a `>`; a lone `<` cannot survive.
+       Kept as a defensive fallback. */
     if (gt === -1) {
       parts.push(text.slice(lt))
       break
     }
+    /* c8 ignore stop */
     parts.push(text.slice(lt, gt + 1))
     i = gt + 1
   }
