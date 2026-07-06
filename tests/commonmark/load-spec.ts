@@ -57,10 +57,13 @@ export function parseSpecExamples(rawText: string): SpecExample[] {
   return examples
 }
 
-// Resolve `commonmark-spec` from the repo root at runtime. Building the require
-// dynamically (rather than using the bundler's `require`) keeps esbuild from
-// trying to inline the package, while still honoring node_modules hoisting. The
-// base file need not exist — it only anchors resolution.
+// Resolve `commonmark-spec` at runtime. Building the require dynamically (rather
+// than using the bundler's `require`) keeps esbuild from trying to inline the
+// package, while still honoring node_modules hoisting. Anchor on `process.cwd()`
+// (the repo root for every runner): `check-normalizer-parity` bundles this module
+// with esbuild and imports it from a `data:` URL, where `import.meta.dirname` is
+// undefined — `createRequire` walks up to find `node_modules` regardless, so the
+// cwd anchor is the portable choice. The base file need not exist.
 const requireFromRoot = createRequire(resolve(process.cwd(), 'noop.js'))
 
 /** Version of the installed `commonmark-spec` package (the pinned spec version). */

@@ -11,9 +11,11 @@ export interface ConformanceBaseline {
   summaryBySection: Record<string, { pass: number; total: number }>
 }
 
+// Anchored on this module's directory (not `process.cwd()`) so the baseline
+// loads regardless of the directory tests are launched from.
 const BASELINE_PATH = resolve(
-  process.cwd(),
-  'tests/fixtures/commonmark/conformance-baseline.json',
+  import.meta.dirname,
+  '../fixtures/commonmark/conformance-baseline.json',
 )
 
 /** Pinned CommonMark conformance baseline (see `conformance-baseline.json`). */
