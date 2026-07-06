@@ -40,6 +40,21 @@ When extending the renderer or its CSS, preserve these rules:
   stable across the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the backend
   registers. `highlight.js` must not be imported outside `highlight-hljs.ts`, or it
   re-enters the default bundle. See [`LAZY-LOADING.md`](LAZY-LOADING.md).
+- **Pluggable fence handlers (#53).** Which HTML a fenced code block emits is a registry
+  keyed by the fence's info-string language (`fence-handlers.ts`, `setFenceHandler`,
+  case-insensitive). A `FenceHandler` supplies the at-rest `render` plus an optional
+  `forming` shape (string HTML + incremental DOM `sync`) used by both streaming emitters
+  while the fence is still open; without one, forming falls back to `render` (string) and
+  a sanitized-`innerHTML` replace (DOM). Fences are opaque to the block tokenizer, so a
+  handler changes **emission only** — no parser surface. The built-in mermaid scaffolding
+  is itself the reference handler, registered by default (remove with
+  `setFenceHandler('mermaid', null)`). Security posture is the mermaid two-phase shape:
+  handler output is emitted **before** the sink sanitizer, so scaffolding must stay inside
+  the sanitizer allowlist (or the handler's host widens it via `setSanitizeExtension`);
+  rich output is injected post-sanitization by a hydration step (`hydratePendingDiagrams`
+  for mermaid, host-owned for others). Forming markup should carry
+  `FORMING_FENCE_PRE_CLASS` on its root so promotion stays a class-only change (see the
+  motion contract below).
 - **Pluggable diagram renderer.** Mermaid is never bundled — the generator emits inert
   `mermaid-diagram--pending` scaffolding and `mermaid-source.ts` is pure string prep.
   `mermaid.ts` adds the registry (`setDiagramRenderer`) plus `hydratePendingDiagrams`,

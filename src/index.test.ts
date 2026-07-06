@@ -25,6 +25,8 @@ const EXPECTED_FUNCTIONS = [
   'highlightFenceCode',
   'setCodeHighlighter',
   'stripAppCodeDecorations',
+  'getFenceHandler',
+  'setFenceHandler',
   'mermaidSourceCandidates',
   'prepareMermaidSource',
   'getDiagramRenderer',
@@ -68,6 +70,7 @@ describe('public API barrel (index.ts)', () => {
     const expected = [
       ...EXPECTED_FUNCTIONS,
       'StreamingMarkdownRenderer',
+      'FORMING_FENCE_PRE_CLASS',
       'PENDING_DIAGRAM_SELECTOR',
       'DEFAULT_SAFE_HREF_SCHEMES',
       'KNOWN_LANGUAGES',

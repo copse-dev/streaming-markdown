@@ -47,6 +47,18 @@ export {
   setCodeHighlighter,
   stripAppCodeDecorations,
 } from './highlight.ts'
+// Fenced-block emission is a pluggable registry keyed by fence language (#53).
+// The built-in mermaid scaffolding is itself a registered FenceHandler; hosts
+// add their own (```math, ```graphviz, …) with setFenceHandler. Handlers emit
+// inert allowlisted scaffolding pre-sanitizer and hydrate after the sink —
+// widen the allowlist via setSanitizeExtension for anything beyond it.
+export {
+  type FenceHandler,
+  type FenceHandlerForming,
+  FORMING_FENCE_PRE_CLASS,
+  getFenceHandler,
+  setFenceHandler,
+} from './fence-handlers.ts'
 export { mermaidSourceCandidates, prepareMermaidSource } from './mermaid-source.ts'
 // Diagram rendering is a pluggable backend, like highlighting. The core emits
 // inert `mermaid-diagram--pending` scaffolding and `hydratePendingDiagrams` swaps

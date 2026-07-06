@@ -73,6 +73,40 @@ await loadHighlightjs()
 See [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md) for the bundle-size rationale
 and how the same shape applies to Mermaid.
 
+### Custom fenced blocks (fence handlers)
+
+Mermaid support is built on a general **fence-handler registry**: which HTML a
+fenced code block emits is looked up by the fence's language (case-insensitive),
+and `mermaid` is simply the built-in entry. Register your own to add
+mermaid-style blocks — math, graphviz, vega, and friends:
+
+```ts
+import { setFenceHandler, escapeHtml, FORMING_FENCE_PRE_CLASS } from '@copse/streaming-markdown'
+
+setFenceHandler('math', {
+  // At-rest HTML for a completed ```math fence. Emitted before the sanitizer
+  // sink: stay inside the allowlist (or widen it via setSanitizeExtension).
+  render: (code) =>
+    `<div class="math-block math-block--pending"><pre class="math">${escapeHtml(code.trimEnd())}</pre></div>`,
+  // Optional: what the fence shows while still streaming (both emitters).
+  forming: {
+    html: (code) =>
+      `<div class="math-block math-block--pending ${FORMING_FENCE_PRE_CLASS}"><pre class="math">${escapeHtml(code)}</pre></div>`,
+    // Optional incremental DOM update; default = sanitized innerHTML replace.
+    sync: (container, code) => {
+      /* patch container in place */
+    },
+  },
+})
+```
+
+The pattern is two-phase, like mermaid: the handler emits inert, escaped
+*scaffolding* at render time, and your app hydrates it into rich output (SVG,
+KaTeX, …) **after** the HTML is sanitized at the sink — mermaid's hydrator is
+`hydratePendingDiagrams`. Fences are opaque to the parser, so handlers change
+emission only. `setFenceHandler('mermaid', null)` removes the built-in and
+renders mermaid fences as ordinary code blocks.
+
 Link destinations are validated against a scheme allowlist
 (`DEFAULT_SAFE_HREF_SCHEMES`: `http`, `https`, `mailto`, `tel`, `sms`, `ftp`,
 `ftps`, plus scheme-less relative/fragment/path forms); any other scheme —
