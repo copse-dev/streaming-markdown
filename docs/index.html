@@ -905,7 +905,9 @@
   <div class="section">
     <div class="section-header">
       <h2>API</h2>
-      <p>Two emitters for the same content stream — pick the one that fits your rendering pipeline.</p>
+      <p>Two emitters for the same content stream — pick the one that fits your rendering pipeline.
+        The sanitizer, syntax highlighter, mermaid &amp; custom fenced blocks, and link routing are all
+        pluggable; see the <a href="https://github.com/copse-dev/streaming-markdown/blob/main/docs/EXTENDING.md">extending guide</a>.</p>
     </div>
     <div class="snippet-grid">
       <div class="snippet-card">
@@ -979,7 +981,7 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
       screen in place — no layout shift, because the element classes never change.
       That's exactly what this page does: watch the status chips above flip as the demo
       streams its first code fence and first diagram.
-      See <a href="https://github.com/copse-dev/streaming-markdown/blob/main/docs/LAZY-LOADING.md">docs/LAZY-LOADING.md</a>
+      See <a href="https://github.com/copse-dev/streaming-markdown/blob/main/docs/LAZY-LOADING.md">the lazy-loading guide</a>
       for the design.
     </p>
   </div>
