@@ -3,6 +3,7 @@
  * Shared by the at-rest renderer and the streaming hold logic.
  */
 import { trailingEntityHoldStart } from './backslash-escapes.ts'
+import { footnoteHoldStart } from './footnotes.ts'
 import { scanCodeSpans } from './inline-code-spans.ts'
 import { linkOrImageEndAt, linkOrImageStartsAt } from './inline-links.ts'
 import { mathHoldStart } from './inline-math.ts'
@@ -446,6 +447,10 @@ export function pendingHoldIndex(s: string): number {
 
   // Inline math (#70): a half-open `$x+` / `\(a` holds like a half-open `~~`.
   cut = Math.min(cut, mathHoldStart(s, mask))
+
+  // A half-typed footnote reference (`[^lab`) holds like a half-open `~~` so
+  // the bracket syntax never flashes raw before it closes (#72).
+  cut = Math.min(cut, footnoteHoldStart(s, mask))
 
   // Registered inline passes contribute their own holds (#53), composing the
   // same way the strikethrough hold does — a half-open `[@doe` or `==foo`

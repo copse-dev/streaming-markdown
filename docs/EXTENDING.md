@@ -337,7 +337,9 @@ is the security gate. If a host plug-in emits tags/attributes outside it (a cust
 fence handler's scaffolding, a decorator's attribute, an artifact `<img>`), widen
 the sink with `setSanitizeExtension` — and keep the additions as narrow as the
 injected output. `onElement` runs for every kept element so a host can lock down
-its own tags.
+its own tags. Note the core gate strips any `id` outside the renderer's own
+footnote shape (`fn-…`/`fnref-…`); a host that injects other ids must re-set
+them from its `onElement` hook (which runs after the strip).
 
 ## Styling
 

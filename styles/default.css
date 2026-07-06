@@ -16,7 +16,7 @@
  *   --sm-radius        corner radius                    (4px)
  *   --sm-font-mono     monospace family for code        (system mono stack)
  *   --sm-font-size-sm  size for code / tables           (0.85em)
- *   --sm-fg-muted      secondary text (blockquotes …)   (#999)
+ *   --sm-fg-muted      secondary text (quotes, footnotes) (#999)
  *   --sm-border        borders / rules                  (#3c3c3c)
  *   --sm-accent        links                            (#007acc)
  *   --sm-code-bg       inline/block code + quote bg     (#252526)
@@ -267,6 +267,28 @@
   }
   & tbody tr:nth-child(even) td {
     background: var(--sm-th-stripe, rgba(255, 255, 255, 0.02));
+  }
+
+  /* GFM footnotes (#72): superscript refs and the trailing section. */
+  & sup.footnote-ref {
+    font-size: 0.75em;
+    line-height: 1;
+  }
+  & sup.footnote-ref a {
+    text-decoration: none;
+  }
+  & section.footnotes {
+    margin-top: var(--sm-space-md, 12px);
+    border-top: 1px solid var(--sm-border, #3c3c3c);
+    padding-top: var(--sm-space-sm, 8px);
+    font-size: var(--sm-font-size-sm, 0.85em);
+    color: var(--sm-fg-muted, #999);
+  }
+  & section.footnotes ol {
+    margin: 0;
+  }
+  & a.footnote-backref {
+    text-decoration: none;
   }
 
   & .mermaid-diagram {

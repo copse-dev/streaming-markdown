@@ -112,6 +112,13 @@ function settleClassOf(kind: BlockKind): SettleClass {
     case 'blockquote':
     case 'indented_code':
       return 'grouping'
+    // A footnote definition can absorb later lines across a blank run (a
+    // 4-column-indented continuation), so a trailing one is never settled.
+    // Footnote-bearing documents never reach the frozen fast path anyway —
+    // `update` full-morphs when `[^` is present (see below) because the
+    // trailing footnotes section and earlier-reference upgrades are global.
+    case 'footnote_def':
+      return 'grouping'
     case 'blank':
     case 'link_ref_def':
       return 'separator'
@@ -352,8 +359,17 @@ export class FrozenTailRenderer {
     // nudging the boundary back over a still-committed blank. The frozen prefix
     // stays valid there, so we keep it and never retreat `frozenEnd` (clamp the
     // advance below).
+    // Footnotes (#72) are document-global: a definition arriving late rewrites
+    // earlier blocks (a literal `[^x]` upgrades to a numbered reference) and
+    // the whole render gains a trailing footnotes section that re-renders as
+    // definitions stream in. Freezing any prefix would pin those, so a
+    // footnote-bearing document always takes the full-morph path — correct,
+    // just not incremental (an O(n) byte scan per commit, same class as the
+    // `includes('|')` gate; `[^` inside a code fence trips it too, which only
+    // costs performance).
     if (
       linkRefKey !== this.lastLinkRefKey ||
+      complete.includes('[^') ||
       !complete.startsWith(this.frozenSource) ||
       tokenStraddles(tokens, this.frozenEnd)
     ) {

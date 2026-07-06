@@ -1,9 +1,11 @@
 import {
+  collectFootnoteDefinitions,
   collectLinkReferenceDefinitions,
   tokenizeBlocks,
   type BlockToken,
 } from './block-tokenizer.ts'
-import { renderBlocks } from './render-blocks.ts'
+import { createFootnoteContext, setActiveFootnoteContext } from './footnotes.ts'
+import { renderBlocks, renderFootnoteSection } from './render-blocks.ts'
 
 export { escapeHtml } from './escape.ts'
 
@@ -41,9 +43,25 @@ export interface RenderMarkdownOptions {
 export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {}): string {
   const tokens = options.tokens ?? tokenizeBlocks(raw)
   const linkRefs = collectLinkReferenceDefinitions(raw, tokens)
-  return renderBlocks(raw, tokens, {
+  const renderOpts = {
     linkRefs,
     htmlFromIndent: TOP_LEVEL_RENDER_OPTS.htmlFromIndent,
     indentedCode: options.indentedCode ?? TOP_LEVEL_RENDER_OPTS.indentedCode,
-  })
+  }
+  // GFM footnotes (#72): with definitions present, install a document-scoped
+  // context so inline `[^label]` references resolve (numbered in first-use
+  // order) and append the trailing footnotes section for the referenced ones.
+  // Without definitions, references stay literal and this path costs nothing.
+  const footnoteDefs = collectFootnoteDefinitions(raw, tokens)
+  if (footnoteDefs.size === 0) return renderBlocks(raw, tokens, renderOpts)
+  const footnotes = createFootnoteContext(footnoteDefs)
+  setActiveFootnoteContext(footnotes)
+  try {
+    const body = renderBlocks(raw, tokens, renderOpts)
+    const section = renderFootnoteSection(footnotes, linkRefs)
+    if (section === '') return body
+    return body === '' ? section : `${body}\n${section}`
+  } finally {
+    setActiveFootnoteContext(null)
+  }
 }

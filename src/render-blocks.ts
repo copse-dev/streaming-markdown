@@ -25,6 +25,7 @@ import {
 } from './block-tokenizer.ts'
 import { escapeHtml } from './escape.ts'
 import { getFenceHandler } from './fence-handlers.ts'
+import { type FootnoteContext } from './footnotes.ts'
 import { fenceCodeClass, highlightFenceCode } from './highlight.ts'
 import { dedentBlock, isIndentedHtmlBlock } from './indented-html.ts'
 import { type LinkReferenceMap } from './link-references.ts'
@@ -548,6 +549,7 @@ function renderSingleBlock(
     case 'list_item':
       return renderListItem(renderListItemContent(slice, false, linkRefs))
     case 'link_ref_def':
+    case 'footnote_def':
     case 'blank':
       return ''
     /* c8 ignore stop */
@@ -574,7 +576,9 @@ export function renderBlocks(
   while (i < tokens.length) {
     const token = tokens[i]
     if (!token) break
-    if (token.kind === 'blank' || token.kind === 'link_ref_def') {
+    if (token.kind === 'blank' || token.kind === 'link_ref_def' || token.kind === 'footnote_def') {
+      // Footnote definitions never render in place — they render in the
+      // trailing footnotes section (renderFootnoteSection, #72).
       i++
       continue
     }
@@ -610,6 +614,43 @@ export function renderBlocksFromSource(
   linkRefs: LinkReferenceMap = new Map(),
 ): string {
   return renderBlocks(source, tokenizeBlocks(source), { linkRefs })
+}
+
+/** Splice the backref link into a definition's last paragraph (GitHub shape). */
+function appendFootnoteBackref(bodyHtml: string, backref: string): string {
+  if (bodyHtml === '') return `<p>${backref}</p>`
+  if (bodyHtml.endsWith('</p>')) {
+    return `${bodyHtml.slice(0, -'</p>'.length)} ${backref}</p>`
+  }
+  return `${bodyHtml}\n<p>${backref}</p>`
+}
+
+/**
+ * The trailing footnotes section (#72): referenced definitions in first-use
+ * order, each ending with a backref to the reference site. Definitions never
+ * referenced are dropped (GitHub behavior). Content renders through the normal
+ * block pipeline WHILE the context is still active, so references inside a
+ * footnote's own content resolve too (the `order` walk picks up labels first
+ * used there).
+ */
+export function renderFootnoteSection(ctx: FootnoteContext, linkRefs: LinkReferenceMap): string {
+  if (ctx.order.length === 0) return ''
+  const items: string[] = []
+  // `ctx.order` may grow while items render (a footnote referencing another
+  // footnote first used inside the section) — iterate by index, not snapshot.
+  for (let i = 0; i < ctx.order.length; i++) {
+    const key = ctx.order[i]
+    const def = key === undefined ? undefined : ctx.defs.get(key)
+    const slug = key === undefined ? undefined : ctx.slugs.get(key)
+    const refId = key === undefined ? undefined : ctx.firstRefIds.get(key)
+    /* c8 ignore next -- unreachable: order entries are only pushed with a
+       matching def, slug, and first ref id (footnoteRefHtml). Defensive guard. */
+    if (def === undefined || slug === undefined || refId === undefined) continue
+    const body = renderBlocksFromSource(def.content, linkRefs)
+    const backref = `<a href="#${refId}" class="footnote-backref">↩</a>`
+    items.push(`<li id="fn-${slug}">${appendFootnoteBackref(body, backref)}</li>`)
+  }
+  return `<section class="footnotes"><ol>${items.join('')}</ol></section>`
 }
 
 /** Whether a line is a GFM table separator (exported for tests that need it). */

@@ -11,6 +11,7 @@ import {
   listItemContentColumn,
 } from './block-tokenizer.ts'
 import { decodeSafeMarkdownEntities, escapeHtml } from './escape.ts'
+import { isPendingFootnoteDefLine } from './footnotes.ts'
 import { scanCodeSpans } from './inline-code-spans.ts'
 import { pendingHoldIndex } from './inline-emphasis.ts'
 import { renderProseInline } from './render-prose-inline.ts'
@@ -183,6 +184,13 @@ export function renderPendingLine(pending: string, options: RenderPendingLineOpt
   }
 
   if (isIncompleteListMarkerPrefix(pending)) {
+    return ''
+  }
+
+  // A footnote definition never renders in place — its content commits into
+  // the trailing footnotes section — so hold the whole pending line/block
+  // (`[^la`, `[^label]`, `[^label]: content…`) instead of flashing it (#72).
+  if (isPendingFootnoteDefLine(pending)) {
     return ''
   }
 

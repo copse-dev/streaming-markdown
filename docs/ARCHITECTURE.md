@@ -157,6 +157,31 @@ When extending the renderer or its CSS, preserve these rules:
   `class="task-list-item"` and its list `class="contains-task-list"` for bullet-free styling
   ([#614](https://github.com/copse-dev/agent-pane/issues/614)). `input` + `type`/`checked`/`disabled` are on the sanitizer allowlist, and the
   per-element gate drops any non-checkbox `<input>` (see `sanitize.ts`).
+- **GFM footnotes (#72).** Inline `[^label]` references render as
+  `<sup class="footnote-ref"><a href="#fn-<slug>" id="fnref-<slug>">N</a></sup>`,
+  numbered in first-use order; repeated references share N with distinct
+  `fnref-…-2` ids (GitHub's shape). `[^label]: content` definition blocks are
+  collected like link reference definitions (`footnote_def` in
+  `block-tokenizer.ts`, `collectFootnoteDefinitions`; they never render in
+  place) and the referenced ones render as a trailing
+  `<section class="footnotes"><ol>…</ol></section>` in reference order, each
+  item ending with a `<a class="footnote-backref">↩</a>` to its first
+  reference. Unresolved references stay literal (mirroring unresolved link
+  refs); unreferenced definitions are dropped (GitHub behavior). Definitions
+  support indented continuation lines and multi-paragraph content via blank +
+  4-space indent, plus lazy first-paragraph continuation; footnotes inside
+  blockquotes are out of scope. Slugs are deterministic (`footnotes.ts`),
+  attribute-safe, and collision-disambiguated; the sanitizer allowlists
+  `section` + `id` and its element gate strips any id outside the
+  `fn-…`/`fnref-…` shape. The reference state is a per-render
+  `FootnoteContext` installed by `renderMarkdown`, so both streaming emitters
+  (which render through it) converge. Streaming: a half-typed `[^lab` holds
+  via `footnoteHoldStart` (composed into `pendingHoldIndex` like the
+  strikethrough hold), pending definition lines hold entirely
+  (`isPendingFootnoteDefLine`), and the trailing section re-renders as
+  definitions commit — footnote-bearing documents take the frozen-tail
+  full-morph path because a late definition upgrades earlier literal `[^x]`
+  text (see `streaming-frozen-tail.ts`).
 - **GitHub alerts (#72).** A blockquote whose first line is exactly `> [!NOTE]`
   (or TIP / IMPORTANT / WARNING / CAUTION, case-insensitive, nothing else on the
   marker line) renders with GitHub-compatible classes:

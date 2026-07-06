@@ -163,13 +163,19 @@ function appendListPendingHtml(
     if (nested) return nested
   }
 
-  const close = `</${listTag}>`
-  const closeIndex = rendered.lastIndexOf(close)
-  if (closeIndex !== -1) {
-    const openNeedle = `<${listTag}`
-    const beforeClose = rendered.slice(0, closeIndex)
-    if (beforeClose.lastIndexOf(openNeedle) !== -1) {
-      return `${beforeClose}${liHtml}${rendered.slice(closeIndex)}`
+  // When the committed HTML ends with the trailing footnotes section (#72),
+  // its own `</ol>` would be found by the lastIndexOf below and the pending
+  // item would land inside the section — append a fresh list instead (the DOM
+  // path's trailing-list lookup rejects the <section> the same way).
+  if (!rendered.endsWith('</section>')) {
+    const close = `</${listTag}>`
+    const closeIndex = rendered.lastIndexOf(close)
+    if (closeIndex !== -1) {
+      const openNeedle = `<${listTag}`
+      const beforeClose = rendered.slice(0, closeIndex)
+      if (beforeClose.lastIndexOf(openNeedle) !== -1) {
+        return `${beforeClose}${liHtml}${rendered.slice(closeIndex)}`
+      }
     }
   }
 

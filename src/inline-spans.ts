@@ -13,6 +13,7 @@ import {
   restoreInlinePassHtml,
 } from './inline-passes.ts'
 import { renderStrikethrough } from './inline-strikethrough.ts'
+import { getActiveFootnoteContext, renderFootnoteRefs } from './footnotes.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 
 /**
@@ -33,6 +34,23 @@ function applyInlinePasses(t: string, stage: InlinePassStage): string {
   return t
 }
 
+/**
+ * Core footnote-reference pass (#72): resolvable `[^label]` becomes a
+ * `<sup class="footnote-ref">` reference. Runs like a built-in `before-links`
+ * pass — outside rendered inline HTML, emitting through the same shielded side
+ * table — so a bracketed footnote consumes its text before markdown-link
+ * resolution reads `[` as a label opener, and code spans never trigger.
+ */
+function applyFootnoteRefs(t: string): string {
+  if (getActiveFootnoteContext() === null || !t.includes('[^')) return t
+  return t
+    .split(INLINE_HTML_SHIELD_RE)
+    .map((segment, index) =>
+      index % 2 === 1 ? segment : renderFootnoteRefs(segment, (html) => inlinePassContext.emit(html)),
+    )
+    .join('')
+}
+
 /** The inline passes that run before link rendering, in pipeline order. */
 function renderInlineSpansBeforeLinks(t: string, linkRefs: LinkReferenceMap): string {
   // Backslash-escaped punctuation is encoded to inert PUA characters first so
@@ -48,6 +66,8 @@ function renderInlineSpansBeforeLinks(t: string, linkRefs: LinkReferenceMap): st
   // GFM strikethrough after emphasis (so `~~*x*~~` nests) and before links (so a
   // struck `~~[a](b)~~` still resolves the link inside the <del>).
   t = renderStrikethrough(t)
+  // Core GFM footnote references (#72) run before registered passes and links.
+  t = applyFootnoteRefs(t)
   // Custom bracket-adjacent syntaxes (e.g. citation `[@key]`) must consume
   // their text before markdown-link resolution treats `[` as a label opener.
   t = applyInlinePasses(t, 'before-links')
@@ -81,7 +101,8 @@ export function renderInlineSpans(t: string, linkRefs: LinkReferenceMap = new Ma
   // Inline-pass bracketing (#53): strip attacker-typed placeholder characters
   // before any pass runs, and swap pass-emitted HTML back in after the escape
   // step (but before punctuation decode, so PUA-encoded escapes a pass captured
-  // into its emitted HTML still decode to their escaped literal form).
+  // into its emitted HTML still decode to their escaped literal form). The
+  // built-in math (#70) and footnote (#72) passes share the same side table.
   t = beginInlinePassRender(t)
   return decodeEscapedPunctuation(
     restoreInlinePassHtml(escapeHtmlTextNodes(renderNestedInlineSpans(t, linkRefs))),

@@ -112,8 +112,8 @@ export const inlinePassContext: InlinePassContext = {
  * literal placeholder characters (so markdown text can never address the emit
  * table) and reset the table — placeholders never outlive the single
  * `renderInlineSpans` call that created them. Unconditional since the built-in
- * inline-math pass (#70) emits through the table on every render, host passes
- * or not.
+ * inline-math (#70) and footnote (#72) passes emit through the table on every
+ * render, host passes or not.
  */
 export function beginInlinePassRender(text: string): string {
   emitted.clear()

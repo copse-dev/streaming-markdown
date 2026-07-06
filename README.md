@@ -45,9 +45,9 @@ for await (const chunk of stream) {
 
 - **Streaming-safe.** Pending block states show partial structure (tables, lists,
   code, diagrams, math) without flashing raw syntax; a re-render upgrades in place.
-- **CommonMark + GFM** — tables, task lists, strikethrough, autolinks, GitHub
-  alerts (`> [!NOTE]`), indented and fenced code. Tracked against the spec's
-  conformance suite.
+- **CommonMark + GFM** — tables, task lists, strikethrough, autolinks,
+  footnotes (`[^1]`), GitHub alerts (`> [!NOTE]`), indented and fenced code.
+  Tracked against the spec's conformance suite.
 - **First-class math.** ```` ```math ```` fences, `$$…$$` and `\[…\]` display
   blocks (the OpenAI delimiter style), and `$…$` / `\(…\)` inline math with
   currency guards (`$20 and $30` stays prose) — rendered lazily via KaTeX,
