@@ -6,7 +6,7 @@
  * the full-re-render string path (`renderStreamingMarkdown`) — and reports the
  * median wall-clock time to stream each fixture to completion.
  *
- * Run: `npm run bench:markdown` (optionally `-- --iters 9 --chunk 4`).
+ * Run: `npm run bench` (optionally `-- --iters 9 --chunk 4`).
  *
  * The absolute numbers are machine-dependent; treat them as a relative baseline.
  * The incremental DOM path should stay at or below the string path, and neither

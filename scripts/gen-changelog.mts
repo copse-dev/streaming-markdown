@@ -111,7 +111,12 @@ const line = (commit: Commit, text: string): string => `- ${text} (\`${commit.ha
 
 for (const commit of commits) {
   const parsed = parse(commit)
-  if (parsed.breaking) breaking.push(line(commit, parsed.description))
+  // A breaking commit is listed once, in its dedicated section — not also
+  // duplicated verbatim into its type bucket / "Other Changes".
+  if (parsed.breaking) {
+    breaking.push(line(commit, parsed.description))
+    continue
+  }
   if (parsed.type && KNOWN_TYPES.has(parsed.type)) {
     const section = SECTIONS.find((s) => s.types.includes(parsed.type as string))
     if (!section) continue

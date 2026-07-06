@@ -29,12 +29,15 @@ const entry = `## [${version}] - ${date}\n\n${notes}\n`
 const existing = existsSync(CHANGELOG) ? readFileSync(CHANGELOG, 'utf8') : `${HEADER}\n`
 
 // Insert the new entry before the first existing release heading; if there are
-// none yet, place it after the intro (i.e. at the end of the file).
+// none yet, place it after the intro (i.e. at the end of the file). Only the
+// insertion seams are re-spaced (trim + a single blank line); the rest of the
+// file is spliced verbatim so a blank line inside a historical entry's fenced
+// code block or notes is never collapsed.
 const firstEntry = existing.search(/^## \[/m)
 const updated =
   firstEntry === -1
     ? `${existing.trimEnd()}\n\n${entry}`
-    : `${existing.slice(0, firstEntry)}${entry}\n${existing.slice(firstEntry)}`
+    : `${existing.slice(0, firstEntry).trimEnd()}\n\n${entry}\n${existing.slice(firstEntry)}`
 
-writeFileSync(CHANGELOG, updated.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n')
+writeFileSync(CHANGELOG, updated.trimEnd() + '\n')
 console.log(`update-changelog: added ${version} entry to CHANGELOG.md`)
