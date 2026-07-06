@@ -12,3 +12,6 @@ tests/commonmark/__pycache__/
 
 # fetched at check time by scripts/fetch-gfm-spec.mts (not published to npm; too large to vendor)
 tests/fixtures/gfm/spec.txt
+
+# built by `npm run build:demo`; published to GitHub Pages by deploy-demo.yml, not committed
+docs/streaming-markdown.*.mjs
