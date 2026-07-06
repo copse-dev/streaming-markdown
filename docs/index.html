@@ -483,24 +483,37 @@
        accent bar hangs in the left gutter via a negative margin that exactly
        cancels its border + padding. */
     /* `p.…` (not bare class) so this outranks `.compare-panel-body p`'s
-       margin shorthand, which would otherwise reset margin-left to 0. */
-    p.stream-pending-paragraph {
+       margin shorthand, which would otherwise reset margin-left to 0.
+       The `:has()` variant keeps the SAME chrome on a committed <p> that still
+       hosts a pending continuation span: the highlight covers the whole open
+       paragraph and lifts exactly once, when the block completes — instead of
+       hopping line-by-line from the committed text to each continuation span. */
+    p.stream-pending-paragraph,
+    p:has(> .stream-pending-paragraph-continuation) {
       background: var(--pending-bg);
       border-left: 3px solid var(--pending-border);
       padding-left: 0.6rem;
       margin: 0.4rem 0 0.4rem calc(-0.6rem - 3px);
-      color: var(--pending-text);
       border-radius: 0 3px 3px 0;
     }
 
+    /* Muted text marks only the UNCOMMITTED text: the whole block while it is
+       fully pending, then just the continuation span (via `.stream-pending`)
+       once earlier lines have committed — committed text keeps its final color
+       so it never flips back. */
+    p.stream-pending-paragraph { color: var(--pending-text); }
+
     /* No bar/indent on pending list items — the tinted background and accent
        marker are the pending cue; the text sits where the committed <li>'s
-       text will land. */
-    .stream-pending-list-item {
+       text will land. As with paragraphs, an <li> hosting a continuation span
+       keeps the whole-item tint until the item completes. */
+    .stream-pending-list-item,
+    li:has(> .stream-pending-list-continuation) {
       background: var(--pending-bg);
-      color: var(--pending-text);
       border-radius: 3px;
     }
+
+    .stream-pending-list-item { color: var(--pending-text); }
 
     .stream-pending-list-item::marker { color: var(--accent); }
 
@@ -568,12 +581,11 @@
 
     /* A pending line that lazily continues the open paragraph renders as a
        span INSIDE that <p> (after a real soft break), so commit just recolors
-       it in place — the text never jumps up from a separate block (#11). */
-    .stream-pending-paragraph-continuation,
-    .stream-pending-list-continuation {
-      background: var(--pending-bg);
-      border-radius: 3px;
-    }
+       it in place — the text never jumps up from a separate block (#11).
+       The span carries NO background of its own: the block-level `:has()`
+       highlight on its host paragraph/list item (above) is the pending cue,
+       so nothing un-highlights until the whole block commits. Its muted text
+       color comes from `.stream-pending`. */
 
     /* Subtle settle-in for blocks the incremental DOM emitter commits: new
        nodes fade up from the pending tint instead of popping. Scoped to
@@ -585,6 +597,22 @@
       .stream-complete li:not(.stream-pending-block),
       .stream-complete tbody tr:not(.stream-pending-row) {
         animation: stream-settle 0.25s ease-out;
+      }
+
+      /* Fade the pending recolors instead of snapping. Transitions only fire
+         on nodes that keep identity across the change, i.e. the incremental
+         DOM emitter's output (the string emitter rebuilds every node per
+         update, so this is inert there). This also swallows the single-frame
+         highlight dip when a chunk ends exactly on a newline (pending is
+         momentarily empty before the next line's first characters arrive).
+         Colors only — the structural chrome (bar width, padding, negative
+         margin) cancels out by design and must keep snapping as one unit. */
+      .compare-panel-body p,
+      .compare-panel-body li,
+      .compare-panel-body blockquote,
+      .compare-panel-body td {
+        transition: background-color 0.3s ease-out, border-color 0.3s ease-out,
+          color 0.3s ease-out;
       }
     }
 
@@ -1176,7 +1204,7 @@ const PRESETS = {
 
 This demo shows **streaming markdown** rendering with pending block states.
 Blocks are styled differently while they're still *forming*, then settle into
-their final appearance once the next newline arrives.
+their final appearance in one step once the whole block completes.
 
 ## Features
 
