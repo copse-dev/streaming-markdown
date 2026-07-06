@@ -15,7 +15,9 @@ import {
   listItemContentColumn,
   orderedListMarkerDelimiter,
   parseOrderedListMarker,
+  parseTableAlignments,
   splitTableRow,
+  type TableAlign,
   TABLE_SEP_RE,
   tokenizeBlocks,
   unorderedListMarkerChar,
@@ -199,6 +201,10 @@ function renderSetextHeading(slice: string, linkRefs: LinkReferenceMap): string 
   return `<h${String(level)}>${renderProseBlock(text, linkRefs)}</h${String(level)}>`
 }
 
+function alignAttr(align: TableAlign): string {
+  return align ? ` align="${align}"` : ''
+}
+
 function renderTable(slice: string, linkRefs: LinkReferenceMap): string {
   const lines = dropTrailingNewline(slice)
     .split('\n')
@@ -206,12 +212,26 @@ function renderTable(slice: string, linkRefs: LinkReferenceMap): string {
   const header = lines[0]
   if (!header) return ''
   const headerCells = splitTableRow(header)
-  const body = lines.slice(2).map((row) => splitTableRow(row))
+  const colCount = headerCells.length
+  const aligns = lines[1] ? parseTableAlignments(lines[1]) : []
+  const alignOf = (col: number): TableAlign => aligns[col] ?? null
+
   const thead = `<thead><tr>${headerCells
-    .map((c) => `<th>${renderProseBlock(c, linkRefs)}</th>`)
+    .map((c, col) => `<th${alignAttr(alignOf(col))}>${renderProseBlock(c, linkRefs)}</th>`)
     .join('')}</tr></thead>`
-  const tbody = `<tbody>${body
-    .map((r) => `<tr>${r.map((c) => `<td>${renderProseBlock(c, linkRefs)}</td>`).join('')}</tr>`)
+
+  // GFM: body rows are padded with empty cells / truncated to the header's
+  // column count (spec 204); a header-only table emits no <tbody> (spec 205).
+  const bodyRows = lines.slice(2)
+  if (bodyRows.length === 0) return `<table>${thead}</table>`
+  const tbody = `<tbody>${bodyRows
+    .map((row) => {
+      const cells = splitTableRow(row)
+      const normalized = Array.from({ length: colCount }, (_unused, col) => cells[col] ?? '')
+      return `<tr>${normalized
+        .map((c, col) => `<td${alignAttr(alignOf(col))}>${renderProseBlock(c, linkRefs)}</td>`)
+        .join('')}</tr>`
+    })
     .join('')}</tbody>`
   return `<table>${thead}${tbody}</table>`
 }

@@ -76,6 +76,8 @@ const ALLOWED_ATTR = [
   'data-browser-link',
   'data-workspace-link',
   'data-ordered-marker',
+  // GFM table column alignment (`<th align>`/`<td align>`) — presentational, no XSS surface.
+  'align',
   // Task-list checkbox attributes (#614) — read-only booleans, no XSS surface.
   'type',
   'checked',

@@ -1,6 +1,6 @@
 {
   "specVersion": "0.29",
-  "source": "github/cmark-gfm spec.txt @ 0.29.0.gfm.13 (vendored: tests/fixtures/gfm/spec.txt)",
+  "source": "github/cmark-gfm spec.txt @ 0.29.0.gfm.13 (fetched to tests/fixtures/gfm/spec.txt)",
   "note": "Examples from the official GitHub Flavored Markdown spec that renderMarkdown() satisfies at rest, after the spec normalizer. GFM is a superset of CommonMark, so the base sections mirror the CommonMark baseline; the GFM-only sections are broken out in extensionSummary. This is a regression baseline, not a conformance goal — the renderer escapes untrusted HTML (sanitize-at-the-sink) and implements a subset of the autolink/strikethrough grammar, so HTML blocks, Raw HTML, and parts of the extension sections fail by design.",
   "total": 672,
   "passing": [
@@ -160,7 +160,13 @@
     196,
     197,
     198,
+    199,
+    200,
     201,
+    202,
+    203,
+    204,
+    205,
     206,
     207,
     208,
@@ -626,7 +632,7 @@
       "total": 1
     },
     "Tables (extension)": {
-      "pass": 2,
+      "pass": 8,
       "total": 8
     },
     "Block quotes": {
@@ -708,7 +714,7 @@
   },
   "extensionSummary": {
     "Tables (extension)": {
-      "pass": 2,
+      "pass": 8,
       "total": 8
     },
     "Task list items (extension)": {
