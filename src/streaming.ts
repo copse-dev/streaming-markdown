@@ -52,6 +52,7 @@ export {
 
 const BLOCK_PENDING_CLASS = 'stream-pending-block'
 const LIST_CONTINUATION_CLASS = 'stream-pending-list-continuation'
+const PARAGRAPH_CONTINUATION_CLASS = 'stream-pending-paragraph-continuation'
 const TRAILING_OPEN_LI_CLOSE_RE = /(<li(?:\s[^>]*)?>)([\s\S]*?)(<\/li>\s*<\/(?:ul|ol)>)\s*$/
 
 // Pending tail elements always live at the very end of `stream-complete`: a
@@ -83,10 +84,16 @@ function insertBeforeTrailingListClose(rendered: string, insertHtml: string): st
   return `${rendered.slice(0, -liClose.length)}${insertHtml}${liClose}`
 }
 
-type BlockPendingCleanup = 'continuation' | 'list-items' | 'direct-blocks' | 'non-list-direct'
+type BlockPendingCleanup =
+  | 'continuation'
+  | 'paragraph-continuation'
+  | 'list-items'
+  | 'direct-blocks'
+  | 'non-list-direct'
 
 function clearBlockPendingDom(completedEl: HTMLElement, parts: BlockPendingCleanup[]): void {
   if (parts.includes('continuation')) clearListContinuationDom(completedEl)
+  if (parts.includes('paragraph-continuation')) clearParagraphContinuationDom(completedEl)
   if (parts.includes('list-items')) {
     tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)?.remove()
   }
@@ -182,7 +189,7 @@ function syncListPendingDom(
   active: boolean,
   openListItemFirstLine?: string,
 ): void {
-  clearBlockPendingDom(completedEl, ['continuation', 'non-list-direct'])
+  clearBlockPendingDom(completedEl, ['continuation', 'paragraph-continuation', 'non-list-direct'])
 
   const listTag = pendingListTag(pending)
   const indent = listPendingIndent(pending)
@@ -326,6 +333,85 @@ function clearListContinuationDom(completedEl: HTMLElement): void {
   tailPendingDescendant(completedEl, `li .${LIST_CONTINUATION_CLASS}`)?.remove()
 }
 
+/**
+ * `pending` should render inside the trailing committed `<p>` (as a lazy
+ * paragraph continuation) rather than as a standalone pending block.
+ */
+function isParagraphContinuationPending(split: StreamingSplit): boolean {
+  const { pending, openListItemFirstLine } = split
+  return (
+    split.paragraphContinuation === true &&
+    blockPendingTag(pending, openListItemFirstLine) === 'p' &&
+    isBlockLevelPending(pending, openListItemFirstLine)
+  )
+}
+
+function paragraphContinuationSpanHtml(pendingInner: string): string {
+  return `<span class="stream-pending ${PARAGRAPH_CONTINUATION_CLASS} ${BLOCK_PENDING_CLASS}">${pendingInner}</span>`
+}
+
+/**
+ * Insert the pending continuation inside the trailing `</p>`. The soft-break
+ * `\n` lives OUTSIDE the span, as paragraph text, so it displays exactly like
+ * the committed soft break will in the host theme (a space under collapsing
+ * white-space, a line break under `white-space: pre-wrap`).
+ */
+function appendParagraphContinuationHtml(rendered: string, pendingInner: string): string | null {
+  if (!rendered.endsWith('</p>')) return null
+  return `${rendered.slice(0, -'</p>'.length)}\n${paragraphContinuationSpanHtml(pendingInner)}</p>`
+}
+
+/** The trailing committed paragraph a pending continuation renders into. */
+function findTrailingParagraphHost(completedEl: HTMLElement): HTMLElement | null {
+  const last = completedEl.lastElementChild
+  if (!(last instanceof HTMLElement) || last.tagName !== 'P') return null
+  // A pending paragraph *block* is also a trailing <p> — never nest into it.
+  if (last.classList.contains(BLOCK_PENDING_CLASS)) return null
+  return last
+}
+
+/** Remove a continuation span together with its preceding soft-break text node. */
+function removeParagraphContinuationNode(el: Element | null): void {
+  if (!el) return
+  const prev = el.previousSibling
+  if (prev !== null && prev.nodeType === 3 /* TEXT_NODE */ && prev.textContent === '\n') {
+    prev.remove()
+  }
+  el.remove()
+}
+
+function clearParagraphContinuationDom(completedEl: HTMLElement): void {
+  removeParagraphContinuationNode(
+    tailPendingDescendant(completedEl, `.${PARAGRAPH_CONTINUATION_CLASS}`),
+  )
+}
+
+function syncParagraphContinuationDom(
+  completedEl: HTMLElement,
+  pendingInner: string,
+  active: boolean,
+): boolean {
+  const host = findTrailingParagraphHost(completedEl)
+  if (!host) return false
+
+  const existing = host.querySelector(`:scope > .${PARAGRAPH_CONTINUATION_CLASS}`)
+  if (!active || !pendingInner) {
+    removeParagraphContinuationNode(existing)
+    return true
+  }
+
+  let el: Element | null = existing
+  if (!el) {
+    // Soft break as a real text node in the <p> (see appendParagraphContinuationHtml).
+    host.append(document.createTextNode('\n'))
+    el = document.createElement('span')
+    host.append(el)
+  }
+  el.className = `stream-pending ${PARAGRAPH_CONTINUATION_CLASS} ${BLOCK_PENDING_CLASS}`
+  el.innerHTML = pendingInner
+  return true
+}
+
 function syncListContinuationDom(
   completedEl: HTMLElement,
   pendingInner: string,
@@ -356,13 +442,25 @@ function syncListContinuationDom(
 
 function syncBlockPendingDom(
   completedEl: HTMLElement,
-  pending: string,
+  split: StreamingSplit,
   pendingInner: string,
   active: boolean,
-  openListItemFirstLine?: string,
 ): void {
-  if (isListContinuationPending(pending, openListItemFirstLine)) {
+  const { pending, openListItemFirstLine } = split
+
+  if (isParagraphContinuationPending(split)) {
     clearBlockPendingDom(completedEl, ['continuation', 'list-items', 'non-list-direct'])
+    if (syncParagraphContinuationDom(completedEl, pendingInner, active)) return
+    // No trailing <p> host — fall through to a standalone pending block.
+  }
+
+  if (isListContinuationPending(pending, openListItemFirstLine)) {
+    clearBlockPendingDom(completedEl, [
+      'continuation',
+      'paragraph-continuation',
+      'list-items',
+      'non-list-direct',
+    ])
     syncListContinuationDom(completedEl, pendingInner, active)
     return
   }
@@ -372,7 +470,7 @@ function syncBlockPendingDom(
     return
   }
 
-  clearBlockPendingDom(completedEl, ['continuation', 'list-items'])
+  clearBlockPendingDom(completedEl, ['continuation', 'paragraph-continuation', 'list-items'])
   const existing = tailDirectPendingBlock(completedEl, false)
   /* c8 ignore start -- unreachable defensive guard: `active` is always `true`
      here and `pendingInner` is non-empty whenever this path runs (see the note
@@ -463,6 +561,11 @@ export function renderStreamingMarkdown(content: string): string {
     renderPendingInlineMarkdown(pending, openListItemFirstLine),
   )
   if (!pendingInner) return rendered
+
+  if (isParagraphContinuationPending(split)) {
+    const inserted = appendParagraphContinuationHtml(rendered, pendingInner)
+    if (inserted) return inserted
+  }
 
   if (isListContinuationPending(pending, openListItemFirstLine)) {
     const contHtml = blockPendingHtml(pending, pendingInner, openListItemFirstLine)
@@ -564,10 +667,10 @@ export class StreamingMarkdownRenderer {
     )
 
     if (pendingVisible && isBlockLevelPending(pending, openListItemFirstLine)) {
-      syncBlockPendingDom(completedEl, pending, pendingInner, true, openListItemFirstLine)
+      syncBlockPendingDom(completedEl, split, pendingInner, true)
       syncInlinePendingDom(pendingEl, '', false)
     } else {
-      clearBlockPendingDom(completedEl, ['continuation', 'direct-blocks'])
+      clearBlockPendingDom(completedEl, ['continuation', 'paragraph-continuation', 'direct-blocks'])
       syncInlinePendingDom(pendingEl, pendingInner, pendingVisible)
     }
   }

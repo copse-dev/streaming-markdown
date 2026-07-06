@@ -11,9 +11,22 @@ import { StreamingMarkdownRenderer } from './streaming.ts'
  */
 describe('streaming pending row matrix', () => {
   it('paragraph: block pending with inline markdown, no raw markup', () => {
-    const html = renderStreamingMarkdown('done\n**bold** tail')
+    // After a blank line the pending line opens a NEW paragraph → standalone block.
+    const html = renderStreamingMarkdown('done\n\n**bold** tail')
     assert.match(html, /<p class="stream-pending stream-pending-paragraph[^"]*">/)
     assert.match(html, /<strong>bold<\/strong> tail/)
+  })
+
+  it('paragraph continuation: pending line renders inside the open <p> (#11)', () => {
+    // Without a blank line the pending line lazily continues the open
+    // paragraph, so it renders inside the trailing committed <p> after a real
+    // soft break — committing only recolors; the text never moves.
+    const html = renderStreamingMarkdown('done\n**bold** tail')
+    assert.match(
+      html,
+      /<p>done\n<span class="stream-pending stream-pending-paragraph-continuation[^"]*"><strong>bold<\/strong> tail<\/span><\/p>/,
+    )
+    assert.doesNotMatch(html, /stream-pending-paragraph[" ]/)
   })
 
   it('unordered list item: hides - marker, uses list-item chrome', () => {
