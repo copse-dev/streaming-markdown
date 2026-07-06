@@ -539,6 +539,15 @@
       color: var(--pending-text);
     }
 
+    /* A pending line that lazily continues the open paragraph renders as a
+       span INSIDE that <p> (after a real soft break), so commit just recolors
+       it in place — the text never jumps up from a separate block (#11). */
+    .stream-pending-paragraph-continuation,
+    .stream-pending-list-continuation {
+      background: var(--pending-bg);
+      border-radius: 3px;
+    }
+
     /* Subtle settle-in for blocks the incremental DOM emitter commits: new
        nodes fade up from the pending tint instead of popping. Scoped to
        .stream-complete so the string emitter (which rebuilds innerHTML every

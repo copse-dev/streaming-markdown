@@ -51,7 +51,8 @@ describe('renderStreamingMarkdown', () => {
     const html = renderStreamingMarkdown(
       'Review intro\n**Recent commits to main (all auto-bump PRs):**',
     )
-    assert.match(html, /<p class="stream-pending stream-pending-paragraph[^"]*">/)
+    // The pending line continues the open paragraph → span inside the <p> (#11).
+    assert.match(html, /<span class="stream-pending stream-pending-paragraph-continuation[^"]*">/)
     assert.match(html, /<strong>Recent commits to main \(all auto-bump PRs\):<\/strong>/)
     assert.doesNotMatch(html, /\*\*Recent commits/)
   })
@@ -73,7 +74,7 @@ describe('renderStreamingMarkdown', () => {
 
   it('fully escapes the in-progress tail, including & and quotes (#115)', () => {
     const html = renderStreamingMarkdown('done\n<img src=x onerror=alert(1)> "a" & b')
-    assert.match(html, /<p class="stream-pending stream-pending-paragraph[^"]*">/)
+    assert.match(html, /<span class="stream-pending stream-pending-paragraph-continuation[^"]*">/)
     assert.doesNotMatch(html, /<img/)
     assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt; &quot;a&quot; &amp; b/)
   })
@@ -90,7 +91,7 @@ describe('renderStreamingMarkdown', () => {
       // placeholder for the artifact tag; the dangerous src/onerror payload must
       // never reach innerHTML.
       const html = renderStreamingMarkdown('done\n<img src="artifacts/x.png" onerror="alert(1)">')
-      assert.match(html, /<p class="stream-pending stream-pending-paragraph[^"]*">/)
+      assert.match(html, /<span class="stream-pending stream-pending-paragraph-continuation[^"]*">/)
       assert.match(html, /<img class="host-image"/)
       assert.doesNotMatch(html, /onerror/)
       assert.doesNotMatch(html, /src=/)
@@ -168,6 +169,8 @@ describe('splitForStreaming (block-granularity emphasis)', () => {
     assert.deepEqual(splitCore('done\nplain tail'), {
       complete: 'done\n',
       pending: 'plain tail',
+      // A later line of the same open paragraph is a lazy continuation (#11).
+      paragraphContinuation: true,
     })
   })
 })
