@@ -72,11 +72,13 @@ jobs:
 
       - run: npm ci
 
-      # Release gate: never cut a release from a red tree.
+      # Release gate: never cut a release from a red tree. Mirrors CI exactly —
+      # `coverage:ci` runs the suite under c8 and enforces the coverage-baseline
+      # ratchet, so a release can't ship a commit CI would have blocked on a PR.
       - name: Typecheck
         run: npm run typecheck
-      - name: Test
-        run: npm test
+      - name: Test + coverage
+        run: npm run coverage:ci
       - name: Build
         run: npm run build
       - name: Normalizer parity
@@ -84,13 +86,19 @@ jobs:
 
       - name: Resolve version
         id: version
+        # Pass the free-text input through `env:` rather than interpolating
+        # `${{ inputs.exact_version }}` into the script body — inline expansion
+        # would let a value like `"; rm -rf … ; "` execute at template-render time.
+        env:
+          EXACT_VERSION: ${{ inputs.exact_version }}
+          BUMP: ${{ inputs.bump }}
         run: |
           set -euo pipefail
           # Prefer the free-text exact version when provided; otherwise use the
           # bump keyword from the dropdown. `npm version` accepts both forms and
           # prints the resulting `vX.Y.Z`. --no-git-tag-version edits
           # package.json + package-lock.json without tagging (we tag ourselves).
-          TARGET="${{ inputs.exact_version || inputs.bump }}"
+          TARGET="${EXACT_VERSION:-$BUMP}"
           TAG=$(npm version "$TARGET" --no-git-tag-version)
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
