@@ -20,23 +20,28 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./sanitizers/dompurify": {
       "types": "./dist/sanitize-dompurify.d.ts",
-      "import": "./dist/sanitize-dompurify.js"
+      "import": "./dist/sanitize-dompurify.js",
+      "default": "./dist/sanitize-dompurify.js"
     },
     "./highlighters/highlightjs": {
       "types": "./dist/highlight-hljs.d.ts",
-      "import": "./dist/highlight-hljs.js"
+      "import": "./dist/highlight-hljs.js",
+      "default": "./dist/highlight-hljs.js"
     },
     "./diagrams/mermaid": {
       "types": "./dist/mermaid-mermaidjs.d.ts",
-      "import": "./dist/mermaid-mermaidjs.js"
+      "import": "./dist/mermaid-mermaidjs.js",
+      "default": "./dist/mermaid-mermaidjs.js"
     },
     "./sanitizers/browser": {
       "types": "./dist/sanitize-browser.d.ts",
-      "import": "./dist/sanitize-browser.js"
+      "import": "./dist/sanitize-browser.js",
+      "default": "./dist/sanitize-browser.js"
     },
     "./styles/core.css": "./styles/core.css",
     "./styles/default.css": "./styles/default.css"
@@ -45,10 +50,18 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "engines": {
-    "node": ">=21"
+    "node": ">=20"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=21",
+      "onFail": "error"
+    }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
     "build:demo": "npm run build && rm -f docs/streaming-markdown.*.mjs && esbuild docs/browser-entry.mjs --bundle --splitting --format=esm --platform=browser --outdir=docs --out-extension:.js=.mjs --entry-names=streaming-markdown.browser --chunk-names=streaming-markdown.[name]-[hash]",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
@@ -70,15 +83,18 @@
     "access": "public"
   },
   "dependencies": {
-    "entities": "^8.0.0",
-    "highlight.js": "^11.11.1"
+    "entities": "^8.0.0"
   },
   "peerDependencies": {
     "dompurify": "^3.4.11",
+    "highlight.js": "^11.11.1",
     "mermaid": "^11.0.0"
   },
   "peerDependenciesMeta": {
     "dompurify": {
+      "optional": true
+    },
+    "highlight.js": {
       "optional": true
     },
     "mermaid": {
@@ -92,6 +108,7 @@
     "commonmark-spec": "0.31.2",
     "dompurify": "^3.4.11",
     "esbuild": "^0.28.1",
+    "highlight.js": "^11.11.1",
     "jsdom": "^29.1.1",
     "tsx": "^4.19.2",
     "typescript": "^6.0.3"
