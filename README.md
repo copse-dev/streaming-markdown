@@ -44,6 +44,44 @@ You can also supply your own `SanitizerBackend`. If no backend is set and the
 native API is unavailable, `sanitizeRenderedMarkdown` throws rather than emit
 unsanitized HTML.
 
+### Trusted Types
+
+The package works on pages that enforce
+[Trusted Types](https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API)
+(`Content-Security-Policy: require-trusted-types-for 'script'`). Every internal
+DOM write goes through a single sink chokepoint that sanitizes first and then
+blesses the markup through a Trusted Types policy — a lazily created policy
+named `streaming-markdown` by default. This does not depend on the native
+Sanitizer API: with the DOMPurify (or any custom) backend, sanitized HTML is
+still assigned via `innerHTML` as policy-minted `TrustedHTML`.
+
+If your CSP restricts policy names (`trusted-types` directive), either
+allowlist `streaming-markdown` or inject your own policy:
+
+```ts
+import { setTrustedTypesPolicy } from '@copse/streaming-markdown'
+
+setTrustedTypesPolicy(
+  window.trustedTypes.createPolicy('my-app#markdown', { createHTML: (s) => s }),
+)
+```
+
+The injected policy always receives markup that has already been through
+`sanitizeRenderedMarkdown`, so an identity `createHTML` is sound — the hook
+exists for CSP policy-name control, not to replace the sanitizer.
+
+Two edges to know about:
+
+- **Your own sinks.** `renderMarkdown`/`renderStreamingMarkdown` return plain
+  strings; assigning them to `innerHTML` yourself still needs your own policy.
+  Prefer the exported `setSanitizedHtml(el, html)` — the package's reference
+  sink — which sanitizes and blesses in one call (also the right tool inside a
+  custom `FenceHandler.sync`).
+- **Mermaid SVG** bypasses the markdown sanitizer by design, so the package
+  never blesses it. Under enforcement, pass `transformSvg` to
+  `hydratePendingDiagrams` and return a `TrustedHTML` minted by your own policy
+  (e.g. `DOMPurify.sanitize(svg, { RETURN_TRUSTED_TYPE: true })`).
+
 Streaming, syntax highlighting, Mermaid source preparation, and an injectable
 `LinkDecorator` for host-specific `<a>` routing are also exported — see the
 public surface in [`src/index.ts`](src/index.ts).

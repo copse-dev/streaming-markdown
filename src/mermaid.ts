@@ -1,4 +1,5 @@
 import { mermaidSourceCandidates } from './mermaid-source.ts'
+import { setHostTrustedHtml, type TrustedHTMLValue } from './html-sink.ts'
 
 // PROTOTYPE (#lazy-load): the diagram-renderer registry, the mermaid analogue of
 // the pluggable code highlighter. Unlike highlight.js, the mermaid *library* is
@@ -72,8 +73,14 @@ export interface HydrateDiagramsOptions {
    * by the trusted library *after* sink sanitization and is not re-sanitized by
    * default (see the design invariant); a safety-conscious host can pass a
    * transform here to run it through its own SVG sanitizer.
+   *
+   * Under Trusted Types enforcement this transform is *required*: the SVG
+   * bypasses the markdown sanitizer, so this package never blesses it with its
+   * own policy — return a `TrustedHTML` minted by a host policy (e.g.
+   * `DOMPurify.sanitize(svg, { RETURN_TRUSTED_TYPE: true })`) or the injection
+   * will be rejected by the page's CSP.
    */
-  transformSvg?: (svg: string) => string
+  transformSvg?: (svg: string) => string | TrustedHTMLValue
 }
 
 /** Read a pending container's diagram source from its `<pre class="mermaid">`. */
@@ -82,10 +89,10 @@ function readDiagramSource(container: Element): string {
   return container.querySelector('pre.mermaid')?.textContent ?? ''
 }
 
-function markRendered(container: Element, svg: string): void {
+function markRendered(container: Element, svg: string | TrustedHTMLValue): void {
   container.classList.remove('mermaid-diagram--pending')
   container.classList.add('mermaid-diagram--rendered')
-  container.innerHTML = svg
+  setHostTrustedHtml(container, svg)
 }
 
 function markError(container: Element): void {

@@ -21,6 +21,7 @@ import { IncrementalSourceScanner } from './incremental-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import { setPresanitizedHtml } from './html-sink.ts'
 import {
   appendPendingTableRowHtml,
   buildFormingTableHtml,
@@ -256,7 +257,7 @@ function syncListPendingDom(
   else li.removeAttribute('data-ordered-marker')
   if (headingLevel !== null) li.setAttribute('data-heading-level', String(headingLevel))
   else li.removeAttribute('data-heading-level')
-  li.innerHTML = wrapBlockPendingInner(pending, pendingInner)
+  setPresanitizedHtml(li, wrapBlockPendingInner(pending, pendingInner))
 }
 
 function blockPendingClassName(pending: string, openListItemFirstLine?: string): string {
@@ -412,7 +413,7 @@ function syncParagraphContinuationDom(
     host.append(el)
   }
   el.className = `stream-pending ${PARAGRAPH_CONTINUATION_CLASS} ${BLOCK_PENDING_CLASS}`
-  el.innerHTML = pendingInner
+  setPresanitizedHtml(el, pendingInner)
   return true
 }
 
@@ -440,7 +441,7 @@ function syncListContinuationDom(
     li.append(el)
   }
   el.className = `stream-pending ${LIST_CONTINUATION_CLASS} ${BLOCK_PENDING_CLASS}`
-  el.innerHTML = pendingInner.startsWith(' ') ? pendingInner : ` ${pendingInner}`
+  setPresanitizedHtml(el, pendingInner.startsWith(' ') ? pendingInner : ` ${pendingInner}`)
   return true
 }
 
@@ -498,7 +499,7 @@ function syncBlockPendingDom(
   else el.removeAttribute('data-ordered-marker')
   if (headingLevel !== null) el.setAttribute('data-heading-level', String(headingLevel))
   else el.removeAttribute('data-heading-level')
-  el.innerHTML = wrapBlockPendingInner(pending, pendingInner)
+  setPresanitizedHtml(el, wrapBlockPendingInner(pending, pendingInner))
 }
 
 function syncInlinePendingDom(
@@ -506,7 +507,7 @@ function syncInlinePendingDom(
   pendingInner: string,
   active: boolean,
 ): void {
-  pendingEl.innerHTML = pendingInner
+  setPresanitizedHtml(pendingEl, pendingInner)
   pendingEl.hidden = !active
   pendingEl.className = 'stream-pending'
   delete pendingEl.dataset['orderedMarker']

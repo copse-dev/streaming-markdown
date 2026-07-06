@@ -54,6 +54,7 @@ import {
 } from './render-blocks.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import { setPresanitizedHtml, setSanitizedHtml } from './html-sink.ts'
 import { renderMarkdown, TOP_LEVEL_RENDER_OPTS } from './renderer.ts'
 import {
   morphElementChildrenFrom,
@@ -428,7 +429,7 @@ export class FrozenTailRenderer {
     // runs collapse to one element).
     if (deltaHtml !== '') {
       const probe = completedEl.cloneNode(false) as HTMLElement
-      probe.innerHTML = lead + (parts[0] ?? '')
+      setPresanitizedHtml(probe, lead + (parts[0] ?? ''))
       this.frozenNodeCount += probe.childNodes.length
       this.frozenHasHtml = true
     }
@@ -564,9 +565,7 @@ export class FrozenTailRenderer {
     // own attributes are synced separately (the task class can appear later)
     // while its frozen <li> children are never touched.
     const templateHost = completedEl.cloneNode(false) as HTMLElement
-    templateHost.innerHTML = sanitizeRenderedMarkdown(
-      `${open}${delta.itemsHtml}${tail.itemsHtml}${close}`,
-    )
+    setSanitizedHtml(templateHost, `${open}${delta.itemsHtml}${tail.itemsHtml}${close}`)
     const templateList = templateHost.firstElementChild
     if (!(templateList instanceof HTMLElement) || templateList.tagName !== wantTag) {
       return 'fallback'
@@ -577,7 +576,7 @@ export class FrozenTailRenderer {
     if (freezeCount > 0) {
       // Counted advance (gap C): parse the sanitized frozen slice alone.
       const countHost = completedEl.cloneNode(false) as HTMLElement
-      countHost.innerHTML = sanitizeRenderedMarkdown(`${open}${delta.itemsHtml}${close}`)
+      setSanitizedHtml(countHost, `${open}${delta.itemsHtml}${close}`)
       this.listFrozenLis += countHost.firstElementChild?.childNodes.length ?? 0
       const lastFrozen = deltaItems[deltaItems.length - 1]
       if (lastFrozen) {

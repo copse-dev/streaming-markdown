@@ -19,6 +19,18 @@ export {
   type SanitizerBackend,
   type SanitizerConfig,
 } from './sanitize.ts'
+// Trusted Types support: every internal `innerHTML` write routes through the
+// html-sink chokepoint, which sanitizes and then blesses the markup with a TT
+// policy when one is active (a lazily created `streaming-markdown` policy by
+// default). `setSanitizedHtml` is the reference sink for hosts and custom fence
+// handlers; `setTrustedTypesPolicy` injects a host policy for pages whose CSP
+// restricts policy names.
+export {
+  setSanitizedHtml,
+  setTrustedTypesPolicy,
+  type TrustedHTMLValue,
+  type TrustedTypesPolicy,
+} from './html-sink.ts'
 // The native-Sanitizer backend is zero-dependency, so it is safe to include in
 // the main entry. The DOMPurify backend stays behind the
 // `@copse/streaming-markdown/sanitizers/dompurify` entry so it is only bundled
