@@ -395,10 +395,14 @@ function syncParagraphContinuationDom(
   if (!host) return false
 
   const existing = host.querySelector(`:scope > .${PARAGRAPH_CONTINUATION_CLASS}`)
+  /* c8 ignore start -- unreachable defensive guard: `active` is always `true`
+     here and `pendingInner` is non-empty whenever this path runs (see the note
+     in syncListPendingDom). */
   if (!active || !pendingInner) {
     removeParagraphContinuationNode(existing)
     return true
   }
+  /* c8 ignore stop */
 
   let el: Element | null = existing
   if (!el) {
