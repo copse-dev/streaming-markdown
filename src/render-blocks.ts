@@ -22,7 +22,8 @@ import {
   tokenizeBlocks,
   unorderedListMarkerChar,
 } from './block-tokenizer.ts'
-import { escapeHtml, escapeMermaidHtml } from './escape.ts'
+import { escapeHtml } from './escape.ts'
+import { getFenceHandler } from './fence-handlers.ts'
 import { fenceCodeClass, highlightFenceCode } from './highlight.ts'
 import { dedentBlock, isIndentedHtmlBlock } from './indented-html.ts'
 import { type LinkReferenceMap } from './link-references.ts'
@@ -49,10 +50,8 @@ export interface RenderBlocksOptions {
 
 
 function renderFencedBlock(lang: string, code: string): string {
-  if (lang === 'mermaid') {
-    const body = escapeMermaidHtml(code.trimEnd())
-    return `<div class="mermaid-diagram mermaid-diagram--pending"><pre class="mermaid">${body}</pre></div>`
-  }
+  const handler = getFenceHandler(lang)
+  if (handler) return handler.render(code, lang)
   const body = highlightFenceCode(code, lang)
   return `<pre><code class="${fenceCodeClass(lang)}">${body}</code></pre>`
 }
