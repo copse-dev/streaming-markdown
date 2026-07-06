@@ -33,6 +33,11 @@
       "import": "./dist/highlight-hljs.js",
       "default": "./dist/highlight-hljs.js"
     },
+    "./highlighters/shiki": {
+      "types": "./dist/highlight-shiki.d.ts",
+      "import": "./dist/highlight-shiki.js",
+      "default": "./dist/highlight-shiki.js"
+    },
     "./diagrams/mermaid": {
       "types": "./dist/mermaid-mermaidjs.d.ts",
       "import": "./dist/mermaid-mermaidjs.js",
@@ -96,7 +101,8 @@
     "dompurify": "^3.4.11",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.0 || ^0.17.0",
-    "mermaid": "^11.0.0"
+    "mermaid": "^11.0.0",
+    "shiki": "^4.3.1"
   },
   "peerDependenciesMeta": {
     "dompurify": {
@@ -109,6 +115,9 @@
       "optional": true
     },
     "mermaid": {
+      "optional": true
+    },
+    "shiki": {
       "optional": true
     }
   },
@@ -123,6 +132,7 @@
     "jsdom": "^29.1.1",
     "katex": "^0.17.0",
     "playwright-core": "^1.61.1",
+    "shiki": "^4.3.1",
     "tsx": "^4.19.2",
     "typescript": "^6.0.3"
   }

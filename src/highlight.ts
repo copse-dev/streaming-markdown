@@ -33,9 +33,10 @@ export interface CodeHighlighter {
 
 /**
  * Language ids the core knows how to resolve to. This MUST stay in sync with the
- * grammars the {@link CodeHighlighter} backend registers (`highlight-hljs.ts`) —
- * the core owns it so `fenceCodeClass` resolves `ts → typescript` before the
- * backend has loaded, giving a stable class across the plain → highlighted swap.
+ * grammars the {@link CodeHighlighter} backends register (`highlight-hljs.ts`,
+ * `highlight-shiki.ts`) — the core owns it so `fenceCodeClass` resolves
+ * `ts → typescript` before the backend has loaded, giving a stable class across
+ * the plain → highlighted swap.
  */
 export const KNOWN_LANGUAGES: ReadonlySet<string> = new Set([
   'typescript',
