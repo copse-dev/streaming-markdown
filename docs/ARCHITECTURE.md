@@ -96,8 +96,24 @@ When extending the renderer or its CSS, preserve these rules:
 - **Valid block HTML.** Block elements (`<ul>`, `<ol>`, `<h3>`, `<h4>`, `<pre>`, `<table>`,
   `<hr>`) must never end up inside `<p>`. Mixed single-newline blocks (heading → subheading → list)
   are common in LLM output; split at block boundaries before wrapping paragraphs.
+- **Pluggable inline passes (#53).** Custom inline syntax (citation `[@key]`, `==highlight==`,
+  …) registers as ordered passes (`inline-passes.ts`, `setInlinePasses`) that run inside the
+  inline pipeline at a declared stage: `before-links` (after strikethrough, before markdown
+  link resolution — bracket syntaxes must consume their text before `[` is read as a label
+  opener, as in Pandoc) or `after-links` (last, over rendered `<a>`/`<code>`). The registry —
+  not each plugin — carries the hard parts: passes are applied only outside rendered
+  `<code>`/`<a>`/`<img>` spans (the `INLINE_HTML_SHIELD_RE` split); generated HTML is spliced
+  via `ctx.emit`, which parks it in a side table behind an inert PUA placeholder restored
+  *after* `escapeHtmlTextNodes` (the raw-image placeholder pattern; attacker-typed placeholder
+  characters are stripped before any pass runs); and a pass's optional `holdStart` composes
+  into `pendingHoldIndex` so a half-open `[@doe` / `==foo` holds mid-stream instead of
+  flashing raw. Emitted HTML still passes the sink sanitizer — the second gate — so passes
+  using tags/attributes beyond the core allowlist must widen it via `setSanitizeExtension`.
+  Passes may run more than once over nested link-label text and must be idempotent
+  (placeholder tokens make emitted output inert automatically).
 - **Inline formatting order.** Fenced code → inline code → emphasis (delimiter stack) →
-  GFM strikethrough → markdown links → bare HTTP autolinks. Emphasis runs before links so
+  GFM strikethrough → registered `before-links` inline passes → markdown links → bare HTTP
+  autolinks → registered `after-links` passes. Emphasis runs before links so
   `*foo [bar](/url)*` resolves correctly; link labels may already contain `<em>` / `<strong>`
   from that pass. Strikethrough (`~~text~~` → `<del>`, `inline-strikethrough.ts`) sits between
   emphasis and links so `~~*x*~~` nests and a struck `~~[a](b)~~` still resolves its link inside

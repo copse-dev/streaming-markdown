@@ -107,6 +107,39 @@ KaTeX, …) **after** the HTML is sanitized at the sink — mermaid's hydrator i
 emission only. `setFenceHandler('mermaid', null)` removes the built-in and
 renders mermaid fences as ordinary code blocks.
 
+### Custom inline syntax (inline passes)
+
+Inline syntax beyond CommonMark/GFM — Pandoc-style citations, `==highlights==`,
+emoji shortcodes — registers as **inline passes** that run inside the inline
+pipeline. The registry handles code-span shielding, escaping, and streaming for
+you:
+
+```ts
+import { setInlinePasses, escapeHtml } from '@copse/streaming-markdown'
+
+setInlinePasses([
+  {
+    name: 'citations',
+    stage: 'before-links', // consume [@key] before it parses as a link label
+    apply: (text, ctx) =>
+      text.replace(/\[@([\w.-]+)\]/g, (_m, key) =>
+        // ctx.emit shields trusted HTML from later passes and escaping; it is
+        // still sanitized at the sink (widen via setSanitizeExtension if needed).
+        ctx.emit(`<span class="citation">@${escapeHtml(key)}</span>`),
+      ),
+    // Streaming: hold a half-open `[@doe` so it never flashes raw mid-stream.
+    holdStart: (line) => {
+      const open = line.lastIndexOf('[@')
+      return open !== -1 && line.indexOf(']', open) === -1 ? open : line.length
+    },
+  },
+])
+```
+
+Passes never see the interior of code spans or rendered links/images, run in
+array order within their stage, and apply identically in the at-rest renderer
+and both streaming emitters. Pass `setInlinePasses(null)` to remove them.
+
 Link destinations are validated against a scheme allowlist
 (`DEFAULT_SAFE_HREF_SCHEMES`: `http`, `https`, `mailto`, `tel`, `sms`, `ftp`,
 `ftps`, plus scheme-less relative/fragment/path forms); any other scheme —
