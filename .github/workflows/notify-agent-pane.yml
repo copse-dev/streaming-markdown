@@ -1,0 +1,48 @@
+name: Notify agent-pane
+
+# Push-model dependency sync: the moment a release is published here, poke
+# copse-dev/agent-pane with a repository_dispatch so its
+# sync-streaming-markdown.yml workflow bumps @copse/streaming-markdown and
+# opens a PR immediately — no waiting for dependabot's weekly schedule and
+# cooldown. Listening on `release: published` (rather than a step inside
+# release.yml) keeps the two concerns decoupled and also covers a release cut
+# by hand in the GitHub UI.
+#
+# GITHUB_TOKEN is scoped to this repo and cannot dispatch cross-repo, so this
+# needs a fine-grained PAT stored as the AGENT_PANE_DISPATCH_TOKEN repo secret:
+#   github.com -> Settings -> Developer settings -> Fine-grained tokens
+#   Repository access: copse-dev/agent-pane only
+#   Permissions: Contents -> Read and write (the repository_dispatch endpoint
+#   sits under Contents)
+# A GitHub App installation token works too if PAT expiry rotation is a
+# concern. Until the secret exists this workflow simply fails on its one step,
+# and releases themselves are unaffected.
+
+on:
+  release:
+    types: [published]
+
+# The job only calls the API on the *other* repo via the PAT; this workflow
+# needs nothing from its own GITHUB_TOKEN.
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    # Pre-releases are opt-in on the consumer side — don't auto-bump agent-pane
+    # onto an 0.x.y-rc. agent-pane can still pull one manually via its
+    # workflow_dispatch input.
+    if: ${{ !github.event.release.prerelease }}
+    steps:
+      - name: Send repository_dispatch to agent-pane
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PANE_DISPATCH_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          gh api repos/copse-dev/agent-pane/dispatches \
+            -f event_type=streaming-markdown-release \
+            -f "client_payload[version]=$VERSION" \
+            -f "client_payload[tag]=$TAG"
+          echo "Dispatched streaming-markdown-release $VERSION to copse-dev/agent-pane"
