@@ -55,6 +55,13 @@ named `streaming-markdown` by default. This does not depend on the native
 Sanitizer API: with the DOMPurify (or any custom) backend, sanitized HTML is
 still assigned via `innerHTML` as policy-minted `TrustedHTML`.
 
+Both bundled backends additionally implement a **node path**
+(`SanitizerBackend.sanitizeInto`): the sanitized nodes are placed into the
+target element directly — one parse per write instead of the string path's
+parse→serialize→re-parse, and no `innerHTML` sink at all, so no policy is
+involved. Custom backends may omit it; sinks then use the string + policy path
+above, which remains fully supported everywhere.
+
 If your CSP restricts policy names (`trusted-types` directive), either
 allowlist `streaming-markdown` or inject your own policy:
 

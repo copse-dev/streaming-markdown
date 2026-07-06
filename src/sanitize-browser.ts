@@ -71,27 +71,35 @@ export function enforceSanitizerAllowlist(root: ParentNode, config: SanitizerCon
   }
 }
 
+function sanitizeIntoElement(target: Element, html: string, config: SanitizerConfig): void {
+  const el = target as unknown as SetHTMLElement
+  // Hand the native Sanitizer our allowlist so it keeps exactly the tags and
+  // attributes the renderer emits — notably `class`, which carries highlight.js
+  // (`hljs-*`) and mermaid hooks and which `setHTML`'s *default* config strips
+  // (dropping syntax highlighting). Passing a config never loosens safety:
+  // setHTML still removes XSS-unsafe elements/attributes (scripts, event
+  // handlers, unsafe URLs) regardless of the allowlist.
+  try {
+    el.setHTML(html, {
+      sanitizer: { elements: config.allowedTags, attributes: config.allowedAttr },
+    })
+  } catch {
+    // Older engines may reject the options argument; fall back to the default
+    // safe parse. The allowlist walk below still narrows the result (it just
+    // cannot restore attributes the default config already stripped).
+    el.setHTML(html)
+  }
+  enforceSanitizerAllowlist(target, config)
+}
+
 export const browserSanitizerBackend: SanitizerBackend = {
   sanitize(html: string, config: SanitizerConfig): string {
     const host = document.createElement('div')
-    const el = host as unknown as SetHTMLElement
-    // Hand the native Sanitizer our allowlist so it keeps exactly the tags and
-    // attributes the renderer emits — notably `class`, which carries highlight.js
-    // (`hljs-*`) and mermaid hooks and which `setHTML`'s *default* config strips
-    // (dropping syntax highlighting). Passing a config never loosens safety:
-    // setHTML still removes XSS-unsafe elements/attributes (scripts, event
-    // handlers, unsafe URLs) regardless of the allowlist.
-    try {
-      el.setHTML(html, {
-        sanitizer: { elements: config.allowedTags, attributes: config.allowedAttr },
-      })
-    } catch {
-      // Older engines may reject the options argument; fall back to the default
-      // safe parse. The allowlist walk below still narrows the result (it just
-      // cannot restore attributes the default config already stripped).
-      el.setHTML(html)
-    }
-    enforceSanitizerAllowlist(host, config)
+    sanitizeIntoElement(host, html, config)
     return host.innerHTML
   },
+  // Node path: `setHTML` parses and sanitizes straight into the live target
+  // (it is a Trusted Types-exempt safe sink), so a sink write needs one parse
+  // and no serialize.
+  sanitizeInto: sanitizeIntoElement,
 }

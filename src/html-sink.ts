@@ -1,4 +1,4 @@
-import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import { sanitizeRenderedMarkdown, sanitizeRenderedMarkdownInto } from './sanitize.ts'
 
 // The single `innerHTML` chokepoint. Every DOM write of rendered-markdown HTML
 // in this package goes through this module (enforced by html-sink.test.ts), so
@@ -105,11 +105,17 @@ function blessSanitizedHtml(sanitized: string): string {
 }
 
 /**
- * Sanitize `html` with {@link sanitizeRenderedMarkdown} and assign it to
- * `el.innerHTML`, routing through a Trusted Types policy when one is active.
- * This is the reference sink for rendered-markdown HTML — custom
- * {@link FenceHandler} `sync` implementations should use it instead of raw
- * `innerHTML` so they inherit both sanitization and Trusted Types support.
+ * Sanitize `html` and set it as `el`'s content. This is the reference sink for
+ * rendered-markdown HTML — custom {@link FenceHandler} `sync` implementations
+ * should use it instead of raw `innerHTML` so they inherit both sanitization
+ * and Trusted Types support.
+ *
+ * When the active {@link SanitizerBackend} implements `sanitizeInto`, the
+ * sanitized nodes land in `el` directly — one parse, no `innerHTML` write, no
+ * Trusted Types policy needed. Otherwise the string path runs: sanitize, bless
+ * through the active policy, assign via `innerHTML`. Both paths serialize
+ * identically; the string path is always fully supported (backends are not
+ * required to provide a node path, and `Element.setHTML` need not exist).
  */
 export function setSanitizedHtml(el: Element, html: string): void {
   if (html === '') {
@@ -118,6 +124,7 @@ export function setSanitizedHtml(el: Element, html: string): void {
     el.replaceChildren()
     return
   }
+  if (sanitizeRenderedMarkdownInto(el, html)) return
   el.innerHTML = blessSanitizedHtml(sanitizeRenderedMarkdown(html))
 }
 

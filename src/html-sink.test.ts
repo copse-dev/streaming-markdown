@@ -15,7 +15,17 @@ import {
   setTrustedTypesPolicy,
   type TrustedTypesPolicy,
 } from './html-sink.ts'
+import { sanitizeRenderedMarkdown, setSanitizerBackend } from './sanitize.ts'
+import { dompurifyBackend } from './sanitize-dompurify.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
+
+// The jsdom setup registers the DOMPurify backend, whose `sanitizeInto` node
+// path bypasses `innerHTML` (and therefore the Trusted Types policy) entirely.
+// Tests that exercise the policy string path pin a string-only backend — the
+// same shape as a custom host backend without a node path.
+function forceStringSanitizePath(): void {
+  setSanitizerBackend({ sanitize: (html, config) => dompurifyBackend.sanitize(html, config) })
+}
 
 interface StubPolicy extends TrustedTypesPolicy {
   name: string
@@ -54,6 +64,8 @@ afterEach(() => {
   delete (globalThis as Record<string, unknown>)['trustedTypes']
   // Also re-arms the default-policy probe for the next test.
   setTrustedTypesPolicy(null)
+  // Restore the backend the jsdom setup registered.
+  setSanitizerBackend(dompurifyBackend)
 })
 
 describe('setSanitizedHtml', () => {
@@ -72,6 +84,7 @@ describe('setSanitizedHtml', () => {
   })
 
   it('lazily creates the default streaming-markdown policy and routes writes through it', () => {
+    forceStringSanitizePath()
     const { created } = installStubTrustedTypes()
     setTrustedTypesPolicy(null) // re-probe now that the shim exists
     const el = document.createElement('div')
@@ -86,6 +99,7 @@ describe('setSanitizedHtml', () => {
   })
 
   it('prefers a host-injected policy and hands it pre-sanitized markup', () => {
+    forceStringSanitizePath()
     const { created } = installStubTrustedTypes()
     const hostPolicy = makeStubPolicy('my-app#markdown', (s) => s)
     setTrustedTypesPolicy(hostPolicy)
@@ -97,6 +111,7 @@ describe('setSanitizedHtml', () => {
   })
 
   it('works with a host policy even when no trustedTypes global exists', () => {
+    forceStringSanitizePath()
     const hostPolicy = makeStubPolicy('my-app#markdown', (s) => s)
     setTrustedTypesPolicy(hostPolicy)
     const el = document.createElement('div')
@@ -106,6 +121,7 @@ describe('setSanitizedHtml', () => {
   })
 
   it('falls back to plain strings when createPolicy is rejected by CSP', () => {
+    forceStringSanitizePath()
     ;(globalThis as Record<string, unknown>)['trustedTypes'] = {
       createPolicy(): never {
         throw new TypeError('Policy "streaming-markdown" disallowed')
@@ -115,6 +131,43 @@ describe('setSanitizedHtml', () => {
     const el = document.createElement('div')
     setSanitizedHtml(el, '<p>still works</p>')
     assert.equal(el.innerHTML, '<p>still works</p>')
+  })
+})
+
+describe('setSanitizedHtml node path (backend sanitizeInto)', () => {
+  it('bypasses innerHTML and the Trusted Types policy entirely', () => {
+    const hostPolicy = makeStubPolicy('my-app#markdown', (s) => s)
+    setTrustedTypesPolicy(hostPolicy)
+    const el = document.createElement('div')
+    setSanitizedHtml(el, '<p>keep</p><script>bad()</script>')
+    assert.equal(hostPolicy.calls.length, 0, 'no policy needed on the node path')
+    assert.equal(el.innerHTML, '<p>keep</p>')
+  })
+
+  it('serializes identically to the string path', () => {
+    const dirty =
+      '<h2 id="x">Title</h2>\n<ul><li class="task-list-item">' +
+      '<input type="checkbox" checked> done</li></ul>' +
+      '<input type="text" name="evil"><td>stray</td>tail &amp; text'
+    const el = document.createElement('div')
+    setSanitizedHtml(el, dirty)
+    assert.equal(el.innerHTML, sanitizeRenderedMarkdown(dirty))
+  })
+
+  it('applies the double-encoded nbsp normalization like the string path', () => {
+    const el = document.createElement('div')
+    setSanitizedHtml(el, '<p>a&amp;nbsp;b</p>')
+    const fresh = document.createElement('div')
+    fresh.innerHTML = sanitizeRenderedMarkdown('<p>a&amp;nbsp;b</p>')
+    assert.equal(el.innerHTML, fresh.innerHTML)
+    assert.equal(el.querySelector('p')?.textContent, 'a b')
+  })
+
+  it('replaces existing children', () => {
+    const el = document.createElement('div')
+    el.innerHTML = '<p>old</p><p>content</p>'
+    setSanitizedHtml(el, '<em>new</em>')
+    assert.equal(el.innerHTML, '<em>new</em>')
   })
 })
 

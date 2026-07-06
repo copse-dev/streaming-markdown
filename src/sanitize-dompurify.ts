@@ -40,4 +40,24 @@ export const dompurifyBackend: SanitizerBackend = {
       activeOnElement = undefined
     }
   },
+  // Node path: hand the sanitized fragment's nodes to the target directly, so a
+  // sink write costs one parse (DOMPurify's) with no serialize→re-parse round
+  // trip — and no `innerHTML` write, which also sidesteps Trusted Types sinks.
+  sanitizeInto(target: Element, html: string, config: SanitizerConfig): void {
+    installHook()
+    activeOnElement = config.onElement
+    try {
+      const fragment = DOMPurify.sanitize(html, {
+        ALLOWED_TAGS: [...config.allowedTags],
+        ALLOWED_ATTR: [...config.allowedAttr],
+        RETURN_DOM_FRAGMENT: true,
+      })
+      const doc = target.ownerDocument
+      target.replaceChildren(
+        fragment.ownerDocument === doc ? fragment : doc.importNode(fragment, true),
+      )
+    } finally {
+      activeOnElement = undefined
+    }
+  },
 }
