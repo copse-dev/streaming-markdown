@@ -1,13 +1,19 @@
 # @copse/streaming-markdown
 
-A streaming-capable CommonMark renderer with two emitters: a pure string→HTML
-function for at-rest rendering, and an incremental DOM renderer that reveals
-partial markdown as tokens arrive without flashing raw syntax. Built for
-LLM/agent chat UIs, but host-independent.
+**Markdown that renders as it arrives.** Two emitters for the same content
+stream — a pure `string→HTML` function for at-rest rendering, and an incremental
+DOM renderer that reveals partial markdown as tokens arrive without flashing raw
+syntax. CommonMark + GFM, built for LLM/agent chat UIs, but host-independent.
+
+**▶ [Live demo](https://copse-dev.github.io/streaming-markdown/)** — watch both emitters stream the same content side by side.
 
 ```bash
 npm install @copse/streaming-markdown
 ```
+
+## Quick start
+
+**At rest** — render a complete string, then sanitize at the sink:
 
 ```ts
 import { renderMarkdown, sanitizeRenderedMarkdown } from '@copse/streaming-markdown'
@@ -16,133 +22,70 @@ import { renderMarkdown, sanitizeRenderedMarkdown } from '@copse/streaming-markd
 el.innerHTML = sanitizeRenderedMarkdown(renderMarkdown('# Hi\n\n**bold** and ~~strike~~'))
 ```
 
-Indented code blocks are supported by default (`    code` → `<pre><code>`); pass
-`renderMarkdown(md, { indentedCode: false })` to opt out and render those lines as
-prose paragraphs instead. See the design note in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Streaming** — feed the growing string on each token. The string emitter is the
+simplest; the DOM emitter patches incrementally instead of replacing `innerHTML`:
 
-### Sanitizer backend
+```ts
+import { StreamingMarkdownRenderer } from '@copse/streaming-markdown'
 
-`sanitizeRenderedMarkdown` runs through a **pluggable sanitizer backend**. By
-default it uses the browser's native [Sanitizer API](https://developer.mozilla.org/en-US/docs/Web/API/Element/setHTML)
-(`Element.setHTML`) — a zero-dependency backend that pulls no sanitizer code into
-your bundle. To use it, no setup is needed in a modern browser.
+const renderer = new StreamingMarkdownRenderer(el)
+for await (const chunk of stream) {
+  accumulated += chunk
+  renderer.update(accumulated) // incremental DOM patch, pending blocks styled while they form
+}
+```
 
-For Node/jsdom/SSR or older browsers without the native API, opt into the bundled
-[DOMPurify](https://github.com/cure53/DOMPurify) backend (a peer dependency you
-install yourself). Because it lives behind its own entry point, bundlers drop
-DOMPurify entirely unless you import it:
+## Highlights
+
+- **Streaming-safe.** Pending block states show partial structure (tables, lists,
+  code, diagrams) without flashing raw syntax; a re-render upgrades in place.
+- **CommonMark + GFM** — tables, task lists, strikethrough, autolinks, indented
+  and fenced code. Tracked against the spec's conformance suite.
+- **Sanitize at the sink.** Rendered HTML is treated as untrusted and links are
+  scheme-validated; the sink sanitizer is the security gate.
+- **Light by default.** The only runtime dependency is `entities`. highlight.js,
+  DOMPurify, and mermaid are **optional and lazy** — never in your bundle unless
+  you opt in. See [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md).
+- **Pluggable everything** — sanitizer, syntax highlighter, mermaid & custom
+  fenced blocks, and `<a>` routing are all injectable.
+
+## Extending
+
+The sanitizer, syntax highlighter, diagram/fenced-block renderers, link routing,
+and raw-image handling are all plug points — register a backend once and it stays
+out of your bundle until you do. The full guide, with code for each, is in
+**[`docs/EXTENDING.md`](docs/EXTENDING.md)**:
 
 ```ts
 import { setSanitizerBackend } from '@copse/streaming-markdown'
 import { dompurifyBackend } from '@copse/streaming-markdown/sanitizers/dompurify'
 
-setSanitizerBackend(dompurifyBackend) // once, before the first render
+setSanitizerBackend(dompurifyBackend) // e.g. for Node/jsdom/SSR
 ```
-
-You can also supply your own `SanitizerBackend`. If no backend is set and the
-native API is unavailable, `sanitizeRenderedMarkdown` throws rather than emit
-unsanitized HTML.
-
-Streaming, syntax highlighting, Mermaid source preparation, and an injectable
-`LinkDecorator` for host-specific `<a>` routing are also exported — see the
-public surface in [`src/index.ts`](src/index.ts).
-
-### Syntax highlighting (lazy backend)
-
-Highlighting is a **pluggable backend**, like the sanitizer. The core carries no
-[highlight.js](https://highlightjs.org/) code and renders fenced code as escaped
-plain text (with the correct `hljs lang-*` class) until you register one — so
-highlight.js is only in your bundle if you ask for it:
-
-```ts
-import { setCodeHighlighter } from '@copse/streaming-markdown'
-import { highlightjsHighlighter } from '@copse/streaming-markdown/highlighters/highlightjs'
-
-setCodeHighlighter(highlightjsHighlighter) // once, before the first render
-```
-
-Or lazily — the grammars load as a separate chunk only when first needed, and a
-re-render upgrades already-rendered fences from plain to highlighted:
-
-```ts
-const { loadHighlightjs } = await import('@copse/streaming-markdown/highlighters/highlightjs')
-await loadHighlightjs()
-```
-
-See [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md) for the bundle-size rationale
-and how the same shape applies to Mermaid.
-
-### Custom fenced blocks (fence handlers)
-
-Mermaid support is built on a general **fence-handler registry**: which HTML a
-fenced code block emits is looked up by the fence's language (case-insensitive),
-and `mermaid` is simply the built-in entry. Register your own to add
-mermaid-style blocks — math, graphviz, vega, and friends:
-
-```ts
-import { setFenceHandler, escapeHtml, FORMING_FENCE_PRE_CLASS } from '@copse/streaming-markdown'
-
-setFenceHandler('math', {
-  // At-rest HTML for a completed ```math fence. Emitted before the sanitizer
-  // sink: stay inside the allowlist (or widen it via setSanitizeExtension).
-  render: (code) =>
-    `<div class="math-block math-block--pending"><pre class="math">${escapeHtml(code.trimEnd())}</pre></div>`,
-  // Optional: what the fence shows while still streaming (both emitters).
-  forming: {
-    html: (code) =>
-      `<div class="math-block math-block--pending ${FORMING_FENCE_PRE_CLASS}"><pre class="math">${escapeHtml(code)}</pre></div>`,
-    // Optional incremental DOM update; default = sanitized innerHTML replace.
-    sync: (container, code) => {
-      /* patch container in place */
-    },
-  },
-})
-```
-
-The pattern is two-phase, like mermaid: the handler emits inert, escaped
-*scaffolding* at render time, and your app hydrates it into rich output (SVG,
-KaTeX, …) **after** the HTML is sanitized at the sink — mermaid's hydrator is
-`hydratePendingDiagrams`. Fences are opaque to the parser, so handlers change
-emission only. `setFenceHandler('mermaid', null)` removes the built-in and
-renders mermaid fences as ordinary code blocks.
-
-Link destinations are validated against a scheme allowlist
-(`DEFAULT_SAFE_HREF_SCHEMES`: `http`, `https`, `mailto`, `tel`, `sms`, `ftp`,
-`ftps`, plus scheme-less relative/fragment/path forms); any other scheme —
-including `javascript:` and `data:` — is dropped. Override it with
-`setSafeHrefSchemes([...])` (case-insensitive; pass `null` to restore the
-default). Narrowing the list is always safe; only widen it with schemes that are
-inert as an `href`, never `javascript`/`data`/`vbscript`/`file`.
 
 ## Styling
 
-The renderer emits a documented set of class hooks (`stream-pending-*`,
-`contains-task-list`, `mermaid-diagram`, `hljs-*`, … — see the class contract in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)) but ships no styles by default, so
-it stays host-independent. Two optional stylesheets are provided; both scope every
-rule under a `.streaming-markdown` class, so add that class to the element you
-render into:
+The renderer emits documented class hooks but ships no styles by default.
+Two optional stylesheets are provided (`styles/core.css`, structural only;
+`styles/default.css`, a batteries-included theme); both scope every rule under a
+`.streaming-markdown` class:
 
 ```ts
 import '@copse/streaming-markdown/styles/default.css'
 el.classList.add('streaming-markdown')
 ```
 
-- **`styles/core.css`** — structural only: the rules the emitter's output needs to
-  render *correctly* regardless of theme (pending-state whitespace, task-list
-  marker suppression, code-block whitespace, layout-blowout guards). No colours,
-  spacing, or typography. Pair it with your own theme.
-- **`styles/default.css`** — imports `core.css` and adds a batteries-included look
-  (spacing, typography, tables, links, and a highlight.js VS Code Dark+ palette).
+Retheme via `--sm-*` custom properties. Full details — class contract, the CSS
+variables, and native-nesting note — are in [`docs/EXTENDING.md`](docs/EXTENDING.md#styling).
 
-Retheme `default.css` by setting `--sm-*` custom properties on `.streaming-markdown`
-(or any ancestor) — each has a fallback, so the sheet also stands alone. See the
-header comment in [`styles/default.css`](styles/default.css) for the full list
-(`--sm-space-sm`, `--sm-border`, `--sm-accent`, `--sm-code-bg`, …).
+## Documentation
 
-The stylesheets are authored with native CSS nesting; bundle with a target that
-supports it (any current engine) or let your bundler lower it.
+- **[`docs/EXTENDING.md`](docs/EXTENDING.md)** — every plug point (sanitizer,
+  highlighter, custom fenced blocks, link routing, images, scheme allowlist) and styling.
+- **[`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md)** — why the heavy deps are
+  optional and lazy, and how the code-split loading works.
+- **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — design invariants, the
+  two-emitter streaming architecture, and the regression/conformance suite.
 
 ## Development
 
@@ -152,19 +95,3 @@ npm run typecheck   # tsc (strict, exactOptionalPropertyTypes)
 npm test            # node:test via tsx — unit + CommonMark & GFM conformance
 npm run build       # emit dist/ (ESM JS + .d.ts)
 ```
-
-## Architecture
-
-Hand-rolled renderer in `renderer.ts`. At-rest rendering routes through
-`tokenizeBlocks()` → `renderBlocks()` (`render-blocks.ts`); block/inline tokenizers in
-`block-tokenizer.ts`, `inline-emphasis.ts`, and `streaming-split.ts` also drive streaming
-hold decisions. It treats the CommonMark spec as the reference for block/inline
-structure and grows toward it incrementally (see the conformance baseline in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)).
-
-## Documentation
-
-The design invariants (sanitize-at-the-sink, package boundary, streaming hold,
-raw-HTML policy, …), the two-emitter streaming architecture, and the full
-regression/conformance suite are documented in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
