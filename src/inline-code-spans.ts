@@ -82,11 +82,15 @@ export function renderInlineCode(text: string): string {
       continue
     }
     const span = nextCodeSpan(text, i)
+    /* c8 ignore start -- unreachable: nextCodeSpan only returns null when there
+       is no backtick at/after `i`, but this line is reached only when
+       `text[i] === '`'` (guarded above), so `span` is always non-null here. */
     if (!span) {
       out += text[i] ?? ''
       i++
       continue
     }
+    /* c8 ignore stop */
     if (span.type === 'unclosed') {
       out += text.slice(span.open, span.open + span.runLen)
       i = span.open + span.runLen

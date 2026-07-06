@@ -45,7 +45,10 @@ function canReuse(node: Node, next: Node): boolean {
   }
   if (node.nodeType === TEXT_NODE) return true
   if (node.nodeType === COMMENT_NODE) return true
+  /* c8 ignore start -- unreachable: rendered-markdown subtrees contain only
+     element, text, and comment nodes; other node types never appear. */
   return false
+  /* c8 ignore stop */
 }
 
 /**
