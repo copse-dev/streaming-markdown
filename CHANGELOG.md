@@ -5,6 +5,18 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-06
+
+### Documentation
+
+- demo lazy loading of highlight.js and mermaid on the site (#51) (`4d4d87b`)
+
+### Other Changes
+
+- Add comprehensive test coverage and coverage-gate ratchet (#50) (`dfeb935`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v0.3.0...v0.4.0
+
 ## [0.3.0] - 2026-07-06
 
 ### Bug Fixes
