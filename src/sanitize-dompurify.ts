@@ -61,6 +61,16 @@ export const dompurifyBackend: SanitizerBackend = {
         RETURN_DOM_FRAGMENT: true,
       }),
     )
+    /* c8 ignore start -- only reachable in a real browser: when DOMPurify
+       cannot parse at all (its internal DOMParser is a Trusted Types sink and
+       the page's CSP does not allowlist DOMPurify's own 'dompurify' policy),
+       its string path returns '' and its fragment path returns null. Mirror
+       the string path's empty result instead of crashing on the null. */
+    if (!fragment) {
+      target.replaceChildren()
+      return
+    }
+    /* c8 ignore stop */
     const doc = target.ownerDocument
     target.replaceChildren(
       fragment.ownerDocument === doc ? fragment : doc.importNode(fragment, true),

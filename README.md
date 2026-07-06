@@ -77,7 +77,13 @@ The injected policy always receives markup that has already been through
 `sanitizeRenderedMarkdown`, so an identity `createHTML` is sound — the hook
 exists for CSP policy-name control, not to replace the sanitizer.
 
-Two edges to know about:
+Three edges to know about:
+
+- **DOMPurify backend under enforcement.** DOMPurify's internal parser is
+  itself a Trusted Types sink, and DOMPurify guards it with its own policy
+  named `dompurify`. If your CSP restricts policy names, allowlist both:
+  `trusted-types streaming-markdown dompurify` — otherwise DOMPurify cannot
+  parse and every render comes out empty.
 
 - **Your own sinks.** `renderMarkdown`/`renderStreamingMarkdown` return plain
   strings; assigning them to `innerHTML` yourself still needs your own policy.
