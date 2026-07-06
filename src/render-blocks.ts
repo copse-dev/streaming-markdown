@@ -1,3 +1,4 @@
+import { alertBlockquoteClass, alertTitle, alertTypeFromMarker } from './alerts.ts'
 import {
   ATX_HEADING_CAPTURE_RE as ATX_HEADING_RE,
   BLOCKQUOTE_DETECT_RE,
@@ -260,8 +261,34 @@ function stripBlockquoteSource(slice: string): string {
     .replace(/^\n+|\n+$/g, '')
 }
 
+/**
+ * Body of an alert blockquote: `innerSource` minus its leading `[!TYPE]`
+ * marker. A lazy continuation merged into the marker line by
+ * {@link stripBlockquoteSource} stays as the first content line (the SOURCE
+ * marker line was still exactly the marker, so the quote classifies).
+ */
+function stripAlertMarker(innerSource: string): string {
+  const nl = innerSource.indexOf('\n')
+  const first = nl === -1 ? innerSource : innerSource.slice(0, nl)
+  const rest = nl === -1 ? '' : innerSource.slice(nl + 1)
+  const afterMarker = first.trimStart().replace(/^\[![A-Za-z]+\]/, '').trimStart()
+  if (afterMarker === '') return rest
+  return rest === '' ? afterMarker : `${afterMarker}\n${rest}`
+}
+
 function renderBlockquote(slice: string, linkRefs: LinkReferenceMap): string {
+  // GitHub alerts (#72): a quote whose first SOURCE line is exactly `[!NOTE]`
+  // (or tip/important/warning/caution) renders with alert classes and a title
+  // paragraph; the marker line itself never renders as content.
+  const firstLine = slice.split('\n')[0] ?? ''
+  const alertType = alertTypeFromMarker(stripBlockquoteMarker(firstLine))
   const innerSource = stripBlockquoteSource(slice)
+  if (alertType) {
+    const body = stripAlertMarker(innerSource)
+    const title = `<p class="markdown-alert-title">${alertTitle(alertType)}</p>`
+    const content = body.trim() === '' ? '' : `\n${renderBlocksFromSource(body, linkRefs)}`
+    return `<blockquote class="${alertBlockquoteClass(alertType)}">${title}${content}</blockquote>`
+  }
   // A quote with no content still renders (`>` alone, spec 239/240).
   if (innerSource.trim() === '') return '<blockquote></blockquote>'
   return `<blockquote>${renderBlocksFromSource(innerSource, linkRefs)}</blockquote>`

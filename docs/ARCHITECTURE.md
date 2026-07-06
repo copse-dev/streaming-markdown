@@ -157,6 +157,19 @@ When extending the renderer or its CSS, preserve these rules:
   `class="task-list-item"` and its list `class="contains-task-list"` for bullet-free styling
   ([#614](https://github.com/copse-dev/agent-pane/issues/614)). `input` + `type`/`checked`/`disabled` are on the sanitizer allowlist, and the
   per-element gate drops any non-checkbox `<input>` (see `sanitize.ts`).
+- **GitHub alerts (#72).** A blockquote whose first line is exactly `> [!NOTE]`
+  (or TIP / IMPORTANT / WARNING / CAUTION, case-insensitive, nothing else on the
+  marker line) renders with GitHub-compatible classes:
+  `<blockquote class="markdown-alert markdown-alert-note"><p class="markdown-alert-title">Note</p>…</blockquote>`
+  (`alerts.ts` + `renderBlockquote` in `render-blocks.ts`). Unknown `[!FOO]`
+  markers fall through to a plain blockquote with the marker line literal
+  (GitHub behavior); nested list/blockquote recursion classifies alerts inside
+  containers the same way. While streaming, a complete marker line classifies
+  the *pending* quote too (same classes + title `<p>` on
+  `blockquote.stream-pending-blockquote`), and a half-typed `[!NOT` holds, so a
+  literal marker never flashes and promotion is class-only. The
+  `markdown-alert*` classes pass the sink sanitizer (`class` is allowlisted);
+  `default.css` themes the five types via `--sm-alert-*` custom properties.
 - **Benign raw inline HTML.** Attribute-less phrasing tags models emit in prose
   (`<b> <i> <u> <s> <del> <ins> <sub> <sup> <kbd> <mark> <br>`) pass through unescaped
   (`BENIGN_RAW_INLINE_TAG_RE` in `escape.ts`); the sanitizer sink allowlist mirrors the set.
@@ -233,6 +246,7 @@ When extending the renderer or its CSS, preserve these rules:
   | Lazy list continuation  | `<span class="stream-pending-list-continuation">` in open `<li>` | n/a (plain text)        | yes                |
   | `### Heading`           | `<div class="stream-pending-heading stream-pending-hN">`         | yes                     | yes                |
   | `> quote`               | `<blockquote class="stream-pending-blockquote"><p>…</p>`         | yes                     | yes                |
+  | `> [!NOTE]` marker line | `<blockquote class="stream-pending-blockquote markdown-alert markdown-alert-note"><p class="markdown-alert-title">Note</p>` | yes (half markers hold) | n/a |
   | `---`                   | `<span class="stream-pending">` escaped plain text               | no                      | no                 |
   | Forming `\| H \|` table | `.stream-forming` + `<th>`                                       | pipes = cell boundaries | per cell           |
   | Pending table body row  | `tr.stream-pending-row` + `<td>`                                 | pipes = cell boundaries | per cell           |

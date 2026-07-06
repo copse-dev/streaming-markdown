@@ -170,6 +170,14 @@ function splitForStreamingCore(content: string, blocks: BlockToken[]): Streaming
     return splitOpenTable(firstOpen, content)
   }
 
+  if (firstOpen.kind === 'blockquote') {
+    // Commit the quote's terminated lines and keep only the partial last line
+    // pending. Holding the whole open quote would re-expose committed lines as
+    // raw `>`-marked pending text on every later line — and let a committed
+    // `> [!NOTE]` alert flash back to its literal marker (#72).
+    return splitOpenBlockAtLastNewline(firstOpen, content)
+  }
+
   const holdStart = streamingHoldStart(blocks)
   return {
     complete: content.slice(0, holdStart),

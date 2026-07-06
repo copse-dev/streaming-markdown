@@ -1,3 +1,4 @@
+import { alertTitle, alertTypeFromMarker, isFormingAlertMarker } from './alerts.ts'
 import {
   ATX_HEADING_CAPTURE_RE,
   BLOCKQUOTE_DETECT_RE,
@@ -196,6 +197,13 @@ export function renderPendingLine(pending: string, options: RenderPendingLineOpt
 
   if (isPendingBlockquoteLine(pending)) {
     const body = pendingBlockquoteBody(pending)
+    // GitHub alerts (#72): a complete `[!NOTE]` marker classifies the pending
+    // quote (the emitters add the alert classes and wrap this title in
+    // `<p class="markdown-alert-title">`); a still-forming `[!NOT` holds so no
+    // partial marker flashes literally.
+    const alertType = alertTypeFromMarker(body)
+    if (alertType) return escapeHtml(alertTitle(alertType))
+    if (isFormingAlertMarker(body)) return ''
     if (!body.trim()) return ''
     const hold = pendingHoldIndex(body)
     const visible = body.slice(0, hold)

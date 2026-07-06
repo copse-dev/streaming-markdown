@@ -1,4 +1,5 @@
 import { renderMarkdown } from './renderer.ts'
+import { alertBlockquoteClass, pendingBlockquoteAlertType } from './alerts.ts'
 import {
   getIncompleteFenceSource,
   getIncompleteMathSource,
@@ -277,6 +278,12 @@ function blockPendingClassName(pending: string, openListItemFirstLine?: string):
     return `stream-pending stream-pending-heading stream-pending-h${String(headingLevel)} ${BLOCK_PENDING_CLASS}`
   }
   if (isPendingBlockquoteLine(pending)) {
+    // A complete `[!NOTE]` marker line classifies the pending quote as an alert
+    // (#72) so promotion to the committed alert blockquote is class-stable.
+    const alertType = pendingBlockquoteAlertType(pending)
+    if (alertType) {
+      return `stream-pending stream-pending-blockquote ${alertBlockquoteClass(alertType)} ${BLOCK_PENDING_CLASS}`
+    }
     return `stream-pending stream-pending-blockquote ${BLOCK_PENDING_CLASS}`
   }
   return `stream-pending stream-pending-paragraph ${BLOCK_PENDING_CLASS}`
@@ -297,6 +304,11 @@ function wrapBlockPendingInner(
 ): SanitizedHtml | '' {
   if (isPendingBlockquoteLine(pending)) {
     // Sanitized inner wrapped in a literal allowlisted <p> — sanitizer-equivalent.
+    // An alert marker line's inner is its title text (#72), wrapped in the
+    // committed render's title paragraph so promotion is class-only.
+    if (pendingBlockquoteAlertType(pending) !== null) {
+      return pendingInner ? asSanitizedHtml(`<p class="markdown-alert-title">${pendingInner}</p>`) : ''
+    }
     return pendingInner ? asSanitizedHtml(`<p>${pendingInner}</p>`) : ''
   }
   return pendingInner
