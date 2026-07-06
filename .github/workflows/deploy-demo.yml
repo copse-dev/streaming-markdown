@@ -1,0 +1,115 @@
+name: Deploy demo
+
+# Build the GitHub Pages demo and publish it via GitHub Actions on every push to
+# main that changes a demo input. The built bundles (docs/streaming-markdown.*.mjs)
+# are no longer committed to git — this workflow is the single source of the
+# published site, so it can never drift from the renderer source.
+#
+# REQUIRES the repo's Pages source to be set to "GitHub Actions"
+# (Settings -> Pages -> Build and deployment -> Source). Until that is flipped the
+# deploy step has nowhere to publish.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'styles/**'
+      - 'docs/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsconfig.build.json'
+      - '.github/workflows/deploy-demo.yml'
+  workflow_dispatch:
+
+# Least privilege for a Pages deployment: read the code, write the Pages
+# deployment, and mint the OIDC token deploy-pages authenticates with.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time; a newer push waits rather than cancelling an
+# in-flight deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # Runner router: reuse the shared self-hosted `copse-checks` pool when one is
+  # online, else GitHub-hosted. Identical fail-open contract to ci.yml's
+  # pick-runner (see that file for the full rationale).
+  pick-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runs_on: ${{ steps.pick.outputs.runs_on }}
+    steps:
+      - id: pick
+        env:
+          RUNNERS_PAT: ${{ secrets.RUNNERS_PAT }}
+          GH_ORG: ${{ github.repository_owner }}
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          # Fail OPEN to hosted on any problem, so errexit must be off (a curl
+          # 4xx must not abort the step). Guard each fallible command instead.
+          set +e
+          set -uo pipefail
+          hosted='["ubuntu-latest"]'
+          selfhosted='["self-hosted","copse-checks"]'
+          choice="$hosted"
+          if [ "$IS_FORK_PR" = "true" ]; then
+            echo "Fork PR — using GitHub-hosted runners (never self-hosted for untrusted code)."
+          elif [ -z "${RUNNERS_PAT:-}" ]; then
+            echo "No RUNNERS_PAT — deferring to GitHub-hosted runners."
+          else
+            runners="$(curl -fsSL \
+              -H "Authorization: Bearer ${RUNNERS_PAT}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/orgs/${GH_ORG}/actions/runners?per_page=100" 2>/dev/null)"
+            rc=$?
+            if [ $rc -ne 0 ] || [ -z "$runners" ]; then
+              echo "Runner query failed (curl exit $rc — token may lack org runner read) — deferring to GitHub-hosted runners."
+            elif printf '%s' "$runners" | jq -e \
+                '[.runners[]? | select(.status=="online") | select(any((.labels // [])[]; .name=="copse-checks"))] | length > 0' \
+                >/dev/null 2>&1; then
+              echo "An online copse-checks runner is available — using the shared self-hosted pool."
+              choice="$selfhosted"
+            else
+              echo "No online copse-checks runner — deferring to GitHub-hosted runners."
+            fi
+          fi
+          echo "runs_on=$choice" >> "$GITHUB_OUTPUT"
+          echo "Selected runner: $choice"
+
+  build:
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runs_on) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build demo
+        run: npm run build:demo
+
+      # docs/ is the published site: index.html + the freshly built bundles.
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
