@@ -4,8 +4,33 @@ import { renderAngleAutolinks } from './inline-autolinks.ts'
 import { renderInlineCode } from './inline-code-spans.ts'
 import { INLINE_HTML_SHIELD_RE, renderEmphasisOutsideInlineHtml } from './inline-emphasis.ts'
 import { renderAnchor, renderInlineLinks, safeLinkHref } from './inline-links.ts'
+import {
+  beginInlinePassRender,
+  getInlinePasses,
+  inlinePassContext,
+  type InlinePassStage,
+  restoreInlinePassHtml,
+} from './inline-passes.ts'
 import { renderStrikethrough } from './inline-strikethrough.ts'
 import { type LinkReferenceMap } from './link-references.ts'
+
+/**
+ * Run the registered inline passes for one pipeline stage (#53). Each pass is
+ * applied only outside rendered inline HTML — `<code>`/`<a>`/`<img>` interiors
+ * are shielded exactly like the bare-autolink pass below — and splices any
+ * generated HTML via `inlinePassContext.emit`, restored after escaping.
+ */
+function applyInlinePasses(t: string, stage: InlinePassStage): string {
+  const passes = getInlinePasses(stage)
+  if (passes.length === 0) return t
+  for (const pass of passes) {
+    t = t
+      .split(INLINE_HTML_SHIELD_RE)
+      .map((segment, index) => (index % 2 === 1 ? segment : pass.apply(segment, inlinePassContext)))
+      .join('')
+  }
+  return t
+}
 
 /** The inline passes that run before link rendering, in pipeline order. */
 function renderInlineSpansBeforeLinks(t: string, linkRefs: LinkReferenceMap): string {
@@ -18,6 +43,9 @@ function renderInlineSpansBeforeLinks(t: string, linkRefs: LinkReferenceMap): st
   // GFM strikethrough after emphasis (so `~~*x*~~` nests) and before links (so a
   // struck `~~[a](b)~~` still resolves the link inside the <del>).
   t = renderStrikethrough(t)
+  // Custom bracket-adjacent syntaxes (e.g. citation `[@key]`) must consume
+  // their text before markdown-link resolution treats `[` as a label opener.
+  t = applyInlinePasses(t, 'before-links')
   return t
 }
 
@@ -35,6 +63,7 @@ function renderNestedInlineSpans(t: string, linkRefs: LinkReferenceMap): string 
   t = renderStrongAroundCode(t)
   t = renderStrongWithInlineHtml(t)
   t = renderBareHttpLinks(t)
+  t = applyInlinePasses(t, 'after-links')
   return t
 }
 
@@ -44,7 +73,14 @@ function renderNestedInlineSpans(t: string, linkRefs: LinkReferenceMap): string 
  * so emphasis cannot pair across cell boundaries (#469).
  */
 export function renderInlineSpans(t: string, linkRefs: LinkReferenceMap = new Map()): string {
-  return decodeEscapedPunctuation(escapeHtmlTextNodes(renderNestedInlineSpans(t, linkRefs)))
+  // Inline-pass bracketing (#53): strip attacker-typed placeholder characters
+  // before any pass runs, and swap pass-emitted HTML back in after the escape
+  // step (but before punctuation decode, so PUA-encoded escapes a pass captured
+  // into its emitted HTML still decode to their escaped literal form).
+  t = beginInlinePassRender(t)
+  return decodeEscapedPunctuation(
+    restoreInlinePassHtml(escapeHtmlTextNodes(renderNestedInlineSpans(t, linkRefs))),
+  )
 }
 
 /** Delimiter stack cannot pair `**` across a `<code>` shield. */

@@ -41,6 +41,8 @@ const EXPECTED_FUNCTIONS = [
   'stripAppLinkAttributes',
   'isWorkspaceMarkdownLinkHref',
   'workspaceLinkTargetFromHref',
+  'getInlinePasses',
+  'setInlinePasses',
 ] as const
 
 describe('public API barrel (index.ts)', () => {

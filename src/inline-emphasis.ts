@@ -5,6 +5,7 @@
 import { trailingEntityHoldStart } from './backslash-escapes.ts'
 import { scanCodeSpans } from './inline-code-spans.ts'
 import { linkOrImageEndAt, linkOrImageStartsAt } from './inline-links.ts'
+import { getInlinePasses } from './inline-passes.ts'
 import { strikethroughHoldStart } from './inline-strikethrough.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 
@@ -439,6 +440,13 @@ export function pendingHoldIndex(s: string): number {
   if (entityStart < cut && !mask[entityStart]) cut = entityStart
 
   cut = Math.min(cut, strikethroughHoldStart(s, mask))
+
+  // Registered inline passes contribute their own holds (#53), composing the
+  // same way the strikethrough hold does — a half-open `[@doe` or `==foo`
+  // truncates the visible tail instead of flashing raw syntax.
+  for (const pass of getInlinePasses()) {
+    if (pass.holdStart) cut = Math.min(cut, pass.holdStart(s, mask))
+  }
 
   return cut
 }
