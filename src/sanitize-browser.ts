@@ -98,8 +98,15 @@ export const browserSanitizerBackend: SanitizerBackend = {
     sanitizeIntoElement(host, html, config)
     return host.innerHTML
   },
-  // Node path: `setHTML` parses and sanitizes straight into the live target
-  // (it is a Trusted Types-exempt safe sink), so a sink write needs one parse
-  // and no serialize.
-  sanitizeInto: sanitizeIntoElement,
+  // Node path: `setHTML` parses and sanitizes (it is a Trusted Types-exempt
+  // safe sink), so a sink write needs one parse and no serialize. The parse
+  // happens in a detached <div> host — the same context the string path uses —
+  // and the nodes are then moved into the target, so both paths treat
+  // context-sensitive fragments identically instead of the live target's tag
+  // changing what the fragment parser keeps.
+  sanitizeInto(target: Element, html: string, config: SanitizerConfig): void {
+    const host = target.ownerDocument.createElement('div')
+    sanitizeIntoElement(host, html, config)
+    target.replaceChildren(...Array.from(host.childNodes))
+  },
 }

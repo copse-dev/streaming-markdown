@@ -120,6 +120,32 @@ describe('setSanitizedHtml', () => {
     assert.equal(el.innerHTML, '**not markdown-rendered** <em>em</em>')
   })
 
+  it('reuses the created default policy after a host set/unset cycle', () => {
+    forceStringSanitizePath()
+    // Strict-CSP factory: re-creating a policy name throws (no 'allow-duplicates').
+    const created: StubPolicy[] = []
+    ;(globalThis as Record<string, unknown>)['trustedTypes'] = {
+      createPolicy(name: string, rules: { createHTML: (input: string) => string }) {
+        if (created.some((p) => p.name === name)) {
+          throw new TypeError(`Policy "${name}" already exists`)
+        }
+        const policy = makeStubPolicy(name, rules.createHTML)
+        created.push(policy)
+        return policy
+      },
+    }
+    setTrustedTypesPolicy(null)
+    const el = document.createElement('div')
+    setSanitizedHtml(el, '<p>one</p>') // lazily creates the default policy
+    setTrustedTypesPolicy(makeStubPolicy('my-app#markdown', (s) => s))
+    setSanitizedHtml(el, '<p>two</p>') // host policy takes over
+    setTrustedTypesPolicy(null) // restore the default — must reuse, not re-create
+    setSanitizedHtml(el, '<p>three</p>')
+    assert.equal(created.length, 1, 'default policy created exactly once')
+    assert.deepEqual(created[0]?.calls, ['<p>one</p>', '<p>three</p>'])
+    assert.equal(el.innerHTML, '<p>three</p>')
+  })
+
   it('falls back to plain strings when createPolicy is rejected by CSP', () => {
     forceStringSanitizePath()
     ;(globalThis as Record<string, unknown>)['trustedTypes'] = {
@@ -163,6 +189,16 @@ describe('setSanitizedHtml node path (backend sanitizeInto)', () => {
     assert.equal(el.querySelector('p')?.textContent, 'a b')
   })
 
+  it('normalizes the hex NBSP escape but not the hex LF escape', () => {
+    const dirty = '<p>a&amp;#xA0;b c&amp;#xA;d</p>'
+    const el = document.createElement('div')
+    setSanitizedHtml(el, dirty)
+    const fresh = document.createElement('div')
+    fresh.innerHTML = sanitizeRenderedMarkdown(dirty)
+    assert.equal(el.innerHTML, fresh.innerHTML, 'node and string paths agree')
+    assert.equal(el.querySelector('p')?.textContent, 'a b c&#xA;d')
+  })
+
   it('replaces existing children', () => {
     const el = document.createElement('div')
     el.innerHTML = '<p>old</p><p>content</p>'
@@ -190,6 +226,13 @@ describe('setPresanitizedHtml', () => {
 })
 
 describe('setHostTrustedHtml', () => {
+  it('clears the element for empty input without touching a TT sink', () => {
+    const el = document.createElement('div')
+    el.innerHTML = '<svg></svg>'
+    setHostTrustedHtml(el, '')
+    assert.equal(el.innerHTML, '')
+  })
+
   it('assigns a TrustedHTML-like value without touching the markdown policy', () => {
     const hostPolicy = makeStubPolicy('my-app#markdown', (s) => s)
     setTrustedTypesPolicy(hostPolicy)
@@ -224,7 +267,7 @@ describe('innerHTML chokepoint guard', () => {
     // Assignment sinks only — reads like `const s = el.innerHTML` stay legal.
     const sinkRe =
       /\.(?:innerHTML|outerHTML)\s*=[^=]|\.insertAdjacentHTML\s*\(|document\.write/
-    for (const file of readdirSync(srcDir)) {
+    for (const file of readdirSync(srcDir, { recursive: true }) as string[]) {
       if (!file.endsWith('.ts') || file.endsWith('.test.ts') || file === 'html-sink.ts') continue
       const lines = readFileSync(join(srcDir, file), 'utf8').split('\n')
       lines.forEach((line, i) => {

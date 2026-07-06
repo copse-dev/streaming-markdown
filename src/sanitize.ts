@@ -122,9 +122,15 @@ export interface SanitizerBackend {
    * touches an HTML injection sink, so Trusted Types enforcement needs no
    * policy on this path. Must apply the same allowlist and
    * {@link SanitizerConfig.onElement} gate as {@link sanitize} — the two paths
-   * must produce identically-serializing trees. Backends that omit it are
-   * fully supported: sinks fall back to the string path (sanitize → bless via
-   * the Trusted Types policy → `innerHTML`).
+   * must produce identically-serializing trees, so parse in a neutral
+   * (body/div) context like {@link sanitize} does, not the target's own
+   * context. Backends that omit it are fully supported: sinks fall back to the
+   * string path (sanitize → bless via the Trusted Types policy → `innerHTML`).
+   *
+   * If you wrap a bundled backend to customize `sanitize` (e.g.
+   * `{ ...dompurifyBackend, sanitize: mySanitize }`), either override
+   * `sanitizeInto` consistently or omit it — a spread copies the bundled node
+   * path, which sinks prefer, silently bypassing your custom `sanitize`.
    */
   sanitizeInto?(target: Element, html: string, config: SanitizerConfig): void
 }
@@ -135,7 +141,10 @@ let sanitizerBackend: SanitizerBackend | null = null
  * Swap the sanitizer implementation used by {@link sanitizeRenderedMarkdown}.
  * Pass `null` to fall back to the built-in default (the native browser Sanitizer
  * API when available). Set this once, before the first sink render — e.g. to the
- * DOMPurify backend in Node/jsdom or older browsers:
+ * DOMPurify backend in Node/jsdom or older browsers. When deriving a backend
+ * from a bundled one, mind the {@link SanitizerBackend.sanitizeInto} note:
+ * spreading copies the bundled node path, which internal sinks prefer over
+ * your overridden `sanitize`.
  *
  * ```ts
  * import { setSanitizerBackend } from '@copse/streaming-markdown'
@@ -199,10 +208,12 @@ function resolveBackend(): SanitizerBackend {
   )
 }
 
-const DOUBLE_ENCODED_NBSP_RE = /&amp;(?:nbsp|#160|#x0*a);/gi
+// `#x0*a0` is the hex NBSP (U+00A0); `#x0*a` would be the LF escape `&#xa;`,
+// which must NOT be rewritten (review finding on the earlier pattern).
+const DOUBLE_ENCODED_NBSP_RE = /&amp;(?:nbsp|#160|#x0*a0);/gi
 // The same pattern in *decoded* DOM data: serialized `&amp;nbsp;` is the text
 // (or attribute value) `&nbsp;` once parsed.
-const DOUBLE_ENCODED_NBSP_DATA_RE = /&(?:nbsp|#160|#x0*a);/gi
+const DOUBLE_ENCODED_NBSP_DATA_RE = /&(?:nbsp|#160|#x0*a0);/gi
 
 // NodeFilter.SHOW_TEXT — numeric so no NodeFilter global is required.
 const SHOW_TEXT = 0x4
@@ -255,6 +266,10 @@ export function sanitizeRenderedMarkdownInto(target: Element, html: string): boo
   const backend = resolveBackend()
   if (!backend.sanitizeInto) return false
   backend.sanitizeInto(target, html, buildSanitizerConfig())
-  normalizeDoubleEncodedNbsp(target)
+  // Decoded `&nbsp;`-style text can only come from an escaped ampersand in the
+  // input (`&amp;…`, `&#38;…`, …), and every escape of `&` contains a literal
+  // `&` — so when the input has none, skip the whole normalization walk. This
+  // keeps the per-token hot path allocation-free for ordinary prose.
+  if (html.includes('&')) normalizeDoubleEncodedNbsp(target)
   return true
 }

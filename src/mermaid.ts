@@ -126,15 +126,25 @@ export async function hydratePendingDiagrams(
     if (rawSource.trim() === '') continue
     let ok = false
     for (const candidate of mermaidSourceCandidates(rawSource)) {
+      let svg: string
       try {
-        const { svg } = await renderer.render(candidate)
+        ;({ svg } = await renderer.render(candidate))
+      } catch {
+        // Try the next (more aggressive) candidate before declaring failure.
+        continue
+      }
+      // Injection failures are candidate-independent — e.g. Trusted Types
+      // rejecting a plain-string SVG because transformSvg did not return a
+      // TrustedHTML — so fail the diagram without re-rendering every
+      // candidate just to hit the same sink error.
+      try {
         markRendered(container, options.transformSvg ? options.transformSvg(svg) : svg)
         ok = true
         rendered++
-        break
       } catch {
-        // Try the next (more aggressive) candidate before declaring failure.
+        // fall through to markError below
       }
+      break
     }
     if (!ok) markError(container)
   }

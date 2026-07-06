@@ -48,6 +48,13 @@ let hostPolicy: TrustedTypesPolicy | null = null
 // and unavailable (no `trustedTypes` global, or the policy name is not
 // allowlisted by the page's CSP).
 let defaultPolicy: TrustedTypesPolicy | null | undefined
+// The `trustedTypes` factory the current defaultPolicy was created from.
+// Trusted Types forbids re-creating a policy name (absent 'allow-duplicates'),
+// so a successfully created default policy must be reused for the lifetime of
+// that factory — re-probing after a host set/unset cycle would throw and lose
+// the policy. Only a *different* factory identity (tests installing a fresh
+// shim) invalidates the cache.
+let defaultPolicyFactory: TrustedTypesFactory | undefined
 
 /**
  * Inject the Trusted Types policy used to bless sanitized markdown HTML before
@@ -70,16 +77,20 @@ let defaultPolicy: TrustedTypesPolicy | null | undefined
  */
 export function setTrustedTypesPolicy(policy: TrustedTypesPolicy | null): void {
   hostPolicy = policy
-  // Re-probe the default policy on the next sink write so tests (and hosts
-  // that install a `trustedTypes` shim late) see a fresh attempt.
-  defaultPolicy = undefined
+  // Allow a failed probe to retry on the next sink write (tests and hosts that
+  // install a `trustedTypes` shim late). A *successfully created* default
+  // policy is deliberately NOT discarded: `createPolicy('streaming-markdown')`
+  // would throw on the second call under a CSP without 'allow-duplicates', and
+  // resolvePolicy's factory-identity check already handles shim swaps.
+  if (defaultPolicy === null) defaultPolicy = undefined
 }
 
 function resolvePolicy(): TrustedTypesPolicy | null {
   if (hostPolicy) return hostPolicy
-  if (defaultPolicy === undefined) {
+  const trustedTypes = (globalThis as { trustedTypes?: TrustedTypesFactory }).trustedTypes
+  if (defaultPolicy === undefined || defaultPolicyFactory !== trustedTypes) {
     defaultPolicy = null
-    const trustedTypes = (globalThis as { trustedTypes?: TrustedTypesFactory }).trustedTypes
+    defaultPolicyFactory = trustedTypes
     if (trustedTypes) {
       try {
         defaultPolicy = trustedTypes.createPolicy('streaming-markdown', {
@@ -125,7 +136,7 @@ export function setSanitizedHtml(el: Element, html: string): void {
     return
   }
   if (sanitizeRenderedMarkdownInto(el, html)) return
-  el.innerHTML = blessSanitizedHtml(sanitizeRenderedMarkdown(html))
+  setPresanitizedHtml(el, sanitizeRenderedMarkdown(html))
 }
 
 /**
@@ -153,5 +164,10 @@ export function setPresanitizedHtml(el: Element, sanitizedHtml: string): void {
  * sanitizer output.
  */
 export function setHostTrustedHtml(el: Element, html: string | TrustedHTMLValue): void {
+  if (html === '') {
+    // Same empty-clear as the sanitized sinks: never touch a TT sink for ''.
+    el.replaceChildren()
+    return
+  }
   el.innerHTML = html as string
 }
