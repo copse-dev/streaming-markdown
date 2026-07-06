@@ -57,6 +57,8 @@
     "coverage:update": "node --import tsx scripts/coverage-gate.mts --update",
     "coverage:ci": "npm run coverage && npm run coverage:check",
     "check:conformance": "node --import tsx --test src/commonmark-conformance.test.ts",
+    "check:gfm-conformance": "node --import tsx --test src/gfm-conformance.test.ts",
+    "check:gfm-spec": "tsx scripts/fetch-gfm-spec.mts",
     "check:normalizer-parity": "tsx scripts/fetch-reference-normalizer.mts && tsx scripts/check-normalizer-parity.mts",
     "bench": "tsx scripts/bench-streaming.mts",
     "changelog": "tsx scripts/gen-changelog.mts",

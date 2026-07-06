@@ -86,6 +86,12 @@ jobs:
       # two absolute throughput-floor perf checks self-skip under instrumentation
       # — the relative O(n²) scaling-regression guard still runs. See
       # scripts/coverage-gate.mts.
+      # Fetch the GFM spec.txt (gitignored, not on npm) from its pinned upstream
+      # tag and verify its SHA-256 — the GFM conformance test in the suite below
+      # needs it present. Same fetch-and-verify pattern as the reference normalizer.
+      - name: Fetch + verify GFM spec
+        run: npm run check:gfm-spec
+
       - name: Test + coverage
         run: npm run coverage:ci
 

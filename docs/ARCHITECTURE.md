@@ -101,13 +101,13 @@ When extending the renderer or its CSS, preserve these rules:
   the start of an item's first line renders a read-only `<input type="checkbox" disabled>`
   (`parseTaskListMarker`/`renderListItem` in `render-blocks.ts`); the item gets
   `class="task-list-item"` and its list `class="contains-task-list"` for bullet-free styling
-  (#614). `input` + `type`/`checked`/`disabled` are on the sanitizer allowlist, and the
+  ([#614](https://github.com/copse-dev/agent-pane/issues/614)). `input` + `type`/`checked`/`disabled` are on the sanitizer allowlist, and the
   per-element gate drops any non-checkbox `<input>` (see `sanitize.ts`).
 - **Benign raw inline HTML.** Attribute-less phrasing tags models emit in prose
   (`<b> <i> <u> <s> <del> <ins> <sub> <sup> <kbd> <mark> <br>`) pass through unescaped
   (`BENIGN_RAW_INLINE_TAG_RE` in `escape.ts`); the sanitizer sink allowlist mirrors the set.
   Anything with attributes, and all block/structural raw HTML, stays escaped — see the
-  raw-HTML policy discussion in #600 before widening this.
+  raw-HTML policy discussion in [#600](https://github.com/copse-dev/agent-pane/issues/600) before widening this.
 - **Indented code blocks (#9).** 4-column-indented lines **are** rendered as CommonMark
   indented code (`<pre><code>`), and this construct **conforms** — `summaryBySection` in the
   conformance baseline records **Indented code blocks: 12/12**. Recognition happens in the block
@@ -123,12 +123,12 @@ When extending the renderer or its CSS, preserve these rules:
   CommonMark indented-code semantics, and the default path (and the conformance baseline) is
   unchanged.
 
-  **Tab expansion is partial.** Leading tabs expand to a 4-column stop for indented code, tab as
+  **Tab expansion.** Leading tabs expand to a 4-column stop for indented code, tab as
   the ATX-heading separator, and tab-indented continuation lines (see the `renderMarkdown tab
-  handling` suite in `renderer.test.ts`), but not every spec case — the baseline records **Tabs:
-  6/11**. The remaining gaps are the harder tab-column arithmetic cases in the spec's `Tabs`
-  section; they are tracked by the conformance baseline rather than a separate list, so a fix shows
-  up as the `Tabs` count rising on re-baseline (`UPDATE_COMMONMARK_BASELINE=1 npm test`).
+  handling` suite in `renderer.test.ts`). The spec's `Tabs` section now **fully conforms** — the
+  baseline records **Tabs: 11/11**. This is tracked by the conformance baseline rather than a
+  separate list, so any regression shows up as the `Tabs` count dropping on re-baseline
+  (`UPDATE_COMMONMARK_BASELINE=1 npm test`).
 
 - **Indented HTML blocks.** CommonMark makes any 4-space-indented line an indented code block,
   so a model that indents a `<div>`/`<table>` snippet would otherwise get a literal `<pre><code>`
@@ -138,7 +138,7 @@ When extending the renderer or its CSS, preserve these rules:
   output as its un-indented form. Gated to the top level on purpose: list/blockquote content is
   tokenized recursively, so nested indented code keeps CommonMark semantics. Genuine indented code
   that merely opens with an inline tag (spec #110, `    <a/>` then `*hi*`) is unaffected because
-  `a` is not in the block-tag list (#616). Example — this indented block renders as escaped
+  `a` is not in the block-tag list ([#616](https://github.com/copse-dev/agent-pane/issues/616)). Example — this indented block renders as escaped
   `&lt;div&gt;…` prose, not a code block:
 
   ```text
@@ -165,7 +165,7 @@ When extending the renderer or its CSS, preserve these rules:
   their label early: `revealFormingLink` (`render-pending-line.ts`) turns a still-open
   `[label` / `[label](https://partial` into just its label text — so no literal brackets flash
   and the partial URL is never rendered or autolinked — then the completed `[label](url)` upgrades
-  to a real `<a>` on commit (#617). Only the trailing forming link is touched; earlier complete
+  to a real `<a>` on commit ([#617](https://github.com/copse-dev/agent-pane/issues/617)). Only the trailing forming link is touched; earlier complete
   links, `[ref]` shortcuts, and `[` inside code spans or after a backslash are left alone.
 
   Pending shapes (`streaming-pending-matrix.test.ts`):
@@ -261,7 +261,7 @@ list-style-position: outside`). Bullets should sit clearly inset from headings, 
   survive (`highlightFenceCode` no longer trims; blank-only fences are preserved), and only the
   opening fence's own indentation is stripped from content lines (`parseFenceSlice`). The language
   is the first word of the info string with backslash escapes / entities decoded
-  (`fenceInfoLanguage`, spec #24: ` `foo\+bar ```→`language-foo+bar`) (#598).
+  (`fenceInfoLanguage`, spec #24: ` `foo\+bar ```→`language-foo+bar`) ([#598](https://github.com/copse-dev/agent-pane/issues/598)).
 - **Mermaid diagrams.** Fenced ` ```mermaid ` blocks render as SVG via lazy-loaded `mermaid`
   (`mermaid.ts`). Diagram rendering runs after final markdown insertion (`message_done`, thread
   restore) — not on every streaming token. Fenced blocks are extracted before HTML escaping; prose
@@ -281,8 +281,8 @@ host owns the browser-rendering and layout checks.
 ## Regression
 
 CI runs `npm run typecheck` + `npm test` + `npm run build`. `npm test` covers the unit suite plus
-the CommonMark conformance baseline. The DOM-glue and layout specs listed below are maintained by
-the downstream host app.
+the CommonMark **and** GFM conformance baselines. The DOM-glue and layout specs listed below are
+maintained by the downstream host app.
 
 ### Unit tests (`renderer.test.ts`, via `npm test`)
 
@@ -313,7 +313,7 @@ Bumping the spec is just `npm i -D commonmark-spec@<version>` followed by a
 re-baseline; the version is read from the installed package and pinned in the
 baseline.
 
-#### Raw-HTML policy and the in-scope conformance ceiling (#600)
+#### Raw-HTML policy and the in-scope conformance ceiling ([#600](https://github.com/copse-dev/agent-pane/issues/600))
 
 **100% CommonMark is deliberately not the goal.** The renderer escapes untrusted
 HTML rather than passing it through — the sanitize-at-the-sink invariant above.
@@ -330,19 +330,62 @@ allowlist** (`b i u s del ins sub sup kbd mark br`, `BENIGN_RAW_INLINE_TAG_RE` i
 block/structural raw HTML, stays escaped.
 
 So the realistic ceiling excludes those **64 HTML examples**: **588 in-scope
-examples**, of which the renderer currently satisfies **~492 (~84%)**. Counting all
-652 examples the baseline is **502 (~77%)**. Both numbers move as non-HTML
+examples**, of which the renderer currently satisfies **573 (~97%)**. Counting all
+652 examples the baseline is **583 (~89%)**. Both numbers move as non-HTML
 conformance grows — `summaryBySection` in the baseline JSON carries the live
 per-section counts; treat the two headline figures here as approximate.
 
 **Passthrough is a future library option, not an app mode.** A `rawHtml:
-'escape' | 'passthrough'` switch (see #600) would let the conformance harness
+'escape' | 'passthrough'` switch (see [#600](https://github.com/copse-dev/agent-pane/issues/600)) would let the conformance harness
 measure the true spec ceiling while the app keeps `escape` + sink sanitization;
 `escape` stays the default because passthrough drops from two defense layers to
-one. This belongs to the extracted package's public API (#601) and is not
+one. This belongs to the extracted package's public API ([#601](https://github.com/copse-dev/agent-pane/issues/601)) and is not
 implemented yet. HTML **block recognition** in `block-tokenizer.ts` can still land
 with emission escaped, and `<details>`/`<summary>` stay excluded until it does
 (they pair across blocks and would emit unbalanced tags mid-stream).
+
+### GFM conformance (`gfm-conformance.test.ts`, via `npm test`)
+
+GFM is a strict superset of CommonMark, adding tables, task lists, strikethrough,
+extended autolinks (`www.`/bare-URL/email), and a disallowed-raw-HTML filter. The
+renderer implements those extensions (GFM mode is always on — there is no
+CommonMark-only switch), so a **second conformance harness** measures the official
+[GFM spec](https://github.github.com/gfm/) the same way `commonmark-conformance.test.ts`
+measures CommonMark: every spec example runs through `renderMarkdown`, is compared
+after the shared normalizer, and the passing set is pinned in
+`tests/fixtures/gfm/gfm-conformance-baseline.json` (fail on drift either way;
+re-baseline with `UPDATE_GFM_BASELINE=1 npm test`). The baseline JSON also carries an
+`extensionSummary` block isolating the five GFM-only sections.
+
+Unlike CommonMark — which ships as the `commonmark-spec` devDependency — the GFM
+spec is **not published to npm**. Rather than vendor its ~10k-line `spec.txt`, it is
+**fetched on demand** into `tests/fixtures/gfm/spec.txt` (gitignored) from
+`github/cmark-gfm` tag `0.29.0.gfm.13`. Its provenance is pinned by SHA-256 in
+`tests/gfm/load-spec.ts` and enforced by `scripts/fetch-gfm-spec.mts`
+(`npm run check:gfm-spec`, a CI step that runs before the suite) — the same
+fetch-and-verify pattern used for the reference normalizer. A bare offline
+`npm test` without the fetched spec skips the GFM suite cleanly. Both specs
+share one example parser (`parseSpecExamples` in `tests/commonmark/load-spec.ts`);
+GFM tags its extension examples with a category word on the fence (`example table`),
+which the parser tolerates. To bump the spec: edit `GFM_SPEC_SOURCE` in
+`tests/gfm/load-spec.ts`, run `npm run check:gfm-spec -- --refresh`, update the
+recorded SHA-256, then re-baseline.
+
+**Extension coverage is partial by design** (`extensionSummary` carries the live
+counts). Current state:
+
+| GFM extension section   | Baseline | Notes                                                                                     |
+| ----------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| Strikethrough           | 2/2      | Full — double-tilde `~~x~~` → `<del>`.                                                     |
+| Tables                  | 2/8      | Gaps: column alignment (`:-:`/`--:` → `align`), escaped `\|` in cells, column-count normalization, delimiter/header mismatch rejection. |
+| Task list items         | 0/2      | Renderer output diverges on purpose — it adds `class="task-list-item"`/`contains-task-list` and a `disabled` checkbox for app styling ([#614](https://github.com/copse-dev/agent-pane/issues/614)), which the spec's bare `<input>` output does not.  |
+| Autolinks (extension)   | 0/11     | Only bare `http(s)://` is linked (`inline-spans.ts`); no `www.`, no bare email, and trailing-punctuation trimming is a simplified regex, not GFM's balanced-paren/entity rules.                 |
+| Disallowed Raw HTML     | 0/1      | The renderer escapes *all* attributed/structural raw HTML, which is stricter than GFM's tag filter — so the filtered-passthrough output never matches.                                          |
+
+Strikethrough is the only fully-conforming extension; the others cap out on real
+grammar gaps (tables, extended autolinks) or deliberate divergence (task-list
+classes, raw-HTML escaping). Closing the table-alignment and `www.`/email autolink
+gaps are the highest-value follow-ups.
 
 ### Streaming convergence fuzz (`streaming-convergence.test.ts`, via `npm test`)
 
@@ -356,7 +399,7 @@ that display must also match the at-rest `renderMarkdown()` output. Set
 
 ### Performance benchmark (`scripts/bench-streaming.mts`, via `npm run bench:markdown`)
 
-Complements the correctness fuzz with a wall-clock benchmark (#618). It replays
+Complements the correctness fuzz with a wall-clock benchmark ([#618](https://github.com/copse-dev/agent-pane/issues/618)). It replays
 three fixtures token-by-token — a mix of medium CommonMark baseline examples, the
 `terms-of-service-streaming.md` agent output, and a synthetic wide-table + long-list
 worst case — through **both** streaming emitters and reports the median time to stream
