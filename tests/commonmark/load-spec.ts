@@ -17,22 +17,19 @@ export interface SpecExample {
   section: string
 }
 
-const EXAMPLE_RE = /^`{32} example\n([\s\S]*?)^\.\n([\s\S]*?)^`{32}$|^#{1,6} *(.*)$/gm
+// The example fence is 32 backticks + ` example`. CommonMark stops there; GFM
+// tags extension examples with a trailing category word (e.g. `example table`,
+// `example strikethrough`), so allow an optional info string after `example`.
+const EXAMPLE_RE = /^`{32} example.*\n([\s\S]*?)^\.\n([\s\S]*?)^`{32}$|^#{1,6} *(.*)$/gm
 
-// Resolve `commonmark-spec` from the repo root at runtime. Building the require
-// dynamically (rather than using the bundler's `require`) keeps esbuild from
-// trying to inline the package, while still honoring node_modules hoisting. The
-// base file need not exist — it only anchors resolution.
-const requireFromRoot = createRequire(resolve(process.cwd(), 'noop.js'))
-
-/** Version of the installed `commonmark-spec` package (the pinned spec version). */
-export function commonMarkSpecVersion(): string {
-  return (requireFromRoot('commonmark-spec/package.json') as { version: string }).version
-}
-
-/** Parse every embedded conformance example from the spec text. */
-export function loadCommonMarkSpec(): SpecExample[] {
-  const text = readFileSync(requireFromRoot.resolve('commonmark-spec/spec.txt'), 'utf8')
+/**
+ * Parse every embedded conformance example from CommonMark-format `spec.txt`
+ * text (32-backtick ` example` fences, a `.` separator, and `#` section
+ * headings). The CommonMark and GFM specs share this exact format, so both
+ * loaders route through here.
+ */
+export function parseSpecExamples(rawText: string): SpecExample[] {
+  const text = rawText
     .replace(/\r\n?/g, '\n')
     .replace(/^<!-- END TESTS -->(.|[\n])*/m, '')
   const examples: SpecExample[] = []
@@ -58,4 +55,20 @@ export function loadCommonMarkSpec(): SpecExample[] {
     },
   )
   return examples
+}
+
+// Resolve `commonmark-spec` from the repo root at runtime. Building the require
+// dynamically (rather than using the bundler's `require`) keeps esbuild from
+// trying to inline the package, while still honoring node_modules hoisting. The
+// base file need not exist — it only anchors resolution.
+const requireFromRoot = createRequire(resolve(process.cwd(), 'noop.js'))
+
+/** Version of the installed `commonmark-spec` package (the pinned spec version). */
+export function commonMarkSpecVersion(): string {
+  return (requireFromRoot('commonmark-spec/package.json') as { version: string }).version
+}
+
+/** Parse every embedded conformance example from the CommonMark spec text. */
+export function loadCommonMarkSpec(): SpecExample[] {
+  return parseSpecExamples(readFileSync(requireFromRoot.resolve('commonmark-spec/spec.txt'), 'utf8'))
 }

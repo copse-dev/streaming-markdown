@@ -115,7 +115,7 @@ supports it (any current engine) or let your bundler lower it.
 ```bash
 npm install
 npm run typecheck   # tsc (strict, exactOptionalPropertyTypes)
-npm test            # node:test via tsx — unit + CommonMark conformance
+npm test            # node:test via tsx — unit + CommonMark & GFM conformance
 npm run build       # emit dist/ (ESM JS + .d.ts)
 ```
 
