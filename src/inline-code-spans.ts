@@ -6,8 +6,15 @@
  * the code-span renderer copies autolinks verbatim; the backslash-escape
  * encoder shares the pattern (escapes do not apply inside autolinks).
  */
+// The email branch matches dot-separated labels (`label(.label)+`) whose runs
+// EXCLUDE `.`, rather than two overlapping `[^<>\s@]+` runs around a literal
+// dot. Overlapping runs let the dot sit at O(n) split points, so an unclosed
+// `<a@word.word.word…` forced quadratic backtracking (ReDoS) on every inline
+// segment this pattern scans (`renderInlineCode`, `encodeBackslashEscapes`).
+// The label form has a single valid segmentation and matches the same set of
+// addresses in linear time.
 export const ANGLE_AUTOLINK_VERBATIM_RE =
-  /^<(?:[a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\s]*|[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[^<>\s@]+\.[^<>\s@]+)>/
+  /^<(?:[a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\s]*|[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[^<>\s@.]+(?:\.[^<>\s@.]+)+)>/
 
 export type CodeSpanBoundary =
   | {

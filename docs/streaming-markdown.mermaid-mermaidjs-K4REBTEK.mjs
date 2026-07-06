@@ -14,11 +14,16 @@ var __rewriteRelativeImportExtension = function(path, preserveJsx) {
 };
 var mermaidLib = null;
 var diagramSeq = 0;
+var MERMAID_SPECIFIER = "mermaid";
+var importMermaid = () => import(__rewriteRelativeImportExtension(MERMAID_SPECIFIER));
+function __setMermaidImporterForTests(fn) {
+  importMermaid = fn ?? (() => import(__rewriteRelativeImportExtension(MERMAID_SPECIFIER)));
+  mermaidLib = null;
+}
 async function loadMermaidLib() {
   if (mermaidLib)
     return mermaidLib;
-  const specifier = "mermaid";
-  const mod = await import(__rewriteRelativeImportExtension(specifier));
+  const mod = await importMermaid();
   const lib = mod.default ?? mod;
   lib.initialize({ startOnLoad: false });
   mermaidLib = lib;
@@ -40,6 +45,7 @@ function loadMermaid() {
   return Promise.resolve(installMermaid());
 }
 export {
+  __setMermaidImporterForTests,
   installMermaid,
   loadMermaid,
   mermaidDiagramRenderer

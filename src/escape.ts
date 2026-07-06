@@ -1,3 +1,6 @@
+import { decodeEscapedPunctuationRaw } from './backslash-escapes.ts'
+import { decodeHtmlCharRefs } from './link-references.ts'
+
 const HTML_ESCAPES: Record<string, string> = {
   '&': '&amp;',
   '<': '&lt;',
@@ -27,11 +30,44 @@ const SAFE_OUTER_TAG_RE =
  */
 const BENIGN_RAW_INLINE_TAG_RE = /^<\/?(?:b|i|u|s|del|ins|sub|sup|kbd|mark|br)\s*\/?>$/i
 
+/** An event-handler attribute (`onclick=`, `onerror=`, …); never in renderer output. */
+const EVENT_HANDLER_ATTR_RE = /\son[a-z]+\s*=/i
+
+/** First `href="…"`/`src="…"` value in a tag, or null. */
+const URL_ATTR_RE = /\b(?:href|src)\s*=\s*"([^"]*)"/i
+
+/**
+ * Schemes that are dangerous as an `href`/`src`. Mirrors the autolink renderer's
+ * denylist (`autolinkHref` in inline-autolinks.ts) rather than the stricter link
+ * allowlist (`safeLinkHref`), so this pass preserves the same uncommon-but-inert
+ * schemes autolinks legitimately produce (`<ftp://…>`, `<foo://…>`).
+ */
+const DANGEROUS_HREF_SCHEME_RE = /^(?:javascript|data|vbscript):/i
+
+/**
+ * `SAFE_OUTER_TAG_RE` matches renderer-generated tags by SHAPE, but a raw tag a
+ * model typed into prose can wear the same shape — a forged `data-md-rendered="1"`
+ * marker, or an attributed `<em onmouseover=…>`. Re-validate CONTENT here so those
+ * never pass unescaped: reject any event-handler attribute, and any `href`/`src`
+ * whose scheme is dangerous (decoding entity/escape obfuscation first, the way
+ * `safeLinkHref` does, so `&#x6a;avascript:` can't slip through). The renderer's
+ * own anchors/images already satisfy this, so legitimate output is untouched.
+ */
+function isSanctionedRendererTag(tag: string): boolean {
+  if (EVENT_HANDLER_ATTR_RE.test(tag)) return false
+  const rawUrl = URL_ATTR_RE.exec(tag)?.[1]
+  if (rawUrl === undefined) return true
+  const url = decodeHtmlCharRefs(decodeEscapedPunctuationRaw(decodeEscapedHref(rawUrl))).trim()
+  return !DANGEROUS_HREF_SCHEME_RE.test(url)
+}
+
 function escapeHtmlOutsideSafeTags(html: string): string {
   return html
     .split(/(<[^>]+>)/g)
     .map((part) =>
-      part.startsWith('<') && (SAFE_OUTER_TAG_RE.test(part) || BENIGN_RAW_INLINE_TAG_RE.test(part))
+      part.startsWith('<') &&
+      ((SAFE_OUTER_TAG_RE.test(part) && isSanctionedRendererTag(part)) ||
+        BENIGN_RAW_INLINE_TAG_RE.test(part))
         ? part
         : escapeHtml(part),
     )

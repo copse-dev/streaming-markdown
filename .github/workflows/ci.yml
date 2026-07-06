@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: CI only reads the checked-out code. Overrides any broader
+# repository-default GITHUB_TOKEN grant.
+permissions:
+  contents: read
+
 jobs:
   # Runner router: use the shared org-level self-hosted `copse-checks` pool when
   # one is online, else GitHub-hosted. The pool is the unified runner image in

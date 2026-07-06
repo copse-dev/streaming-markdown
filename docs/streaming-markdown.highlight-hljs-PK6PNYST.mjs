@@ -1,6 +1,6 @@
 import {
   setCodeHighlighter
-} from "./streaming-markdown.chunk-T4OPBJRW.mjs";
+} from "./streaming-markdown.chunk-6GE7FBY2.mjs";
 import {
   __commonJS,
   __toESM

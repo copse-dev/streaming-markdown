@@ -19,11 +19,12 @@ export interface SpecExample {
 
 const EXAMPLE_RE = /^`{32} example\n([\s\S]*?)^\.\n([\s\S]*?)^`{32}$|^#{1,6} *(.*)$/gm
 
-// Resolve `commonmark-spec` from the repo root at runtime. Building the require
-// dynamically (rather than using the bundler's `require`) keeps esbuild from
-// trying to inline the package, while still honoring node_modules hoisting. The
-// base file need not exist — it only anchors resolution.
-const requireFromRoot = createRequire(resolve(process.cwd(), 'noop.js'))
+// Resolve `commonmark-spec` at runtime. Building the require dynamically (rather
+// than using the bundler's `require`) keeps esbuild from trying to inline the
+// package, while still honoring node_modules hoisting. Anchor on this module's
+// own directory (not `process.cwd()`) so the resolution works regardless of the
+// directory tests are launched from; the base file need not exist.
+const requireFromRoot = createRequire(resolve(import.meta.dirname, 'noop.js'))
 
 /** Version of the installed `commonmark-spec` package (the pinned spec version). */
 export function commonMarkSpecVersion(): string {
