@@ -15,6 +15,7 @@ export {
   sanitizeRenderedMarkdown,
   setSanitizeExtension,
   setSanitizerBackend,
+  type SanitizedHtml,
   type SanitizeExtension,
   type SanitizerBackend,
   type SanitizerConfig,

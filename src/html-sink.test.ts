@@ -15,7 +15,7 @@ import {
   setTrustedTypesPolicy,
   type TrustedTypesPolicy,
 } from './html-sink.ts'
-import { sanitizeRenderedMarkdown, setSanitizerBackend } from './sanitize.ts'
+import { asSanitizedHtml, sanitizeRenderedMarkdown, setSanitizerBackend } from './sanitize.ts'
 import { dompurifyBackend } from './sanitize-dompurify.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
 
@@ -212,7 +212,7 @@ describe('setPresanitizedHtml', () => {
     const hostPolicy = makeStubPolicy('my-app#markdown', (s) => s)
     setTrustedTypesPolicy(hostPolicy)
     const el = document.createElement('div')
-    setPresanitizedHtml(el, '<p>already sanitized</p>')
+    setPresanitizedHtml(el, asSanitizedHtml('<p>already sanitized</p>'))
     assert.deepEqual(hostPolicy.calls, ['<p>already sanitized</p>'])
     assert.equal(el.innerHTML, '<p>already sanitized</p>')
   })
@@ -222,6 +222,21 @@ describe('setPresanitizedHtml', () => {
     el.innerHTML = '<p>old</p>'
     setPresanitizedHtml(el, '')
     assert.equal(el.innerHTML, '')
+  })
+
+  it('rejects unbranded strings at compile time (SanitizedHtml brand)', () => {
+    const el = document.createElement('div')
+    const raw: string = '<p>raw</p>'
+    // @ts-expect-error — a plain string must not reach the presanitized sink;
+    // it has to pass through sanitizeRenderedMarkdown or an audited
+    // asSanitizedHtml assertion first. If this line ever compiles, the brand
+    // has been weakened.
+    const rejected = () => setPresanitizedHtml(el, raw)
+    void rejected
+    // And the two blessed producers still satisfy the brand:
+    setPresanitizedHtml(el, sanitizeRenderedMarkdown('<p>ok</p>'))
+    setPresanitizedHtml(el, asSanitizedHtml('<p>audited</p>'))
+    assert.equal(el.innerHTML, '<p>audited</p>')
   })
 })
 

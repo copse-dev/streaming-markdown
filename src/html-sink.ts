@@ -1,4 +1,8 @@
-import { sanitizeRenderedMarkdown, sanitizeRenderedMarkdownInto } from './sanitize.ts'
+import {
+  sanitizeRenderedMarkdown,
+  sanitizeRenderedMarkdownInto,
+  type SanitizedHtml,
+} from './sanitize.ts'
 
 // The single `innerHTML` chokepoint. Every DOM write of rendered-markdown HTML
 // in this package goes through this module (enforced by html-sink.test.ts), so
@@ -142,11 +146,13 @@ export function setSanitizedHtml(el: Element, html: string): void {
 /**
  * Assign markup that has ALREADY been through {@link sanitizeRenderedMarkdown}
  * (possibly wrapped in literal allowlisted tags by the caller) without
- * re-sanitizing. Internal: every caller must be auditable as sanitized-only —
- * this is what keeps the identity policy above sound. Not exported from the
- * package entry point.
+ * re-sanitizing. The {@link SanitizedHtml} brand makes that contract
+ * compile-time checked: a plain string cannot reach this sink without either
+ * the sanitizer or an audited `asSanitizedHtml` assertion — this is what
+ * keeps the identity policy above sound. Not exported from the package entry
+ * point.
  */
-export function setPresanitizedHtml(el: Element, sanitizedHtml: string): void {
+export function setPresanitizedHtml(el: Element, sanitizedHtml: SanitizedHtml | ''): void {
   if (sanitizedHtml === '') {
     el.replaceChildren()
     return

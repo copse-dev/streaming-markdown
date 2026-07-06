@@ -14,6 +14,7 @@
 // serialization byte-for-byte identical to a fresh parse.
 
 import { setPresanitizedHtml } from './html-sink.ts'
+import type { SanitizedHtml } from './sanitize.ts'
 
 const TEXT_NODE = 3
 const ELEMENT_NODE = 1
@@ -92,7 +93,7 @@ function morphChildren(parent: Node, template: Node, offset = 0): void {
  * unchanged blocks keep their identity across the update. The resulting
  * serialization is identical to `container.innerHTML = html`.
  */
-export function morphInnerHtml(container: HTMLElement, html: string): void {
+export function morphInnerHtml(container: HTMLElement, html: SanitizedHtml | ''): void {
   // Reconcile the whole child list. `morphInnerHtmlFrom(_, 0, '')` trims every
   // child (equivalent to `replaceChildren()`), so the empty case needs no
   // special-casing here.
@@ -105,7 +106,11 @@ export function morphInnerHtml(container: HTMLElement, html: string): void {
  * The resulting serialization of the `[startIndex, …)` region is identical to
  * having assigned that region via `innerHTML` (#21).
  */
-export function morphInnerHtmlFrom(container: HTMLElement, startIndex: number, html: string): void {
+export function morphInnerHtmlFrom(
+  container: HTMLElement,
+  startIndex: number,
+  html: SanitizedHtml | '',
+): void {
   if (html === '') {
     while (container.childNodes.length > startIndex) container.lastChild?.remove()
     return

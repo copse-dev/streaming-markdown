@@ -80,6 +80,12 @@ The injected policy always receives markup that has already been through
 `sanitizeRenderedMarkdown`, so an identity `createHTML` is sound — the hook
 exists for CSP policy-name control, not to replace the sanitizer.
 
+That "already sanitized" contract is compiler-enforced: `sanitizeRenderedMarkdown`
+returns a branded `SanitizedHtml` type (a `string` at runtime, exported from the
+package entry), and the internal presanitized sink only accepts that brand — an
+arbitrary string cannot reach it without passing through the sanitizer or an
+audited internal assertion.
+
 Edges to know about:
 
 - **DOMPurify backend under enforcement.** DOMPurify's internal parser is
