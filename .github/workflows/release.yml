@@ -56,6 +56,9 @@ concurrency:
 
 jobs:
   release:
+    # Deliberately NOT routed to the self-hosted pool (vars.CHECKS_RUNNER):
+    # npm Trusted Publishing / provenance requires a GitHub-hosted runner, and
+    # hosted minutes are free on a public repo anyway.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

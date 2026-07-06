@@ -28,6 +28,8 @@ permissions: {}
 
 jobs:
   dispatch:
+    # Deliberately NOT routed to the self-hosted pool: one API call, free on a
+    # public repo, and release notifications shouldn't depend on fleet uptime.
     runs-on: ubuntu-latest
     # Pre-releases are opt-in on the consumer side — don't auto-bump agent-pane
     # onto an 0.x.y-rc. agent-pane can still pull one manually via its
