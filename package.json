@@ -38,6 +38,11 @@
       "import": "./dist/mermaid-mermaidjs.js",
       "default": "./dist/mermaid-mermaidjs.js"
     },
+    "./math/katex": {
+      "types": "./dist/math-katex.d.ts",
+      "import": "./dist/math-katex.js",
+      "default": "./dist/math-katex.js"
+    },
     "./sanitizers/browser": {
       "types": "./dist/sanitize-browser.d.ts",
       "import": "./dist/sanitize-browser.js",
@@ -90,6 +95,7 @@
   "peerDependencies": {
     "dompurify": "^3.4.11",
     "highlight.js": "^11.11.1",
+    "katex": "^0.16.0 || ^0.17.0",
     "mermaid": "^11.0.0"
   },
   "peerDependenciesMeta": {
@@ -97,6 +103,9 @@
       "optional": true
     },
     "highlight.js": {
+      "optional": true
+    },
+    "katex": {
       "optional": true
     },
     "mermaid": {
@@ -112,6 +121,7 @@
     "esbuild": "^0.28.1",
     "highlight.js": "^11.11.1",
     "jsdom": "^29.1.1",
+    "katex": "^0.17.0",
     "playwright-core": "^1.61.1",
     "tsx": "^4.19.2",
     "typescript": "^6.0.3"
