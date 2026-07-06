@@ -5,6 +5,53 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-06
+
+### Bug Fixes
+
+- deterministic host image paths to stop screenshot churn (#43) (`efd6ba7`)
+
+### Performance
+
+- incremental tokenize + link-ref scanning via safe resume boundaries (#30) (#40) (`b0791d0`)
+- intra-list tail bounding — freeze settled items of an open list (#29) (#39) (`82182e0`)
+- incremental committed-prefix rendering (fixes #21) (#23) (`ca2286a`)
+
+### Refactors
+
+- compile-enforced settle classification + review dedups (#32) (#36) (`3f6c472`)
+
+### Documentation
+
+- soft-wrap API snippets and drop the install badge glyph (#46) (`ad6c727`)
+- fix hero pane scroll, badge selection, and fidelity check (#44) (`23fcf53`)
+
+### Tests
+
+- CI-able perf-regression guard + share top-level render opts (#34) (`979e718`)
+
+### Build System
+
+- drop private:true now that publishing is intentional (#35) (`38be874`)
+- require Node >=21 so npm test can't silently run zero tests (#28) (`7700739`)
+
+### Continuous Integration
+
+- harden release publishing (OIDC trusted publishing + publish-before-push) (#27) (`8b9526e`)
+
+### Other Changes
+
+- Support paragraph continuation in streaming markdown renderer (#49) (`20497c2`)
+- Align CommonMark spec compliance for links, blocks, and emphasis (#47) (`dd367bb`)
+- sanitize: native backend preserves allowlisted class (hljs/mermaid hooks) (#45) (`55d0389`)
+- Add self-hosted runner routing to CI workflow (#42) (`cb23310`)
+- Prototype: lazy-load the generator's highlight.js dependency (#37) (`9e31620`)
+- Add GitHub Pages live demo with browser bundle (#41) (`e34694d`)
+- styles: ship optional core + default reference stylesheets (#26) (`870999a`)
+- Add GitHub Pages demo (docs/) and streaming e2e test suite (#38) (`5b2123a`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v0.2.0...v0.3.0
+
 ## [0.2.0] - 2026-07-05
 
 ### Other Changes
