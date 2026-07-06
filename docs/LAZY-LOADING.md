@@ -3,6 +3,12 @@
 > Status: **prototype**. Wired for `highlight.js` today; sketches the same shape
 > for Mermaid. See `src/highlight.ts`, `src/highlight-hljs.ts`, and
 > `src/highlight-lazy.test.ts`.
+>
+> The demo site (`docs/index.html`) exercises both paths live: its bundle is
+> built with code splitting, so the highlight.js grammars are fetched as a
+> separate chunk on the first fenced code block, and mermaid is fetched via an
+> import map on the first ```mermaid fence. Status chips on the page show each
+> load happening.
 
 ## The problem
 

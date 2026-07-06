@@ -4,6 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>@copse/streaming-markdown — Live Demo</title>
+  <!-- Mermaid is an OPTIONAL PEER of the package — never bundled. The lazy
+       backend does `import('mermaid')` at first render; this import map is the
+       demo's stand-in for `npm install mermaid` in a real host. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "mermaid": "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    }
+  }
+  </script>
   <style>
     :root {
       --bg: #0d1117;
@@ -625,6 +635,126 @@
     .cls { color: #ffa657; }
     .prop { color: #d2a8ff; }
 
+    /* ── Lazy-extras status chips ────────────────────────────
+       Live view of the two optional heavy dependencies. Neither is in the
+       page's main bundle: highlight.js is a code-split chunk fetched on the
+       first fenced code block, mermaid comes from the import map (CDN) on the
+       first diagram. The chips flip idle → loading → loaded as that happens. */
+    .lazy-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      padding: 0.5rem 1rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface2);
+      font-size: 0.72rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--text-muted);
+    }
+
+    /* Standalone variant used outside the hero card. */
+    .lazy-bar--inline {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      margin-bottom: 1rem;
+    }
+
+    .lazy-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.15rem 0.65rem;
+      transition: border-color 0.2s;
+    }
+
+    .lazy-chip em {
+      font-style: normal;
+      color: var(--text-muted);
+    }
+
+    .lazy-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .lazy-chip[data-state="loading"] .lazy-dot {
+      background: var(--warning);
+      animation: blink 0.8s ease-in-out infinite;
+    }
+
+    .lazy-chip[data-state="loaded"] { border-color: rgba(63, 185, 80, 0.4); }
+    .lazy-chip[data-state="loaded"] .lazy-dot { background: var(--success); }
+    .lazy-chip[data-state="loaded"] em { color: var(--success); }
+
+    .lazy-chip[data-state="error"] { border-color: rgba(248, 81, 73, 0.4); }
+    .lazy-chip[data-state="error"] .lazy-dot { background: var(--danger); }
+    .lazy-chip[data-state="error"] em { color: var(--danger); }
+
+    /* ── highlight.js tokens (VS Code Dark+, as in styles/default.css) ──
+       These only take effect once the lazy grammar chunk has loaded and
+       fences upgrade from escaped plain text to token spans. */
+    .compare-panel-body .hljs-comment,
+    .compare-panel-body .hljs-quote { color: #6a9955; font-style: italic; }
+    .compare-panel-body .hljs-keyword,
+    .compare-panel-body .hljs-selector-tag,
+    .compare-panel-body .hljs-built_in { color: #569cd6; }
+    .compare-panel-body .hljs-string,
+    .compare-panel-body .hljs-regexp { color: #ce9178; }
+    .compare-panel-body .hljs-number,
+    .compare-panel-body .hljs-literal { color: #b5cea8; }
+    .compare-panel-body .hljs-title,
+    .compare-panel-body .hljs-title.function_,
+    .compare-panel-body .hljs-function .hljs-title { color: #dcdcaa; }
+    .compare-panel-body .hljs-type,
+    .compare-panel-body .hljs-class .hljs-title { color: #4ec9b0; }
+    .compare-panel-body .hljs-attr,
+    .compare-panel-body .hljs-attribute,
+    .compare-panel-body .hljs-variable,
+    .compare-panel-body .hljs-template-variable { color: #9cdcfe; }
+    .compare-panel-body .hljs-meta,
+    .compare-panel-body .hljs-symbol { color: #d4d4d4; }
+
+    /* ── Mermaid diagrams ────────────────────────────────────
+       While pending (library not loaded / stream still going) the generator's
+       inert scaffolding shows the escaped source in a normal <pre>. Hydration
+       swaps in SVG; the light card keeps mermaid's default theme readable on
+       this dark page. */
+    .compare-panel-body .mermaid-diagram { margin: 0.5rem 0; }
+
+    .compare-panel-body .mermaid-diagram--rendered {
+      background: #f6f8fa;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+    }
+
+    .compare-panel-body .mermaid-diagram svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 0 auto;
+    }
+
+    .compare-panel-body .mermaid-diagram--error pre.mermaid {
+      border-color: var(--danger);
+    }
+
+    .compare-panel-body .mermaid-diagram--error::before {
+      content: '⚠ diagram failed to render — showing source';
+      display: block;
+      color: var(--danger);
+      font-size: 0.72rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      margin-bottom: 0.25rem;
+    }
+
     /* ── Fidelity indicator ──────────────────────────────── */
     .fidelity-badge {
       /* Toggled via `visibility` (not display) so appearing at stream end
@@ -707,6 +837,11 @@
       </div>
     </div>
     <div class="hero-output compare-panel-body" id="hero-output"></div>
+    <div class="lazy-bar" title="Neither library is in the page's main bundle. Each is fetched the first time the stream actually needs it.">
+      <span>optional extras — fetched on first use:</span>
+      <span class="lazy-chip" data-extra="hljs" data-state="idle"><span class="lazy-dot"></span>highlight.js <em>not loaded</em></span>
+      <span class="lazy-chip" data-extra="mermaid" data-state="idle"><span class="lazy-dot"></span>mermaid <em>not loaded</em></span>
+    </div>
   </div>
 </div>
 
@@ -720,6 +855,7 @@
     <button class="preset-btn active" data-preset="mixed">Mixed</button>
     <button class="preset-btn" data-preset="table">Table</button>
     <button class="preset-btn" data-preset="code">Code</button>
+    <button class="preset-btn" data-preset="diagrams">Diagrams</button>
     <button class="preset-btn" data-preset="lists">Lists</button>
     <button class="preset-btn" data-preset="basic">Basic</button>
   </div>
@@ -734,6 +870,12 @@
       Fast
     </label>
     <span id="fidelity-badge" class="fidelity-badge" style="visibility:hidden">&#10003; outputs match</span>
+  </div>
+
+  <div class="lazy-bar lazy-bar--inline" title="Neither library is in the page's main bundle. Each is fetched the first time the stream actually needs it.">
+    <span>optional extras — fetched on first use:</span>
+    <span class="lazy-chip" data-extra="hljs" data-state="idle"><span class="lazy-dot"></span>highlight.js <em>not loaded</em></span>
+    <span class="lazy-chip" data-extra="mermaid" data-state="idle"><span class="lazy-dot"></span>mermaid <em>not loaded</em></span>
   </div>
 
   <div class="compare-panels">
@@ -824,6 +966,56 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
   </div>
 </div>
 
+<div class="section">
+  <div class="section-header">
+    <h2>Heavy dependencies are optional — and lazy</h2>
+    <p>
+      The core bundle carries <strong>no highlight.js and no mermaid</strong>, so first paint
+      stays fast. Code fences render immediately as escaped plain text with their final
+      <code>hljs lang-*</code> class, and <code>&#96;&#96;&#96;mermaid</code> fences render as inert source.
+      Each library is fetched only when the stream first needs it — highlight.js grammars as
+      a ~71&nbsp;KB code-split chunk, mermaid as an optional peer dependency the host installs
+      (this page maps it to a CDN). When it arrives, a re-render upgrades what's already on
+      screen in place — no layout shift, because the element classes never change.
+      That's exactly what this page does: watch the status chips above flip as the demo
+      streams its first code fence and first diagram.
+      See <a href="https://github.com/copse-dev/streaming-markdown/blob/main/docs/LAZY-LOADING.md">docs/LAZY-LOADING.md</a>
+      for the design.
+    </p>
+  </div>
+  <div class="snippet-grid">
+    <div class="snippet-card">
+      <div class="snippet-card-header">
+        <span>Lazy syntax highlighting</span> — grammars stay out of your main bundle
+      </div>
+      <pre><code><span class="cmt">// e.g. on the first fenced block, or at idle.</span>
+<span class="cmt">// Until then, fences are safe escaped text.</span>
+<span class="kw">const</span> { <span class="fn">loadHighlightjs</span> } = <span class="kw">await</span> <span class="fn">import</span>(
+  <span class="str">'@copse/streaming-markdown/highlighters/highlightjs'</span>
+)
+<span class="kw">await</span> <span class="fn">loadHighlightjs</span>() <span class="cmt">// registers the backend</span>
+
+<span class="cmt">// re-render: plain fences upgrade to token spans</span>
+<span class="fn">rerender</span>()</code></pre>
+    </div>
+
+    <div class="snippet-card">
+      <div class="snippet-card-header">
+        <span>Lazy diagrams</span> — mermaid is an optional peer, never bundled
+      </div>
+      <pre><code><span class="kw">import</span> { <span class="fn">hydratePendingDiagrams</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown'</span>
+
+<span class="kw">const</span> { <span class="fn">loadMermaid</span> } = <span class="kw">await</span> <span class="fn">import</span>(
+  <span class="str">'@copse/streaming-markdown/diagrams/mermaid'</span>
+)
+<span class="kw">await</span> <span class="fn">loadMermaid</span>() <span class="cmt">// mermaid itself loads on first render</span>
+
+<span class="cmt">// pending &lt;pre class="mermaid"&gt; scaffolding → SVG</span>
+<span class="kw">await</span> <span class="fn">hydratePendingDiagrams</span>(messageEl)</code></pre>
+    </div>
+  </div>
+</div>
+
 <footer class="site-footer">
   <span>@copse/streaming-markdown · Apache-2.0</span>
   <span>
@@ -839,11 +1031,96 @@ import {
   setSanitizerBackend,
   isBrowserSanitizerSupported,
   dompurifyBackend,
+  hydratePendingDiagrams,
+  loadHighlightBackend,
+  loadMermaidBackend,
 } from './streaming-markdown.browser.mjs';
 
 // Firefox and older browsers lack the native Sanitizer API (Element.setHTML).
 if (!isBrowserSanitizerSupported()) {
   setSanitizerBackend(dompurifyBackend);
+}
+
+// ── Lazy extras: highlight.js + mermaid ────────────────────────────────────
+// Neither library is in streaming-markdown.browser.mjs. The first fenced code
+// block in a stream triggers a fetch of the code-split grammar chunk; the
+// first ```mermaid fence triggers a fetch of mermaid via the import map. The
+// status chips (one set in the hero card, one in the comparison section)
+// mirror the module state.
+
+const extras = {
+  hljs: { promise: null, loaded: false },
+  mermaid: { promise: null, loaded: false },
+};
+
+function setChips(kind, state, detail) {
+  document.querySelectorAll(`.lazy-chip[data-extra="${kind}"]`).forEach((chip) => {
+    chip.dataset.state = state;
+    chip.querySelector('em').textContent = detail;
+  });
+}
+
+function ensureHighlight() {
+  if (extras.hljs.promise) return extras.hljs.promise;
+  setChips('hljs', 'loading', 'loading grammar chunk…');
+  const t0 = performance.now();
+  extras.hljs.promise = loadHighlightBackend()
+    .then(() => {
+      extras.hljs.loaded = true;
+      setChips('hljs', 'loaded', `loaded in ${Math.round(performance.now() - t0)} ms`);
+      // Upgrade fences that already committed as plain escaped text. The
+      // element classes were final from the start, so only the interior
+      // swaps to token spans — no layout shift.
+      rerenderAfterHighlight();
+    })
+    .catch(() => {
+      setChips('hljs', 'error', 'failed to load');
+    });
+  return extras.hljs.promise;
+}
+
+function ensureMermaid() {
+  if (extras.mermaid.promise) return extras.mermaid.promise;
+  setChips('mermaid', 'loading', 'loading from CDN…');
+  const t0 = performance.now();
+  extras.mermaid.promise = loadMermaidBackend()
+    // Warm the actual library now (the backend would otherwise defer the
+    // import-map fetch to the first render) so the chip times the real
+    // network cost and hydration at stream end is instant.
+    .then(() => import('mermaid'))
+    .then(() => {
+      extras.mermaid.loaded = true;
+      setChips('mermaid', 'loaded', `loaded in ${Math.round(performance.now() - t0)} ms`);
+      // If a stream already finished while mermaid was in flight, hydrate now.
+      // Streams still running hydrate at their own completion instead —
+      // hydrating mid-stream would race the incremental DOM morph.
+      if (!heroStreaming) hydrateDiagrams(heroOutput);
+      if (!compareStreaming) {
+        hydrateDiagrams(stringOutput);
+        hydrateDiagrams(domOutput);
+      }
+    })
+    .catch(() => {
+      setChips('mermaid', 'error', 'failed to load');
+    });
+  return extras.mermaid.promise;
+}
+
+// Kick off loads the moment the *streamed* partial first mentions a fence —
+// the fetch overlaps the rest of the stream, so by the time the fence settles
+// the library is usually already there.
+function detectExtras(partial) {
+  if (extras.hljs.loaded && extras.mermaid.loaded) return;
+  if (!extras.mermaid.promise && /```mermaid\b/.test(partial)) ensureMermaid();
+  if (!extras.hljs.promise && /```(?!mermaid\b)[a-z0-9]/i.test(partial)) ensureHighlight();
+}
+
+// Hydrate settled ```mermaid scaffolding under `root` into SVG. No-op until
+// the backend is registered; safe to call repeatedly. Only ever called on a
+// root whose stream has ended, so no container is still forming.
+function hydrateDiagrams(root) {
+  if (!extras.mermaid.loaded || !root) return;
+  hydratePendingDiagrams(root).catch(() => {});
 }
 
 // ── Install badge: click to select the command (and copy it) ────────────────
@@ -901,6 +1178,17 @@ def fibonacci(n):
 
 for num in fibonacci(10):
     print(num, end=" ")
+\`\`\`
+
+### Example: a mermaid diagram
+
+\`\`\`mermaid
+flowchart LR
+    tokens[LLM tokens] --> split[splitForStreaming]
+    split --> committed[committed blocks]
+    split --> pending[pending tail]
+    committed --> dom[incremental DOM]
+    pending --> dom
 \`\`\`
 
 | Block type | Pending class | Settled class |
@@ -978,6 +1266,39 @@ export class StreamingMarkdownRenderer {
 The fence is \`stream-fence-forming\` until the closing \`\`\`\`\`\` appears.
 After that it becomes a normal \`<pre><code>\` block.`,
 
+  diagrams: `## Mermaid diagrams
+
+A \`\`\`\`mermaid\`\`\` fence streams in as **inert, escaped source** — the mermaid
+library isn't even fetched until the first diagram fence appears. Once the
+stream settles, \`hydratePendingDiagrams()\` swaps the source for SVG.
+
+\`\`\`mermaid
+flowchart TD
+    chunk[token arrives] --> split{safe to commit?}
+    split -->|yes| commit[commit block]
+    split -->|no| pend[render pending state]
+    commit --> paint[incremental DOM patch]
+    pend --> paint
+    paint --> chunk
+\`\`\`
+
+Sequence diagrams work the same way:
+
+\`\`\`mermaid
+sequenceDiagram
+    participant LLM
+    participant Renderer
+    participant DOM
+    LLM->>Renderer: update(partial)
+    Renderer->>DOM: commit settled blocks
+    Renderer->>DOM: restyle pending tail
+    Note over Renderer,DOM: mermaid hydrates after the stream settles
+\`\`\`
+
+> Mermaid is an **optional peer dependency** — the package never bundles it.
+> This page fetches it from a CDN via an import map, only when a diagram
+> fence first appears in the stream.`,
+
   lists: `## CommonMark list support
 
 Tight lists (no blank lines between items):
@@ -1043,11 +1364,15 @@ let heroTimer = null;
 let heroPos = 0;
 let heroUpdates = 0;
 let heroStart = 0;
+let heroText = '';
+let heroStreaming = false;
 
 let compareTimer = null;
 let comparePos = 0;
 let compareUpdates = 0;
 let compareStart = 0;
+let compareText = '';
+let compareStreaming = false;
 let domRenderer = null;
 let currentPreset = 'mixed';
 
@@ -1064,6 +1389,7 @@ function heroReset() {
   heroPos = 0;
   heroUpdates = 0;
   heroStart = performance.now();
+  heroStreaming = true;
   heroDot.classList.add('active');
   heroOutput.scrollTop = 0;
 }
@@ -1072,16 +1398,21 @@ function heroTick(text) {
   if (heroPos >= text.length) {
     heroPos = text.length;
     clearInterval(heroTimer);
+    heroStreaming = false;
     heroDot.classList.remove('active');
     const elapsed = (performance.now() - heroStart) / 1000;
     heroCps.textContent = `${Math.round(text.length / elapsed).toLocaleString()} chars/s`;
     heroUpdatesEl.textContent = `${heroUpdates} updates`;
+    // The stream has settled — swap any ```mermaid scaffolding for SVG.
+    hydrateDiagrams(heroOutput);
     // restart after pause
     heroTimer = setTimeout(() => startHero(), 3500);
     return;
   }
   heroPos = Math.min(heroPos + 6, text.length);
-  heroRenderer.update(text.slice(0, heroPos));
+  const heroPartial = text.slice(0, heroPos);
+  detectExtras(heroPartial);
+  heroRenderer.update(heroPartial);
   // Keep the newest content in view as the stream grows. The pane is its own
   // scroll container (overflow-y:auto), so this never moves the page.
   heroOutput.scrollTop = heroOutput.scrollHeight;
@@ -1093,6 +1424,7 @@ function heroTick(text) {
 
 function startHero() {
   const text = PRESETS.mixed;
+  heroText = text;
   heroReset();
   heroTimer = setInterval(() => heroTick(text), 25);
 }
@@ -1130,6 +1462,8 @@ function formatStats(elapsed, chars, updates) {
 
 function clearCompare() {
   if (compareTimer) { clearInterval(compareTimer); compareTimer = null; }
+  compareStreaming = false;
+  comparePos = 0;
   stringOutput.innerHTML = '';
   domOutput.innerHTML = '';
   stringStats.innerHTML = '<span>—</span>';
@@ -1147,6 +1481,8 @@ function startCompare() {
   fidelityBadge.style.visibility = 'hidden';
   domRenderer = new StreamingMarkdownRenderer(domOutput);
 
+  compareText = text;
+  compareStreaming = true;
   comparePos = 0;
   compareUpdates = 0;
   compareStart = performance.now();
@@ -1160,15 +1496,20 @@ function startCompare() {
       comparePos = text.length;
       clearInterval(compareTimer);
       compareTimer = null;
+      compareStreaming = false;
       const elapsed = performance.now() - compareStart;
       stringStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
       domStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
       checkFidelity(text);
+      // The stream has settled — swap any ```mermaid scaffolding for SVG.
+      hydrateDiagrams(stringOutput);
+      hydrateDiagrams(domOutput);
       return;
     }
 
     comparePos = Math.min(comparePos + step, text.length);
     const partial = text.slice(0, comparePos);
+    detectExtras(partial);
 
     const t0 = performance.now();
     const html = renderStreamingMarkdown(partial);
@@ -1191,6 +1532,35 @@ function startCompare() {
     domStats.innerHTML = formatStats(elapsed, comparePos, compareUpdates)
       + ` · <span>${domMs.toFixed(1)}ms</span>`;
   }, interval);
+}
+
+// Once the highlight.js backend registers, the string panel upgrades for free
+// on its next tick (it re-renders the full partial each frame). Anything that
+// already COMMITTED plain — the DOM panels' earlier fences, or a stream that
+// finished before the chunk arrived — needs one explicit re-render: this is
+// the `rerender()` step from docs/LAZY-LOADING.md. Fence classes are final
+// from the first paint, so the upgrade only swaps text for token spans.
+function rerenderAfterHighlight() {
+  if (heroText && heroPos > 0) {
+    heroOutput.innerHTML = '';
+    heroRenderer = new StreamingMarkdownRenderer(heroOutput);
+    heroRenderer.update(heroText.slice(0, heroPos));
+    heroOutput.scrollTop = heroOutput.scrollHeight;
+    if (!heroStreaming) hydrateDiagrams(heroOutput);
+  }
+  if (compareText && comparePos > 0) {
+    const partial = compareText.slice(0, comparePos);
+    stringOutput.innerHTML = renderStreamingMarkdown(partial);
+    domOutput.innerHTML = '';
+    domRenderer = new StreamingMarkdownRenderer(domOutput);
+    domRenderer.update(partial);
+    stringOutput.scrollTop = stringOutput.scrollHeight;
+    domOutput.scrollTop = domOutput.scrollHeight;
+    if (!compareStreaming) {
+      hydrateDiagrams(stringOutput);
+      hydrateDiagrams(domOutput);
+    }
+  }
 }
 
 // The DOM emitter wraps committed blocks in structural containers

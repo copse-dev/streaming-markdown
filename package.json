@@ -49,7 +49,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "build:demo": "npm run build && esbuild docs/browser-entry.mjs --bundle --format=esm --platform=browser --outfile=docs/streaming-markdown.browser.mjs",
+    "build:demo": "npm run build && rm -f docs/streaming-markdown.*.mjs && esbuild docs/browser-entry.mjs --bundle --splitting --format=esm --platform=browser --outdir=docs --out-extension:.js=.mjs --entry-names=streaming-markdown.browser --chunk-names=streaming-markdown.[name]-[hash]",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "check:conformance": "node --import tsx --test src/commonmark-conformance.test.ts",

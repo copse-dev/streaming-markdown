@@ -1,3 +1,17 @@
+import {
+  decodeEscapedHref,
+  decodeSafeMarkdownEntities,
+  escapeHtml,
+  escapeHtmlTextNodes,
+  escapeMermaidHtml,
+  fenceCodeClass,
+  highlightFenceCode
+} from "./streaming-markdown.chunk-T4OPBJRW.mjs";
+import {
+  hydratePendingDiagrams
+} from "./streaming-markdown.chunk-TXP7OKL4.mjs";
+import "./streaming-markdown.chunk-H5LJGXOH.mjs";
+
 // node_modules/entities/dist/decode-codepoint.js
 var decodeMap = /* @__PURE__ */ new Map([
   [0, 65533],
@@ -1627,137 +1641,6 @@ function isAmbiguousBlockLine(line) {
   if (isGfmTableRowLine(line))
     return true;
   return false;
-}
-
-// dist/escape.js
-var HTML_ESCAPES = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;"
-};
-function escapeHtml(text2) {
-  return text2.replace(/[&<>"']/g, (ch) => HTML_ESCAPES[ch] ?? ch);
-}
-var SAFE_OUTER_TAG_RE = /^(?:<a(?:\s+href="[^"]*")(?:\s+(?:title|target|rel|data-browser-link|data-workspace-link|class)="[^"]*")*\s*>|<\/(?:a|code|em|strong)>|<(?:code|em|strong)\b[^>]*>|<img\b[^>]*\bdata-md-rendered="1"[^>]*\/?>)$/i;
-var BENIGN_RAW_INLINE_TAG_RE = /^<\/?(?:b|i|u|s|del|ins|sub|sup|kbd|mark|br)\s*\/?>$/i;
-function escapeHtmlOutsideSafeTags(html2) {
-  return html2.split(/(<[^>]+>)/g).map((part) => part.startsWith("<") && (SAFE_OUTER_TAG_RE.test(part) || BENIGN_RAW_INLINE_TAG_RE.test(part)) ? part : escapeHtml(part)).join("");
-}
-function escapeHtmlTextNodes(html2) {
-  return html2.split(/(<code>[\s\S]*?<\/code>)/g).map((segment, index) => {
-    if (index % 2 === 1) {
-      const match = segment.match(/^(<code>)([\s\S]*?)(<\/code>)$/);
-      if (!match)
-        return segment;
-      return `${match[1] ?? ""}${escapeHtml(match[2] ?? "")}${match[3] ?? ""}`;
-    }
-    return escapeHtmlOutsideSafeTags(segment);
-  }).join("");
-}
-function escapeMermaidHtml(text2) {
-  return text2.replace(/[&<"']/g, (ch) => HTML_ESCAPES[ch] ?? ch);
-}
-function decodeEscapedHref(raw) {
-  return raw.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-}
-var SAFE_MARKDOWN_ENTITY_RE = /&(?:amp;)?(?:nbsp|#160|#x0*a);/gi;
-var KNOWN_SAFE_ENTITIES = [
-  "&nbsp;",
-  "&#160;",
-  "&#xa0;",
-  "&amp;nbsp;",
-  "&amp;#160;",
-  "&amp;#xa0;"
-];
-function stripIncompleteSafeEntities(text2) {
-  const amp = text2.lastIndexOf("&");
-  if (amp === -1)
-    return text2;
-  const suffix = text2.slice(amp);
-  if (/^&(?:amp;)?(?:nbsp|#160|#x0*a);$/i.test(suffix))
-    return text2;
-  const lower = suffix.toLowerCase();
-  if (KNOWN_SAFE_ENTITIES.some((entity) => entity.startsWith(lower) && lower.length < entity.length)) {
-    return text2.slice(0, amp);
-  }
-  return text2;
-}
-function decodeSafeMarkdownEntities(text2) {
-  const stripped = stripIncompleteSafeEntities(text2);
-  return stripped.replace(SAFE_MARKDOWN_ENTITY_RE, (entity) => {
-    const lower = entity.toLowerCase();
-    if (lower === "&nbsp;" || lower === "&#160;" || lower === "&#xa0;" || lower === "&amp;nbsp;" || lower === "&amp;#160;" || lower === "&amp;#xa0;") {
-      return "\xA0";
-    }
-    return entity;
-  });
-}
-
-// dist/highlight.js
-var KNOWN_LANGUAGES = /* @__PURE__ */ new Set([
-  "typescript",
-  "javascript",
-  "bash",
-  "shell",
-  "json",
-  "python",
-  "css",
-  "xml",
-  "markdown",
-  "yaml",
-  "rust",
-  "go",
-  "sql"
-]);
-var LANG_ALIASES = {
-  ts: "typescript",
-  tsx: "typescript",
-  js: "javascript",
-  jsx: "javascript",
-  mjs: "javascript",
-  cjs: "javascript",
-  sh: "bash",
-  zsh: "bash",
-  py: "python",
-  yml: "yaml",
-  md: "markdown",
-  html: "xml",
-  htm: "xml",
-  rs: "rust",
-  text: "plaintext",
-  plaintext: "plaintext"
-};
-function resolveLanguage(lang) {
-  const key = lang.trim().toLowerCase();
-  if (!key)
-    return null;
-  const resolved = LANG_ALIASES[key] ?? key;
-  if (resolved === "plaintext")
-    return null;
-  return KNOWN_LANGUAGES.has(resolved) ? resolved : null;
-}
-var codeHighlighter = null;
-function highlightFenceCode(code, lang) {
-  if (code === "")
-    return "";
-  if (code.trim() === "")
-    return escapeHtml(code);
-  const highlighter = codeHighlighter;
-  const language = resolveLanguage(lang);
-  if (!highlighter)
-    return escapeHtml(code);
-  if (language)
-    return highlighter.highlight(code, language);
-  if (!lang.trim())
-    return highlighter.highlightAuto(code);
-  return escapeHtml(code);
-}
-function fenceCodeClass(lang) {
-  const language = resolveLanguage(lang);
-  const label = language ?? (lang.trim() ? lang.trim().toLowerCase() : "text");
-  return `hljs lang-${escapeHtml(label)}`;
 }
 
 // dist/indented-html.js
@@ -6146,10 +6029,21 @@ var dompurifyBackend = {
     }
   }
 };
+
+// docs/browser-entry.mjs
+function loadHighlightBackend() {
+  return import("./streaming-markdown.highlight-hljs-PNAZZBTU.mjs").then((m) => m.loadHighlightjs());
+}
+function loadMermaidBackend() {
+  return import("./streaming-markdown.mermaid-mermaidjs-GNR5WXCQ.mjs").then((m) => m.loadMermaid());
+}
 export {
   StreamingMarkdownRenderer,
   dompurifyBackend,
+  hydratePendingDiagrams,
   isBrowserSanitizerSupported,
+  loadHighlightBackend,
+  loadMermaidBackend,
   renderStreamingMarkdown,
   setSanitizerBackend
 };
