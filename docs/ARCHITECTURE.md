@@ -295,9 +295,10 @@ host owns the browser-rendering and layout checks.
 
 ## Regression
 
-CI runs `npm run typecheck` + `npm test` + `npm run build`. `npm test` covers the unit suite plus
-the CommonMark **and** GFM conformance baselines. The DOM-glue and layout specs listed below are
-maintained by the downstream host app.
+CI runs `npm run typecheck` + `npm run check:gfm-spec` + `npm run coverage:ci` + `npm run build` +
+`npm run check:normalizer-parity`. `coverage:ci` runs the unit suite (plus the CommonMark **and** GFM
+conformance baselines) under c8 and enforces the coverage-baseline ratchet. The DOM-glue and layout
+specs listed below are maintained by the downstream host app.
 
 ### Unit tests (`renderer.test.ts`, via `npm test`)
 
@@ -412,7 +413,7 @@ complete render. When the tokenizer commits the entire input (no pending tail),
 that display must also match the at-rest `renderMarkdown()` output. Set
 `STREAMING_FUZZ_ALL=1` to exercise every character index on long examples.
 
-### Performance benchmark (`scripts/bench-streaming.mts`, via `npm run bench:markdown`)
+### Performance benchmark (`scripts/bench-streaming.mts`, via `npm run bench`)
 
 Complements the correctness fuzz with a wall-clock benchmark ([#618](https://github.com/copse-dev/agent-pane/issues/618)). It replays
 three fixtures token-by-token — a mix of medium CommonMark baseline examples, the
@@ -421,8 +422,8 @@ worst case — through **both** streaming emitters and reports the median time t
 each to completion:
 
 ```
-npm run bench:markdown              # defaults: iters=5 warmup=2 chunk=8
-npm run bench:markdown -- --iters 9 --chunk 4
+npm run bench              # defaults: iters=5 warmup=2 chunk=8
+npm run bench -- --iters 9 --chunk 4
 ```
 
 | Column      | Meaning                                                           |
@@ -450,13 +451,13 @@ changing table/list/metadata streaming behaviour.
 
 The JS normalizer (`tests/commonmark/normalize.ts`) is differentially validated
 against the reference `normalize.py` by `npm run check:normalizer-parity` (a CI
-step in the `check` job; needs python3). The reference normalizer is **not**
+step in the `build` job; needs python3). The reference normalizer is **not**
 checked in — `scripts/fetch-reference-normalizer.mts` fetches it from a pinned,
 SHA-256-verified upstream commit into `tests/commonmark/normalize.py`
 (gitignored) at check time. The parity check then asserts both that the
 conformance pass set is identical under either normalizer and that per-example
 normalized output matches byte-for-byte, except for a small documented allowlist
-of pathological raw-HTML cases. This is **not** in `npm run check`, so
+of pathological raw-HTML cases. This is **not** part of `npm test`, so
 contributors without python can still run the default gates.
 
 ### E2e tests (seeded via `tests/e2e/helpers/seed-config.ts`)
