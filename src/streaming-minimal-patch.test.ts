@@ -105,6 +105,42 @@ describe('streaming pending→committed transitions are minimal DOM patches', ()
     assert.equal(complete.querySelector('p'), introBefore, 'sibling <p> still the same node')
   })
 
+  it('paragraph soft-break: pending continuation lives inside the open <p> and merges on commit (#11)', () => {
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+
+    r.update('Committed intro.\n\nline one\nline two part')
+    const complete = completeEl(host)
+    const introBefore = complete.querySelector('p')
+    assert.ok(introBefore, 'intro paragraph is committed')
+    const openP = complete.lastElementChild
+    assert.equal(openP?.tagName, 'P', 'open paragraph is the trailing <p>')
+    const span = openP?.querySelector('.stream-pending-paragraph-continuation')
+    assert.ok(span, 'pending continuation renders INSIDE the open <p>, not as a sibling block')
+    assert.equal(span?.textContent, 'line two part')
+    assert.equal(
+      span?.previousSibling?.textContent,
+      '\n',
+      'soft break precedes the span as paragraph text',
+    )
+    assert.equal(
+      complete.querySelector(':scope > .stream-pending-block'),
+      null,
+      'no standalone pending block for a lazy continuation',
+    )
+
+    // The line commits: the continuation text merges into the same paragraph.
+    r.update('Committed intro.\n\nline one\nline two part\n\n')
+    assert.equal(complete.querySelector('p'), introBefore, 'committed sibling <p> keeps identity')
+    const merged = complete.lastElementChild
+    assert.equal(merged?.textContent, 'line one\nline two part', 'soft-break line merged into the paragraph')
+    assert.equal(
+      complete.querySelector('.stream-pending-paragraph-continuation'),
+      null,
+      'pending chrome removed on commit',
+    )
+  })
+
   it('list marker reveal keeps sibling list items and reuses the committed <ul>', () => {
     const host = document.createElement('div')
     const r = new StreamingMarkdownRenderer(host)

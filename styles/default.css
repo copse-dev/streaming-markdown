@@ -73,10 +73,14 @@
   & h2 + p,
   & h3 + p,
   & h4 + p,
+  & h5 + p,
+  & h6 + p,
   & p + h1,
   & p + h2,
   & p + h3,
-  & p + h4 {
+  & p + h4,
+  & p + h5,
+  & p + h6 {
     margin-top: var(--sm-space-sm, 8px);
   }
 
@@ -92,18 +96,34 @@
     margin-top: 0;
   }
 
-  /* Pending heading sizes (raw `#` markers are hidden mid-stream). */
-  & .stream-pending-h1,
+  /* Heading sizes are declared explicitly (matching the UA defaults) and each
+     pending class carries its committed size, so the pending→committed
+     promotion (`.stream-pending-hN` div → `<hN>`) changes color at most —
+     never text position or wrapping (#11). Raw `#` markers stay hidden
+     mid-stream. */
+  & h1,
+  & .stream-pending-h1 {
+    font-size: 2em;
+  }
+  & h2,
   & .stream-pending-h2 {
-    font-size: 1.15em;
+    font-size: 1.5em;
   }
+  & h3,
   & .stream-pending-h3 {
-    font-size: 1.05em;
+    font-size: 1.17em;
   }
-  & .stream-pending-h4,
-  & .stream-pending-h5,
-  & .stream-pending-h6 {
+  & h4,
+  & .stream-pending-h4 {
     font-size: 1em;
+  }
+  & h5,
+  & .stream-pending-h5 {
+    font-size: 0.83em;
+  }
+  & h6,
+  & .stream-pending-h6 {
+    font-size: 0.67em;
   }
 
   /* Spacing for the committed-stream wrapper (`stream-complete`) and its pending
@@ -209,6 +229,26 @@
   }
   & .mermaid-diagram .error-icon {
     fill: var(--sm-error, #f48771);
+  }
+}
+
+/* Subtle settle-in when the incremental DOM emitter commits a block: the new
+   node fades up instead of popping. Opacity only — no transform or layout, so
+   it can never cause a shift. Scoped to `.stream-complete` (only emitted by
+   `StreamingMarkdownRenderer`, which preserves committed node identity): a
+   string-emitter host that reassigns innerHTML per token recreates every node
+   each frame and must not re-animate its whole output. */
+@media (prefers-reduced-motion: no-preference) {
+  .streaming-markdown .stream-complete > :not(.stream-pending-block),
+  .streaming-markdown .stream-complete li:not(.stream-pending-block),
+  .streaming-markdown .stream-complete tbody tr:not(.stream-pending-row) {
+    animation: sm-stream-settle 0.25s ease-out;
+  }
+}
+
+@keyframes sm-stream-settle {
+  from {
+    opacity: 0.55;
   }
 }
 

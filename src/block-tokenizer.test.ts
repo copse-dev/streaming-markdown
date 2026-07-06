@@ -244,6 +244,8 @@ describe('splitForStreaming (tokenizer #475)', () => {
     assert.deepEqual(splitCore('done\nplain tail'), {
       complete: 'done\n',
       pending: 'plain tail',
+      // A later line of the same open paragraph is a lazy continuation (#11).
+      paragraphContinuation: true,
     })
   })
 

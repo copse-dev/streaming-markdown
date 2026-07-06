@@ -14,6 +14,16 @@ export interface StreamingSplit {
   pending: string
   /** First line of the open list item when `pending` continues it. */
   openListItemFirstLine?: string
+  /**
+   * `pending` is a later line of the open trailing paragraph — a lazy
+   * continuation. The tokenizer kept the line inside the paragraph precisely
+   * because it cannot interrupt one (not a heading/list/quote/fence/table
+   * start), so on commit it is guaranteed to join the trailing committed
+   * `<p>` after a soft break. Emitters use this to render the pending tail
+   * *inside* that `<p>` instead of as a separate block that would visibly
+   * merge upward on commit (#11).
+   */
+  paragraphContinuation?: boolean
 }
 
 /**
@@ -66,7 +76,15 @@ function splitOpenParagraph(block: BlockToken, content: string): StreamingSplit 
     return { complete: content.slice(0, cut), pending: content.slice(cut) }
   }
 
-  return splitOpenBlockAtLastNewline(block, content)
+  const split = splitOpenBlockAtLastNewline(block, content)
+  // Committed lines of this same open paragraph exist, so the pending line is
+  // a lazy continuation of the trailing committed <p>. (The inline-hold paths
+  // above are excluded: there the cut can land mid-line, where a soft-break
+  // join would be wrong.)
+  if (split.pending !== '' && split.complete.length > block.start) {
+    split.paragraphContinuation = true
+  }
+  return split
 }
 
 function openListItemFirstLine(block: BlockToken, content: string): string {
