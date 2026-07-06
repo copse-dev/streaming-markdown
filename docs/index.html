@@ -621,6 +621,17 @@
       to { opacity: 1; }
     }
 
+    /* rerenderAfterHighlight() rebuilds a pane in place (fresh renderer, fresh
+       nodes) to upgrade fences that committed before highlight.js loaded. New
+       nodes would replay stream-settle across the WHOLE pane — one subtle
+       full-output blink. The class suppresses the animation from the rebuild
+       until the pane's next reset; higher specificity than the rule above. */
+    .no-settle .stream-complete > :not(.stream-pending-block),
+    .no-settle .stream-complete li,
+    .no-settle .stream-complete tbody tr {
+      animation: none;
+    }
+
     /* ── Code snippet section ────────────────────────────── */
     .snippets {
       background: var(--surface);
@@ -1405,6 +1416,35 @@ Second paragraph after a thematic break. The renderer handles:
 That's it — *start typing in the textarea above* to see your own markdown stream in.`
 };
 
+// ── Smooth auto-follow ──────────────────────────────────────────────────────
+// Assigning `scrollTop = scrollHeight` on every stream tick snaps the pane a
+// full line at a time. Instead, each streaming pane eases toward the bottom on
+// animation frames, spreading each line-height jump over a few frames. Under
+// prefers-reduced-motion the follow snaps directly, as before.
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const followers = new Map(); // pane element -> requestAnimationFrame id
+
+function followBottom(el) {
+  if (reducedMotion.matches) {
+    el.scrollTop = el.scrollHeight;
+    return;
+  }
+  if (followers.has(el)) return; // already easing toward the bottom
+  const step = () => {
+    const target = el.scrollHeight - el.clientHeight;
+    const delta = target - el.scrollTop;
+    if (delta <= 0.5) {
+      el.scrollTop = target;
+      followers.delete(el);
+      return;
+    }
+    // Exponential ease-out with a minimum step so it always converges.
+    el.scrollTop += Math.max(delta * 0.18, Math.min(delta, 1.5));
+    followers.set(el, requestAnimationFrame(step));
+  };
+  followers.set(el, requestAnimationFrame(step));
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 let heroRenderer = null;
 let heroTimer = null;
@@ -1432,6 +1472,7 @@ const heroUpdatesEl = document.getElementById('hero-updates');
 function heroReset() {
   if (heroTimer) clearInterval(heroTimer);
   heroOutput.innerHTML = '';
+  heroOutput.classList.remove('no-settle');
   heroRenderer = new StreamingMarkdownRenderer(heroOutput);
   heroPos = 0;
   heroUpdates = 0;
@@ -1462,7 +1503,7 @@ function heroTick(text) {
   heroRenderer.update(heroPartial);
   // Keep the newest content in view as the stream grows. The pane is its own
   // scroll container (overflow-y:auto), so this never moves the page.
-  heroOutput.scrollTop = heroOutput.scrollHeight;
+  followBottom(heroOutput);
   heroUpdates++;
   const elapsed = (performance.now() - heroStart) / 1000 || 0.001;
   heroCps.textContent = `${Math.round(heroPos / elapsed).toLocaleString()} chars/s`;
@@ -1513,6 +1554,7 @@ function clearCompare() {
   comparePos = 0;
   stringOutput.innerHTML = '';
   domOutput.innerHTML = '';
+  domOutput.classList.remove('no-settle');
   stringStats.innerHTML = '<span>—</span>';
   domStats.innerHTML = '<span>—</span>';
   fidelityBadge.style.visibility = 'hidden';
@@ -1525,6 +1567,7 @@ function startCompare() {
 
   stringOutput.innerHTML = '';
   domOutput.innerHTML = '';
+  domOutput.classList.remove('no-settle');
   fidelityBadge.style.visibility = 'hidden';
   domRenderer = new StreamingMarkdownRenderer(domOutput);
 
@@ -1569,8 +1612,8 @@ function startCompare() {
 
     // Keep the newest content in view; each panel is its own scroll container,
     // so this never moves the page.
-    stringOutput.scrollTop = stringOutput.scrollHeight;
-    domOutput.scrollTop = domOutput.scrollHeight;
+    followBottom(stringOutput);
+    followBottom(domOutput);
 
     compareUpdates++;
     const elapsed = performance.now() - compareStart;
@@ -1589,6 +1632,11 @@ function startCompare() {
 // from the first paint, so the upgrade only swaps text for token spans.
 function rerenderAfterHighlight() {
   if (heroText && heroPos > 0) {
+    // Every node in the pane is about to be recreated with identical layout —
+    // suppress the settle animation until the next reset, or the whole pane
+    // re-fades as one subtle blink. (Blocks committed during the remainder of
+    // this stream skip their settle fade too; next loop restores it.)
+    heroOutput.classList.add('no-settle');
     heroOutput.innerHTML = '';
     heroRenderer = new StreamingMarkdownRenderer(heroOutput);
     heroRenderer.update(heroText.slice(0, heroPos));
@@ -1598,6 +1646,7 @@ function rerenderAfterHighlight() {
   if (compareText && comparePos > 0) {
     const partial = compareText.slice(0, comparePos);
     stringOutput.innerHTML = renderStreamingMarkdown(partial);
+    domOutput.classList.add('no-settle');
     domOutput.innerHTML = '';
     domRenderer = new StreamingMarkdownRenderer(domOutput);
     domRenderer.update(partial);
