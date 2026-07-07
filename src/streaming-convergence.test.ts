@@ -4,6 +4,8 @@ import '../tests/setup-dom-jsdom.ts'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { loadBaselinePassingExamples } from '../tests/commonmark/baseline-examples.ts'
+import { loadGfmExtensionBaselineExamples } from '../tests/gfm/baseline-examples.ts'
+import { streamingCutIndices } from '../tests/streaming-cuts.ts'
 import { renderMarkdown } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import {
@@ -35,25 +37,11 @@ function streamingDisplayAfterUpdates(markdown: string, cuts: number[]): string 
   return extractStreamingDisplay(host)
 }
 
-/**
- * Cut indices exercised for each example. Short inputs try every prefix length;
- * longer ones still hit every newline and a strided sample so runtime stays bounded.
- */
-function streamingCutIndices(text: string): number[] {
-  const len = text.length
-  if (len <= 256 || process.env['STREAMING_FUZZ_ALL'] === '1') {
-    return Array.from({ length: len + 1 }, (_, i) => i)
-  }
-  const cuts = new Set<number>([0, len])
-  for (let i = 0; i < len; i++) {
-    if (text[i] === '\n' || i < 32 || i >= len - 32) cuts.add(i)
-  }
-  const stride = Math.max(1, Math.ceil(len / 128))
-  for (let i = 0; i <= len; i += stride) cuts.add(i)
-  return [...cuts].sort((a, b) => a - b)
-}
-
-const baselineExamples = loadBaselinePassingExamples()
+// CommonMark alone contains no GFM extensions — the streaming table regression
+// fixed alongside this corpus change streamed cleanly past a table-free fuzz —
+// so the GFM-only baseline examples (tables, task lists, strikethrough) join
+// the corpus. Empty when spec.txt is not fetched (CI fetches it first).
+const baselineExamples = [...loadBaselinePassingExamples(), ...loadGfmExtensionBaselineExamples()]
 
 describe('streaming markdown convergence (CommonMark baseline fuzz)', () => {
   it('incremental cuts converge to a fresh complete StreamingMarkdownRenderer render', () => {
