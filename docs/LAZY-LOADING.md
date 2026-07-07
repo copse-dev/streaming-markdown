@@ -78,7 +78,26 @@ rerender()
 Until either runs, code fences render as safe, escaped plain text with the correct
 `hljs lang-*` class.
 
-## Mermaid — same shape, applied to a host-injected library
+## Shiki — same registry, an async-loading backend
+
+`@copse/streaming-markdown/highlighters/shiki` is a second highlighter backend
+over the same `setCodeHighlighter` registry. It sits between the two patterns
+above: like mermaid, `shiki` is an **optional peer dependency** reached only
+through variable-specifier dynamic imports (the package builds without it, and
+zero shiki bytes can land in the main entry — or in the subpath chunk itself);
+like highlight.js, the backend highlights synchronously once ready.
+
+Because shiki can only initialize asynchronously, `loadShiki()` is the load
+seam: it awaits shiki's fine-grained core (`shiki/core` +
+`createHighlighterCore` with the JavaScript regex engine — no oniguruma WASM,
+no bundled-registry entry) plus the grammar and theme modules, then registers a
+backend that highlights synchronously against the loaded instance. Until it
+resolves, fences render as escaped plain text with the same stable
+core-resolved `hljs lang-*` class, and a re-render upgrades them in place —
+identical UX to lazy highlight.js. Token colors are emitted as classes (not
+shiki's inline `style` attributes, which the sink sanitizer strips); see the
+Shiki section of [`EXTENDING.md`](EXTENDING.md#shiki) for the styling contract
+and `shikiThemeCss()`.
 
 Mermaid is **not** bundled by this package: `mermaid-source.ts` is pure string
 preparation, and the generator only emits inert scaffolding

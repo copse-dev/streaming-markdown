@@ -53,9 +53,10 @@ for await (const chunk of stream) {
   streamed without delimiter flash. See [Math in `docs/EXTENDING.md`](docs/EXTENDING.md#math-katex).
 - **Sanitize at the sink.** Rendered HTML is treated as untrusted and links are
   scheme-validated; the sink sanitizer is the security gate.
-- **Light by default.** The only runtime dependency is `entities`. highlight.js,
-  DOMPurify, mermaid, and KaTeX are **optional and lazy** — never in your bundle
-  unless you opt in. See [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md).
+- **Light by default.** The only runtime dependency is `entities`. highlight.js
+  (or Shiki — both ship as backends), DOMPurify, mermaid, and KaTeX are
+  **optional and lazy** — never in your bundle unless you opt in. See
+  [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md).
 - **Pluggable everything** — sanitizer, syntax highlighter, mermaid & math &
   custom fenced blocks, custom inline syntax (citations, highlights), and `<a>`
   routing are all injectable.

@@ -8,7 +8,7 @@ it unless you import it. Register each once, before your first render.
 | Plug point | Register with | Optional backend entry |
 | --- | --- | --- |
 | HTML sanitizer | `setSanitizerBackend` | `…/sanitizers/dompurify` |
-| Syntax highlighter | `setCodeHighlighter` | `…/highlighters/highlightjs` |
+| Syntax highlighter | `setCodeHighlighter` | `…/highlighters/highlightjs`, `…/highlighters/shiki` |
 | Diagram renderer | `setDiagramRenderer` | `…/diagrams/mermaid` |
 | Math renderer | `setMathRenderer` | `…/math/katex` |
 | Custom fenced blocks | `setFenceHandler` | — (you supply the handler) |
@@ -129,6 +129,49 @@ await loadHighlightjs()
 
 See [`LAZY-LOADING.md`](LAZY-LOADING.md) for the bundle-size rationale and how the
 same shape applies to Mermaid.
+
+### Shiki
+
+A second bundled backend uses [Shiki](https://shiki.style/) (an optional peer
+dependency you install, like mermaid — never bundled by this package). Shiki can
+only initialize asynchronously, so the backend is an async-load seam over the
+synchronous `CodeHighlighter` contract: fences render as escaped plain text
+(with the stable core-resolved `lang-*` class) until the load resolves, and a
+re-render upgrades them in place — the same UX as lazy highlight.js:
+
+```ts
+const { loadShiki, shikiThemeCss } = await import('@copse/streaming-markdown/highlighters/shiki')
+await loadShiki() // loads shiki/core + grammars + theme, registers the backend
+document.head.insertAdjacentHTML('beforeend', `<style>${shikiThemeCss()}</style>`)
+rerender() // already-rendered fences upgrade from plain → highlighted
+```
+
+`installShiki()` is the eager form: it registers the backend synchronously and
+starts the library load in the background (`await loadShiki()` to observe
+completion or a missing-peer failure).
+
+**Styling.** Shiki's stock output colors tokens with inline `style` attributes,
+which the sink sanitizer strips (`style` stays off the allowlist — it would hand
+markdown authors arbitrary CSS). The backend instead renders tokens itself with
+*class*-based colors — `<span class="shiki-f97583">` plus
+`shiki-italic`/`shiki-bold`/… — which pass the existing `class` allowlist, and
+`shikiThemeCss()` returns the theme's tiny stylesheet (one rule per palette
+color) to inject once, any way your app ships CSS. Tokens in the theme's default
+foreground are emitted bare, so your code-block text color still applies.
+
+**Theme and grammars.** The default is the `github-dark` theme and grammars
+covering the core `KNOWN_LANGUAGES` set (`shellscript` provides both the `bash`
+and `shell` ids). The first `loadShiki`/`installShiki` call can override both:
+
+```ts
+await loadShiki({ theme: 'vitesse-light', langs: ['typescript', 'python'] })
+```
+
+`theme` is a bundled shiki theme name or a pre-resolved theme registration
+object; `langs` are shiki grammar names. Two behavioural mismatches with the
+hljs backend: shiki has no auto-detection, so fences with an *empty* info string
+stay plain text, and grammars you drop from `langs` fall back to plain text even
+though the core still resolves their ids.
 
 ## Custom fenced blocks (fence handlers)
 
