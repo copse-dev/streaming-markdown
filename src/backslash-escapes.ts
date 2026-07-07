@@ -15,7 +15,7 @@
  * walks left to right: the backslash consumes the backtick before the code
  * span scanner (which runs on encoded text) ever sees it.
  */
-import { decodeHTMLStrict } from 'entities'
+import { decodeHtmlEntities } from './entity-decoder.ts'
 import { ANGLE_AUTOLINK_VERBATIM_RE, nextCodeSpan } from './inline-code-spans.ts'
 
 const ESCAPED_BASE = 0xe000
@@ -98,7 +98,7 @@ export function encodeBackslashEscapes(text: string): string {
     if (ch === '&') {
       const candidate = ENTITY_CANDIDATE_RE.exec(text.slice(i))?.[0]
       if (candidate) {
-        const decoded = decodeHTMLStrict(candidate)
+        const decoded = decodeHtmlEntities(candidate)
         if (decoded !== candidate) {
           for (const c of decoded) out += encodeLiteralChar(c)
           i += candidate.length

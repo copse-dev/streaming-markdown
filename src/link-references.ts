@@ -1,4 +1,4 @@
-import { decodeHTMLStrict } from 'entities'
+import { decodeHtmlEntities } from './entity-decoder.ts'
 import { canonicalizeEscapedPunctuation } from './backslash-escapes.ts'
 
 /** Parsed link reference definition from block-level `[label]: destination`. */
@@ -53,9 +53,11 @@ function decodeDestinationEscapes(text: string): string {
 }
 
 export function decodeHtmlCharRefs(text: string): string {
-  // Full HTML5 named + numeric character references, semicolon required
-  // (CommonMark). Escaped-at-source markup is re-encoded by the caller.
-  return decodeHTMLStrict(text)
+  // Numeric + named character references, semicolon required (CommonMark).
+  // Named coverage is the pluggable set from entity-decoder.ts (HTML4 by
+  // default, full HTML5 when a host registers a decoder). Escaped-at-source
+  // markup is re-encoded by the caller.
+  return decodeHtmlEntities(text)
 }
 
 /**

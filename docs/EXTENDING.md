@@ -348,6 +348,50 @@ including `javascript:` and `data:` — is dropped. Override it with
 default). Narrowing the list is always safe; only widen it with schemes that are
 inert as an `href`, never `javascript`/`data`/`vbscript`/`file`.
 
+## Entity decoding
+
+CommonMark decodes the full HTML5 named + numeric character-reference set, but
+the full named table is ~2,100 entries (~23 KB gzip — roughly half the core's
+transfer size). Models overwhelmingly emit only the Latin-1 / typographic / math
+tail of it, so the **default decoder is dependency-free**: it carries the 252
+classic HTML4 named references plus *all* numeric references (which need no table
+— they are algorithmic). Across the entire CommonMark spec that subset costs
+exactly **one** example (#25, which packs HTML5-only names like `&Dcaron;` and
+`&HilbertSpace;`).
+
+Need the full HTML5 set? Register a decoder — no change to how you call the
+renderer, decoding routes through it automatically:
+
+```ts
+import { setEntityDecoder, browserEntityDecoder } from '@copse/streaming-markdown'
+
+// Option A — the browser's own parser table, via a detached <textarea>.
+// Full HTML5 coverage at ZERO bundle cost. DOM only.
+setEntityDecoder(browserEntityDecoder)
+
+// Option B — the `entities` package (install it as a peer dep). Works anywhere,
+// adds the ~23 KB table to your bundle. Best for Node/SSR without a DOM.
+import { installFullEntityDecoder } from '@copse/streaming-markdown/entities/full'
+installFullEntityDecoder()
+```
+
+Both are strict (a trailing `;` is required, per CommonMark) and decode any name
+in the built-in set byte-identically to the full table.
+
+Just need a handful of extra names? Extend the built-in set instead of shipping
+the whole table:
+
+```ts
+import { addNamedEntities } from '@copse/streaming-markdown'
+
+addNamedEntities({ checkmark: '✓', myco: '🌱' }) // keys are bare names, no &/;
+```
+
+`addNamedEntities` merges (user entries win on collision), `setNamedEntities`
+replaces the user layer, `getNamedEntities` returns the effective set, and
+`resetEntityDecoder` restores the default decoder and clears user names. These
+affect the built-in decoder only — a `setEntityDecoder` decoder owns its own set.
+
 ## Widening the sanitizer allowlist
 
 The sink allowlist in `sanitize.ts` mirrors exactly what the renderer emits and

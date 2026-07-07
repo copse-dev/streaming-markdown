@@ -23,6 +23,7 @@ import { resolve } from 'node:path'
 import { renderMarkdown } from './renderer.ts'
 import { stripAppCodeDecorations } from './highlight.ts'
 import { installHighlightjs } from './highlight-hljs.ts'
+import { installFullEntityDecoder } from './entity-decoder-full.ts'
 import { stripAppImageAttributes, stripAppLinkAttributes } from './inline-links.ts'
 import { normalizeHtml } from '../tests/commonmark/normalize.ts'
 import {
@@ -38,6 +39,11 @@ import {
 // The baseline was recorded with highlighting on; register the backend so the
 // conformance render matches it (span decorations are stripped before comparison).
 installHighlightjs()
+// Full CommonMark conformance requires the complete HTML5 named-reference set
+// (the spec's entity section exercises the long tail, e.g. `&Dcaron;`,
+// `&HilbertSpace;`). The default decoder ships only the HTML4 subset, so register
+// the full `entities`-backed decoder here — this measures config #3 (full).
+installFullEntityDecoder()
 
 const SPEC_VERSION = commonMarkSpecVersion()
 const spec = loadCommonMarkSpec()
