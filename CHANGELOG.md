@@ -5,6 +5,35 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-07
+
+### Features
+
+- showcase math, footnotes, alerts, and the Shiki backend (#79) (#82) (`e849c1d`)
+- gate math prose syntax on renderer registration, add setMathSyntax (#78) (#81) (`07cbed1`)
+- GFM footnotes and GitHub alerts in the core parser (#76) (`e68098d`)
+- Shiki highlighter backend behind ./highlighters/shiki (#71) (#74) (`a758456`)
+- first-class math support with a lazy KaTeX backend (`math/katex`) (#75) (`3706af6`)
+
+### Bug Fixes
+
+- keep a streaming table separator with its header in one block (#77) (`e49cb9f`)
+
+### Tests
+
+- GFM streaming fuzz corpus + mid-stream display invariants (#80) (`005b035`)
+
+### Continuous Integration
+
+- replace pick-runner probe jobs with CHECKS_RUNNER variable routing (#69) (`498d1b1`)
+- dispatch agent-pane sync on every published release (#68) (`5000517`)
+
+### Other Changes
+
+- Refactor pending block styling to use :has() for unified highlights (#73) (`9da3499`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v0.5.0...v0.6.0
+
 ## [0.5.0] - 2026-07-06
 
 ### Features
