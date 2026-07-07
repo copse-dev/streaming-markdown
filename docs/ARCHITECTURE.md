@@ -71,7 +71,15 @@ When extending the renderer or its CSS, preserve these rules:
   ```` ```math ```` fences and `$$ … $$` / `\[ … \]` display blocks (own-line delimiters
   or a one-line `$$E=mc^2$$`; a tokenizer construct, `math_block`), and
   `math-inline--pending` spans for `$…$` / `$$…$$` / `\(…\)` inline math (a built-in
-  pass in `inline-math.ts`, shielded through the inline-pass emit table). Single-dollar
+  pass in `inline-math.ts`, shielded through the inline-pass emit table). The **prose
+  grammar is gated on renderer registration (#78)**: `$…$`-style delimiters have
+  realistic non-math readings (`set $PATH$ properly`), so the `math_block` construct,
+  the inline pass, and their streaming holds activate only once `setMathRenderer` gets a
+  backend — preserving the invariant that output is byte-identical until a host
+  registers something — with `setMathSyntax(true | false | null)` as the explicit
+  override (`math-syntax.ts`, a dependency-free leaf flag both the tokenizer and the
+  inline pipeline read). The explicitly labeled ```` ```math ```` fence is never gated,
+  like mermaid's. With the grammar on: single-dollar
   math carries remark-math's currency guards (no whitespace just inside the delimiters,
   no digit after the closing `$`), so `$20 and $30` stays prose; escaped `\$`, code
   spans/fences, and link destinations never delimit. Recognizing `\(…\)` / `\[…\]` — the
@@ -132,9 +140,9 @@ When extending the renderer or its CSS, preserve these rules:
   using tags/attributes beyond the core allowlist must widen it via `setSanitizeExtension`.
   Passes may run more than once over nested link-label text and must be idempotent
   (placeholder tokens make emitted output inert automatically).
-- **Inline formatting order.** Fenced code → inline code → inline math (#70; before
-  emphasis because math content is verbatim, like code — `$a_i * b$` must reach KaTeX
-  untouched) → emphasis (delimiter stack) →
+- **Inline formatting order.** Fenced code → inline code → inline math (#70, when the
+  math prose grammar is enabled (#78); before emphasis because math content is verbatim,
+  like code — `$a_i * b$` must reach KaTeX untouched) → emphasis (delimiter stack) →
   GFM strikethrough → registered `before-links` inline passes → markdown links → bare HTTP
   autolinks → registered `after-links` passes. Emphasis runs before links so
   `*foo [bar](/url)*` resolves correctly; link labels may already contain `<em>` / `<strong>`

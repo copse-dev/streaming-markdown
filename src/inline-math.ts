@@ -23,6 +23,7 @@ import { canonicalizeEscapedPunctuation } from './backslash-escapes.ts'
 import { escapeHtml } from './escape.ts'
 import { INLINE_HTML_SHIELD_RE, maskLinkSpans } from './inline-emphasis.ts'
 import { inlinePassContext } from './inline-passes.ts'
+import { isMathSyntaxEnabled } from './math-syntax.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 
 // The render pass runs on encoded text (`encodeBackslashEscapes`), where `\(`
@@ -120,11 +121,14 @@ function dollarGuardsPass(
  * pipeline text: code spans and angle autolinks are already rendered (masked
  * via the inline-HTML shield), backslash escapes are PUA characters, and
  * complete link spans are masked so destinations can never host math.
+ * Gated (#78): a no-op unless math prose syntax is enabled, so `$PATH$`-style
+ * prose is untouched (and output byte-identical) in non-math hosts.
  */
 export function renderInlineMathSpans(
   text: string,
   linkRefs: LinkReferenceMap = new Map(),
 ): string {
+  if (!isMathSyntaxEnabled()) return text
   if (!text.includes('$') && !text.includes(ESCAPED_LPAREN)) return text
   const mask = maskLinkSpans(text, inlineHtmlMask(text), linkRefs)
   let out = ''
@@ -215,9 +219,11 @@ function findRawParenClose(s: string, openEnd: number, mask: boolean[]): number 
  * directly followed by a digit (`$20 and`) — or a trailing `$` directly after
  * one (`20$`) — is far more likely money than an opening delimiter, so it is
  * left visible; if it later completes as valid math, the at-rest render still
- * upgrades it.
+ * upgrades it. Gated (#78): never holds while math prose syntax is off — a
+ * non-math host's `$x+` tail must stay visible.
  */
 export function mathHoldStart(s: string, mask: boolean[]): number {
+  if (!isMathSyntaxEnabled()) return s.length
   let i = 0
   while (i < s.length) {
     if (mask[i]) {

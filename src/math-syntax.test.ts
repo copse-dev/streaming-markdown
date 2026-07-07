@@ -1,0 +1,179 @@
+import '../tests/setup-dom-jsdom.ts'
+import { describe, it, afterEach } from 'node:test'
+import assert from 'node:assert/strict'
+import { tokenizeBlocks } from './block-tokenizer.ts'
+import { hydratePendingMath, type MathRenderer, setMathRenderer } from './math.ts'
+import { getMathSyntax, setMathSyntax } from './math-syntax.ts'
+import { renderMarkdown } from './renderer.ts'
+import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import {
+  pendingHoldIndex,
+  renderStreamingMarkdown,
+  StreamingMarkdownRenderer,
+} from './streaming.ts'
+
+// The math prose-syntax gate (#78): recognizing `$…$` / `$$…$$` / `\(…\)` /
+// `\[…\]` in prose is a grammar change with realistic false positives
+// (`set $PATH$ properly`), so it activates only when a math renderer is
+// registered — restoring the invariant that output is byte-identical until a
+// host registers something — with `setMathSyntax` as the explicit override.
+// The ```math FENCE stays always-on (explicit author intent, like mermaid).
+
+const stubRenderer: MathRenderer = {
+  render: (source) => Promise.resolve({ html: `<span class="katex">${source}</span>` }),
+}
+
+/** Prose fixtures that must render as literal text while the gate is off. */
+const PROSE_FIXTURES: [string, string][] = [
+  ['env var', 'set $PATH$ properly'],
+  ['inline dollar', 'Euler: $e^{i\\pi}+1=0$ wow'],
+  ['inline double', 'so $$x^2$$ mid'],
+  ['currency', 'costs $20 and $30 total'],
+  ['dollar block', 'intro\n\n$$\nE = mc^2\n$$\n\noutro'],
+  ['one-line dollar block', '$$E = mc^2$$'],
+  ['bracket block', '\\[\nE = mc^2\n\\]'],
+  ['one-line bracket block', '\\[ E = mc^2 \\]'],
+  ['escaped parens', 'so \\(a_i + b\\) mid'],
+]
+
+afterEach(() => {
+  setMathSyntax(null)
+  setMathRenderer(null)
+})
+
+describe('gate off (default): byte-identical pre-math output', () => {
+  it('defaults to no override (null)', () => {
+    assert.equal(getMathSyntax(), null)
+  })
+
+  it('emits no math scaffolding for any prose fixture', () => {
+    for (const [name, md] of PROSE_FIXTURES) {
+      const html = renderMarkdown(md)
+      assert.doesNotMatch(html, /math-block|math-inline/, name)
+    }
+  })
+
+  it('renders `set $PATH$ properly` (and friends) as literal prose', () => {
+    assert.equal(renderMarkdown('set $PATH$ properly'), '<p>set $PATH$ properly</p>')
+    assert.equal(renderMarkdown('Euler: $e^2$ wow'), '<p>Euler: $e^2$ wow</p>')
+    // Escaped punctuation keeps its CommonMark literal reading.
+    assert.equal(renderMarkdown('so \\(a + b\\) mid'), '<p>so (a + b) mid</p>')
+    assert.equal(renderMarkdown('\\[ E = mc^2 \\]'), '<p>[ E = mc^2 ]</p>')
+  })
+
+  it('tokenizes $$ delimiter lines as ordinary paragraphs (no math_block)', () => {
+    const kinds = tokenizeBlocks('$$\nE = mc^2\n$$\n').map((t) => t.kind)
+    assert.ok(!kinds.includes('math_block'))
+    assert.deepEqual(kinds, ['paragraph'])
+  })
+
+  it('does not hold streaming tails (`$x+` stays visible)', () => {
+    for (const line of ['see $x plus', 'a $$half', 'ok \\(a+b', 'trailing $']) {
+      assert.equal(pendingHoldIndex(line), line.length, line)
+    }
+  })
+
+  it('streams a $$ line as plain pending prose, and both emitters converge', () => {
+    const html = renderStreamingMarkdown('$$\nE = mc')
+    assert.doesNotMatch(html, /math-block/)
+
+    const doc = 'intro\n\n$$\nE = mc^2\n$$\n\nInline $a+b$ end.\n'
+    const host = document.createElement('div')
+    const renderer = new StreamingMarkdownRenderer(host)
+    for (let i = 1; i <= doc.length; i++) renderer.update(doc.slice(0, i))
+    const display = host.querySelector('.stream-complete')?.innerHTML
+    assert.equal(display, sanitizeRenderedMarkdown(renderMarkdown(doc)))
+    assert.doesNotMatch(display ?? '', /math-block|math-inline/)
+  })
+
+  it('the ```math fence is NOT gated (explicit author intent, like mermaid)', () => {
+    const html = renderMarkdown('```math\nE = mc^2\n```')
+    assert.match(
+      html,
+      /<div class="math-block math-block--pending"><pre class="math">E = mc\^2<\/pre><\/div>/,
+    )
+    // …including its forming state.
+    assert.match(renderStreamingMarkdown('```math\nE = m'), /math-block--pending/)
+  })
+})
+
+describe('gate on via renderer registration', () => {
+  it('setMathRenderer(backend) activates the prose grammar', () => {
+    setMathRenderer(stubRenderer)
+    assert.match(renderMarkdown('set $PATH$ properly'), /math-inline math-inline--pending/)
+    assert.match(renderMarkdown('$$\nE = mc^2\n$$'), /math-block math-block--pending/)
+  })
+
+  it('setMathRenderer(null) restores literal prose output', () => {
+    setMathRenderer(stubRenderer)
+    assert.match(renderMarkdown('$x$'), /math-inline/)
+    setMathRenderer(null)
+    assert.equal(renderMarkdown('$x$'), '<p>$x$</p>')
+    assert.equal(pendingHoldIndex('see $x plus'), 'see $x plus'.length)
+  })
+
+  it('holds streaming tails once a renderer is registered', () => {
+    setMathRenderer(stubRenderer)
+    assert.equal('see $x plus'.slice(0, pendingHoldIndex('see $x plus')), 'see ')
+  })
+
+  it('end-to-end: register, render, hydrate (the loadKatex one-call story)', async () => {
+    // installKatex()/loadKatex() activate the grammar purely through their
+    // existing setMathRenderer side effect — modelled here with the stub.
+    setMathRenderer(stubRenderer)
+    const host = document.createElement('div')
+    host.innerHTML = renderMarkdown('$$\nE = mc^2\n$$')
+    const count = await hydratePendingMath(host)
+    assert.equal(count, 1)
+    assert.ok(host.querySelector('.math-block--rendered .katex'))
+  })
+})
+
+describe('setMathSyntax override', () => {
+  it('true forces the grammar on without a renderer (scaffolding-only hosts)', async () => {
+    setMathSyntax(true)
+    assert.equal(getMathSyntax(), true)
+    const html = renderMarkdown('inline $a+b$ here')
+    assert.match(html, /math-inline math-inline--pending/)
+    // No renderer: hydration is a no-op and the scaffolding stays pending.
+    const host = document.createElement('div')
+    host.innerHTML = html
+    assert.equal(await hydratePendingMath(host), 0)
+    assert.ok(host.querySelector('.math-inline--pending'))
+  })
+
+  it('false forces the grammar off even with a renderer registered', () => {
+    setMathRenderer(stubRenderer)
+    setMathSyntax(false)
+    assert.equal(renderMarkdown('set $PATH$ properly'), '<p>set $PATH$ properly</p>')
+    assert.doesNotMatch(renderMarkdown('$$\nx\n$$'), /math-block/)
+    assert.equal(pendingHoldIndex('see $x plus'), 'see $x plus'.length)
+    // The explicitly labeled fence still works — that is the KaTeX-for-fences-
+    // only configuration.
+    assert.match(renderMarkdown('```math\nx\n```'), /math-block--pending/)
+  })
+
+  it('null defers back to renderer registration', () => {
+    setMathSyntax(false)
+    setMathRenderer(stubRenderer)
+    assert.doesNotMatch(renderMarkdown('$x$'), /math-inline/)
+    setMathSyntax(null)
+    assert.match(renderMarkdown('$x$'), /math-inline/)
+    setMathRenderer(null)
+    assert.doesNotMatch(renderMarkdown('$x$'), /math-inline/)
+  })
+
+  it('a toggle between renders re-parses cleanly at rest', () => {
+    // The flag is read by the shared tokenizer/pipeline: whole at-rest renders
+    // are consistent under whichever state is current. (Mid-stream toggles
+    // only affect regions rendered afterwards — recreate the streaming
+    // renderer for a clean switch; see setMathSyntax docs.)
+    const md = '$$\nx\n$$'
+    setMathSyntax(true)
+    assert.match(renderMarkdown(md), /math-block/)
+    setMathSyntax(false)
+    assert.doesNotMatch(renderMarkdown(md), /math-block/)
+    setMathSyntax(true)
+    assert.match(renderMarkdown(md), /math-block/)
+  })
+})

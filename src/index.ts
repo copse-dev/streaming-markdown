@@ -91,9 +91,12 @@ export {
 // inert `math-block--pending` / `math-inline--pending` scaffolding for
 // ```math fences, `$$…$$` / `\[…\]` display blocks, and `$…$` / `\(…\)` inline
 // math; `hydratePendingMath` swaps in rendered HTML once a renderer is
-// registered. The KaTeX backend stays behind the
-// `@copse/streaming-markdown/math/katex` entry so its library is only fetched
-// when a host opts in — see docs/LAZY-LOADING.md.
+// registered. Registering the renderer is also what turns the *prose* math
+// grammar on (#78) — without one, `$…$`-style text stays ordinary prose and
+// output is byte-identical to a math-free build; `setMathSyntax` overrides that
+// default in either direction (the ```math fence is always on). The KaTeX
+// backend stays behind the `@copse/streaming-markdown/math/katex` entry so its
+// library is only fetched when a host opts in — see docs/LAZY-LOADING.md.
 export {
   getMathRenderer,
   type HydrateMathOptions,
@@ -104,6 +107,7 @@ export {
   PENDING_MATH_SELECTOR,
   setMathRenderer,
 } from './math.ts'
+export { getMathSyntax, setMathSyntax } from './math-syntax.ts'
 export {
   appLinkDecorator,
   DEFAULT_SAFE_HREF_SCHEMES,

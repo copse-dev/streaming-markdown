@@ -8,6 +8,7 @@ import {
   type MathRenderer,
   setMathRenderer,
 } from './math.ts'
+import { setMathSyntax } from './math-syntax.ts'
 import { renderMarkdown } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 
@@ -15,6 +16,11 @@ import { sanitizeRenderedMarkdown } from './sanitize.ts'
 // same inert two-phase scaffolding (escaped source inside allowlisted tags),
 // and `hydratePendingMath` upgrades it after the sink sanitizer — the mermaid
 // shape, with KaTeX behind `@copse/streaming-markdown/math/katex`.
+//
+// Math prose syntax is gated on renderer registration (#78); this file tests
+// the grammar itself, so force it on for the whole file (node:test isolates
+// each file in its own process). The gate is covered by math-syntax.test.ts.
+setMathSyntax(true)
 
 const BLOCK_SCAFFOLD_RE =
   /<div class="math-block math-block--pending"><pre class="math">([^<]*)<\/pre><\/div>/

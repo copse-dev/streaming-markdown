@@ -37,6 +37,8 @@ const EXPECTED_FUNCTIONS = [
   'getMathRenderer',
   'hydratePendingMath',
   'setMathRenderer',
+  'getMathSyntax',
+  'setMathSyntax',
   'appLinkDecorator',
   'getSafeHrefSchemes',
   'renderAnchor',
