@@ -2,6 +2,7 @@ import '../tests/setup-dom-jsdom.ts'
 import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { hydratePendingMath, setMathRenderer } from './math.ts'
+import { setMathSyntax } from './math-syntax.ts'
 import { renderMarkdown } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import {
@@ -13,6 +14,12 @@ import {
 // Streaming math (#70): open `$$` / `\[` blocks (and ```math fences) show a
 // forming pending-math state instead of raw delimiters; half-open inline `$x+`
 // holds via pendingHoldIndex; and both emitters converge on the at-rest render.
+//
+// Math prose syntax is gated on renderer registration (#78); this file tests
+// streaming behaviour with the grammar active, so force it on for the whole
+// file. The gate itself (holds off, byte-identical output) is covered by
+// math-syntax.test.ts.
+setMathSyntax(true)
 
 /** Visible streaming HTML (committed + forming + live tail), as the fuzz test extracts it. */
 function extractStreamingDisplay(host: HTMLElement): string {

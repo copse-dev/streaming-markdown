@@ -65,16 +65,21 @@ export const katexMathRenderer: MathRenderer = {
   },
 }
 
-/** Register the KaTeX backend synchronously (the library still loads lazily on first render). */
+/**
+ * Register the KaTeX backend synchronously (the library still loads lazily on
+ * first render). Registration also activates the `$…$`-style prose math grammar
+ * via `setMathRenderer` (#78) — this one call is the whole opt-in.
+ */
 export function installKatex(): MathRenderer {
   setMathRenderer(katexMathRenderer)
   return katexMathRenderer
 }
 
 /**
- * Lazy convenience: register the KaTeX backend. When called through a dynamic
- * `import('.../math/katex')`, the katex library is a code-split chunk fetched
- * at this point (or on the first {@link katexMathRenderer.render}). Idempotent.
+ * Lazy convenience: register the KaTeX backend (activating the prose math
+ * grammar, #78). When called through a dynamic `import('.../math/katex')`, the
+ * katex library is a code-split chunk fetched at this point (or on the first
+ * {@link katexMathRenderer.render}). Idempotent.
  */
 export function loadKatex(): Promise<MathRenderer> {
   return Promise.resolve(installKatex())

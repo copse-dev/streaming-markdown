@@ -145,7 +145,12 @@ Math (#70) mirrors mermaid exactly. The generator emits inert scaffolding for
 every math form — ```` ```math ```` fences, `$$ … $$` / `\[ … \]` display
 blocks, and `$…$` / `\(…\)` inline spans
 (`math-block--pending` / `math-inline--pending`, escaped TeX source inside) —
-so the KaTeX payload is never needed at render time:
+so the KaTeX payload is never needed at render time. The *prose* delimiter
+grammar (everything except the always-on ```` ```math ```` fence) is itself
+gated on registration (#78): until `setMathRenderer` gets a backend — or a
+host forces it with `setMathSyntax(true)` — `$…$`-style text stays ordinary
+prose and output is byte-identical to a math-free build, so hosts that never
+opt in pay nothing at all:
 
 - **`math.ts` (core)** carries no KaTeX code: the registry (`setMathRenderer` /
   `getMathRenderer`), the `MathRenderer` interface, and
@@ -163,7 +168,7 @@ so the KaTeX payload is never needed at render time:
 import { hydratePendingMath } from '@copse/streaming-markdown'
 
 const { loadKatex } = await import('@copse/streaming-markdown/math/katex')
-await loadKatex()                   // registers the backend; library loads lazily
+await loadKatex()                   // registers the backend (activating the prose grammar)
 await hydratePendingMath(messageEl) // pending → rendered KaTeX HTML
 ```
 

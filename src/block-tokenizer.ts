@@ -30,6 +30,7 @@ import {
   type FootnoteDefinition,
   type FootnoteDefinitionMap,
 } from './footnotes.ts'
+import { isMathSyntaxEnabled } from './math-syntax.ts'
 
 export type BlockKind =
   | 'blank'
@@ -192,10 +193,11 @@ export function tableColumnsMatch(headerLine: string, sepLine: string): boolean 
 /**
  * A display-math delimiter line interrupts open block constructs the way a
  * fence opener does (`$$` / `\[` on its own line, or a complete one-line
- * `$$…$$` block — see math-block.ts).
+ * `$$…$$` block — see math-block.ts). Gated (#78): with math prose syntax off
+ * (no renderer registered, no override), these lines are ordinary prose.
  */
 function isMathBlockInterruptLine(line: string): boolean {
-  return mathBlockDelimiterLine(line) !== null
+  return isMathSyntaxEnabled() && mathBlockDelimiterLine(line) !== null
 }
 
 /**
@@ -516,10 +518,14 @@ export function tokenizeBlocks(source: string): BlockToken[] {
     // complete one-line `$$…$$` / `\[…\]` is a whole block. A still-streaming
     // final line that starts with an opener is held `open` until its newline
     // decides between a one-line block and ordinary prose (`$$ x` terminated
-    // without a closer is a paragraph line, never math).
-    const math = line.terminated
-      ? mathBlockDelimiterLine(line.text)
-      : mathBlockOpenCandidate(line.text)
+    // without a closer is a paragraph line, never math). Gated (#78): the
+    // construct exists only while math prose syntax is enabled — off, these
+    // lines tokenize exactly as they did before math support landed.
+    const math = !isMathSyntaxEnabled()
+      ? null
+      : line.terminated
+        ? mathBlockDelimiterLine(line.text)
+        : mathBlockOpenCandidate(line.text)
     if (math) {
       if (!line.terminated) {
         // Necessarily the final line: hold it as an open math block.
@@ -995,7 +1001,7 @@ export function isAmbiguousBlockLine(line: string): boolean {
   if (ATX_HEADING_RE.test(line)) return true
   if (THEMATIC_BREAK_RE.test(line)) return true
   if (FENCE_OPEN_RE.test(line)) return true
-  if (mathBlockOpenCandidate(line) !== null) return true
+  if (isMathSyntaxEnabled() && mathBlockOpenCandidate(line) !== null) return true
   if (LIST_ITEM_RE.test(line)) return true
   if (BLOCKQUOTE_RE.test(line)) return true
   if (isGfmTableRowLine(line)) return true

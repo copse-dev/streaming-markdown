@@ -1,4 +1,5 @@
 import { setHostTrustedHtml, type TrustedHTMLValue } from './html-sink.ts'
+import { setMathSyntaxRendererRegistered } from './math-syntax.ts'
 
 // The math-renderer registry (#70): the KaTeX analogue of the pluggable diagram
 // renderer. Like mermaid, the KaTeX *library* is never bundled by this package —
@@ -44,10 +45,13 @@ export const PENDING_MATH_SELECTOR =
 let mathRenderer: MathRenderer | null = null
 
 /**
- * Register the active {@link MathRenderer} (or `null` to disable hydration, so
- * pending math keeps showing its inert escaped source). Set it once, before the
- * first {@link hydratePendingMath} call — from
- * `@copse/streaming-markdown/math/katex`:
+ * Register the active {@link MathRenderer} (or `null` to disable). Set it once,
+ * before the first render: registration is also what activates the `$…$` /
+ * `$$…$$` / `\(…\)` / `\[…\]` *prose syntax* (#78) — without a backend (or an
+ * explicit `setMathSyntax(true)` override) those delimiters stay ordinary prose
+ * and output is byte-identical to a math-free build, so non-math hosts never
+ * accumulate pending scaffolding that nothing will hydrate. Passing `null`
+ * restores that state. From `@copse/streaming-markdown/math/katex`:
  *
  * ```ts
  * import { setMathRenderer } from '@copse/streaming-markdown'
@@ -64,6 +68,7 @@ let mathRenderer: MathRenderer | null = null
  */
 export function setMathRenderer(renderer: MathRenderer | null): void {
   mathRenderer = renderer
+  setMathSyntaxRendererRegistered(renderer !== null)
 }
 
 /** The active {@link MathRenderer}, or `null` when none has been registered. */

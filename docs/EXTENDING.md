@@ -11,6 +11,7 @@ it unless you import it. Register each once, before your first render.
 | Syntax highlighter | `setCodeHighlighter` | `…/highlighters/highlightjs`, `…/highlighters/shiki` |
 | Diagram renderer | `setDiagramRenderer` | `…/diagrams/mermaid` |
 | Math renderer | `setMathRenderer` | `…/math/katex` |
+| Math prose syntax (override) | `setMathSyntax` | — |
 | Custom fenced blocks | `setFenceHandler` | — (you supply the handler) |
 | Custom inline syntax | `setInlinePasses` | — (you supply the pass) |
 | `<a>` routing | `setLinkDecorator` | — |
@@ -210,8 +211,8 @@ blocks.
 
 ## Math (KaTeX)
 
-Math is first-class syntax, on by default. Four surface forms emit the same
-inert two-phase scaffolding:
+Math is first-class syntax. Four surface forms emit the same inert two-phase
+scaffolding:
 
 - ```` ```math ```` fences and `$$ … $$` / `\[ … \]` display blocks (delimiters
   on their own lines, or a one-line `$$E=mc^2$$` / `\[ E=mc^2 \]`) →
@@ -219,18 +220,35 @@ inert two-phase scaffolding:
 - `$x$` / `$$x$$` / `\(x\)` inline math →
   `<span class="math-inline math-inline--pending">…escaped TeX…</span>`
 
-Single-dollar math carries remark-math's currency guards — no whitespace just
-inside the delimiters and no digit right after the closing `$` — so `$20 and
-$30` stays prose; escaped `\$` and `$` inside code spans/fences/link
-destinations never delimit. While streaming, a half-open `$$` block shows a
-forming pending-math state and a half-open `$x+` holds, so raw delimiters never
-flash. (Recognizing `\(…\)`/`\[…\]` is a deliberate, documented divergence from
-CommonMark's escaped-punctuation reading — OpenAI models emit bracket
-delimiters — gated to non-empty bodies so the spec suites still pass.)
+**The prose grammar is off until you register a renderer (#78).** `$…$`-style
+delimiters in ordinary prose have realistic non-math readings (`set $PATH$
+properly`, prices), so by default they stay literal text and output is
+byte-identical to a math-free build — no pending scaffolding that nothing will
+hydrate. `setMathRenderer(backend)` (which `installKatex()` / `loadKatex()`
+call for you) turns the prose grammar on; `setMathRenderer(null)` restores the
+literal reading. `setMathSyntax(true | false | null)` is the explicit override:
+`true` forces the grammar on without a renderer (scaffolding-only hosts that
+hydrate elsewhere), `false` forces it off even with a renderer (KaTeX for
+fences only), `null` — the default — defers to renderer registration. Set it
+once, before the first render; a mid-stream flip only affects regions rendered
+afterwards, so recreate the streaming renderer for a clean switch. The
+explicitly labeled ```` ```math ```` **fence is never gated** — like a
+```` ```mermaid ```` fence, it is unambiguous author intent.
+
+With the grammar on: single-dollar math carries remark-math's currency
+guards — no whitespace just inside the delimiters and no digit right after the
+closing `$` — so `$20 and $30` stays prose; escaped `\$` and `$` inside code
+spans/fences/link destinations never delimit. While streaming, a half-open
+`$$` block shows a forming pending-math state and a half-open `$x+` holds, so
+raw delimiters never flash. (Recognizing `\(…\)`/`\[…\]` is a deliberate,
+documented divergence from CommonMark's escaped-punctuation reading — OpenAI
+models emit bracket delimiters — gated to non-empty bodies so the spec suites
+still pass.)
 
 The core ships **zero KaTeX code**: without a backend, pending math shows its
 escaped TeX source. Register the KaTeX backend (an optional peer dependency you
-install) and hydrate after the sink, exactly like mermaid:
+install) and hydrate after the sink, exactly like mermaid — one call activates
+the grammar and the renderer together:
 
 ```ts
 import { hydratePendingMath } from '@copse/streaming-markdown'

@@ -51,7 +51,10 @@ for await (const chunk of stream) {
 - **First-class math.** ```` ```math ```` fences, `$$…$$` and `\[…\]` display
   blocks (the OpenAI delimiter style), and `$…$` / `\(…\)` inline math with
   currency guards (`$20 and $30` stays prose) — rendered lazily via KaTeX,
-  streamed without delimiter flash. See [Math in `docs/EXTENDING.md`](docs/EXTENDING.md#math-katex).
+  streamed without delimiter flash. The prose delimiters activate when you
+  register a math renderer (`loadKatex()` is enough); until then output stays
+  byte-identical to a math-free build (`setMathSyntax` overrides either way).
+  See [Math in `docs/EXTENDING.md`](docs/EXTENDING.md#math-katex).
 - **Sanitize at the sink.** Rendered HTML is treated as untrusted and links are
   scheme-validated; the sink sanitizer is the security gate.
 - **Light by default.** The only runtime dependency is `entities`. highlight.js
