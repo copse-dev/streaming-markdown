@@ -178,3 +178,69 @@ The host also loads KaTeX's stylesheet/fonts (`katex/dist/katex.min.css`).
 re-sanitized, matching the mermaid invariant; `hydratePendingMath(root,
 { transformHtml })` is the seam for a host that wants to (and the required hook
 under Trusted Types enforcement).
+
+## Input smoothing — an opt-in reveal cadence (#84)
+
+Chunky token arrival shows as chunky updates: an LLM transport delivers text in
+bursts, and the incremental DOM emitter renders exactly what it is given, when it
+is given it. The optional **input smoother** steadies that reveal — it sits
+between the host's chunk arrival and `renderer.update()` and releases the growing
+string a few characters per frame (via `requestAnimationFrame`) instead of in raw
+token bursts.
+
+It lives behind `@copse/streaming-markdown/smoothing` and is **never** re-exported
+from the main entry, so a host that doesn't import it pays zero bytes and the
+default emitter behaviour is byte-for-byte unchanged (the same "zero bytes in the
+main bundle" contract as the highlighter/mermaid/KaTeX backends above —
+[`src/smoothing.test.ts`](../src/smoothing.test.ts) asserts an esbuild bundle of
+the main entry contains none of the smoother's code).
+
+```ts
+import { StreamingMarkdownRenderer } from '@copse/streaming-markdown'
+import { createInputSmoother } from '@copse/streaming-markdown/smoothing'
+
+const renderer = new StreamingMarkdownRenderer(host)
+const smoother = createInputSmoother({
+  update: (text) => renderer.update(text), // the sink for each revealed prefix
+  charsPerSecond: 600,                     // the rate knob (default 600)
+})
+
+for await (const fullTextSoFar of stream) smoother.push(fullTextSoFar)
+smoother.flush()   // stream end / final chunk: release everything now — no lag
+smoother.dispose() // tear down (cancels any pending frame)
+```
+
+`push(text)` takes the **full accumulated message so far** (the same argument
+`renderer.update` takes), so every value the smoother releases is a *prefix* of
+the target. That is exactly the streaming contract the pending-state machinery
+and DOM morph already converge on, so smoothing composes with them for free
+rather than fighting the morph.
+
+### Why input smoothing, not output animation
+
+Two designs were on the table (see #84): throttle the *input* string fed to
+`update()`, or animate the *output* (CSS/opacity transitions on newly-added
+nodes). We ship **input smoothing only** — it is lower-risk and framework- and
+theme-agnostic, and it reuses the renderer's existing convergence guarantees
+instead of introducing a second animation system that could fight the DOM morph.
+**CSS entrance animations are deliberately left to the host**: a host that wants
+nodes to fade in can style the emitter's class hooks (`.stream-pending`,
+`.stream-complete`) with its own transitions — that is a presentation concern the
+package does not own.
+
+### Guarantees
+
+- **Convergence.** After `flush()` the sink has seen the full text, so the
+  rendered DOM equals a single un-smoothed `update(fullText)` — asserted against
+  a direct full-string render in the tests.
+- **`prefers-reduced-motion`.** Honoured by default: when the environment reports
+  reduced motion, smoothing is disabled and `push` passes straight through
+  immediately (`respectReducedMotion: false` overrides; `disabled: true` forces
+  pass-through unconditionally). `smoother.enabled` reports which mode is active.
+- **No completion lag.** `flush()` releases the whole pending target at once and
+  stops the loop, so stream end never carries artificial delay.
+- **Environment-guarded.** `requestAnimationFrame` / `cancelAnimationFrame`,
+  `performance.now`, and `matchMedia` are all read through defaulted, injectable
+  seams (`requestFrame` / `cancelFrame` / `now` / `matchMedia` options), so the
+  smoother runs — and is unit-tested with a fake clock — under node/jsdom where
+  those globals may be absent.
