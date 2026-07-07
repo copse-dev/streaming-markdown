@@ -103,6 +103,8 @@ variables, and native-nesting note — are in [`docs/EXTENDING.md`](docs/EXTENDI
 
 - **[`docs/EXTENDING.md`](docs/EXTENDING.md)** — every plug point (sanitizer,
   highlighter, custom fenced blocks, link routing, images, scheme allowlist) and styling.
+- **[`docs/RECIPES.md`](docs/RECIPES.md)** — host-UI recipes: how to add copy
+  buttons (and similar chrome) to code blocks without fighting the streaming morph.
 - **[`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md)** — why the heavy deps are
   optional and lazy, and how the code-split loading works.
 - **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — design invariants, the
