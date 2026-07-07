@@ -15,12 +15,30 @@ import { type LinkReferenceMap } from './link-references.ts'
 // and S (spec 354 — `£`/`€` count like `$`).
 const UNICODE_PUNCTUATION_RE = /[\p{P}\p{S}]/u
 
+/**
+ * Opt-in override (default `null`) that excludes characters from the flanking
+ * *punctuation* class — the seam the CJK entry (`@copse/streaming-markdown/cjk`,
+ * `src/cjk.ts`) uses to treat full-width/ideographic punctuation as
+ * non-punctuation so emphasis pairs around `「…」` / `。` the way CJK authors
+ * expect (markdown-cjk-friendly). Left `null` in the default build, so Latin
+ * output and the CommonMark/GFM conformance suites are byte-identical — the
+ * predicate below short-circuits before ever calling it.
+ */
+let flankingPunctuationExclusion: ((ch: string) => boolean) | null = null
+
+/** Inject (or clear with `null`) the flanking-punctuation exclusion. */
+export function setFlankingPunctuationExclusion(fn: ((ch: string) => boolean) | null): void {
+  flankingPunctuationExclusion = fn
+}
+
 function isFlankingWhitespace(ch: string): boolean {
   return ch === '' || /\s/.test(ch)
 }
 
 function isFlankingPunctuation(ch: string): boolean {
-  return ch !== '' && UNICODE_PUNCTUATION_RE.test(ch)
+  if (ch === '' || !UNICODE_PUNCTUATION_RE.test(ch)) return false
+  if (flankingPunctuationExclusion !== null && flankingPunctuationExclusion(ch)) return false
+  return true
 }
 
 export function isLeftFlanking(prev: string, next: string): boolean {

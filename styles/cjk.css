@@ -1,0 +1,62 @@
+/*
+ * @copse/streaming-markdown — optional CJK (East-Asian) text styles
+ *
+ * Line-break and inter-script spacing for Chinese / Japanese / Korean prose is
+ * the *host's* CSS to own, not the renderer's — the renderer emits the same
+ * structural HTML for every script. This sheet is the ready-made version of
+ * that CSS; it is NOT imported by `core.css` / `default.css` and carries no
+ * weight unless you opt in:
+ *
+ *   import '@copse/streaming-markdown/styles/cjk.css'
+ *
+ * It pairs with the opt-in `@copse/streaming-markdown/cjk` JS entry (correct
+ * emphasis / autolink boundaries around full-width punctuation), but the two are
+ * independent — this file is pure presentation and needs no JS.
+ *
+ * Scope: rules apply to the CJK parts of your rendered markdown, selected two
+ * ways so you can use whichever your app already sets:
+ *   1. `lang` — set `lang="zh"` / `lang="ja"` / `lang="ko"` on the container (or
+ *      any ancestor). This is the correct, accessible signal and lets a single
+ *      container mix scripts (an inner `<span lang="en">` opts back out).
+ *   2. `.sm-cjk` class hook — add it to the `.streaming-markdown` element when
+ *      you know the whole message is CJK but cannot set `lang`.
+ *
+ * All rules stay scoped under `.streaming-markdown`, like the other sheets.
+ */
+
+.streaming-markdown {
+  &:is(:lang(zh), :lang(ja), :lang(ko)),
+  & :is(:lang(zh), :lang(ja), :lang(ko)),
+  &.sm-cjk,
+  &.sm-cjk * {
+    /* Ideographs wrap between any two characters; keep Latin words intact and
+       only break long unbreakable runs (URLs) as a last resort. */
+    word-break: normal;
+    overflow-wrap: break-word;
+
+    /* Don't start a line with a closing bracket / small kana or end it with an
+       opening bracket — the standard Kinsoku line-break constraints. */
+    line-break: strict;
+
+    /* Insert the conventional 1/4-em gap between CJK and adjacent Latin letters
+       or digits (` v0.6.0 をリリース`). Progressive enhancement — ignored by
+       engines that don't support it yet, `normal` is the CJK-aware default. */
+    text-autospace: normal;
+
+    /* Trim the half-width gap baked into full-width punctuation at the start of
+       a line and collapse adjacent full-width punctuation, so `「…」。` sets
+       tightly. Progressive enhancement, safely ignored where unsupported. */
+    text-spacing-trim: trim-start;
+  }
+
+  /* A soft line break (source newline) between two ideographs must not surface
+     as a space. The renderer already emits `newline` soft breaks (not `space`)
+     for CJK-safe prose, and CSS collapses a break between wide characters to
+     nothing — but tight list items join their lines with a real space, so pin
+     white-space handling for those under CJK. */
+  &:is(:lang(zh), :lang(ja), :lang(ko)) li,
+  & :is(:lang(zh), :lang(ja), :lang(ko)) li,
+  &.sm-cjk li {
+    word-break: normal;
+  }
+}
