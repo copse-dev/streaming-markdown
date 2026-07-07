@@ -482,19 +482,60 @@
        the element it will commit to, so promotion only changes color. The
        accent bar hangs in the left gutter via a negative margin that exactly
        cancels its border + padding. */
-    /* `p.…` (not bare class) so this outranks `.compare-panel-body p`'s
-       margin shorthand, which would otherwise reset margin-left to 0.
-       The `:has()` variant keeps the SAME chrome on a committed <p> that still
-       hosts a pending continuation span: the highlight covers the whole open
-       paragraph and lifts exactly once, when the block completes — instead of
-       hopping line-by-line from the committed text to each continuation span. */
+    /* Every top-level paragraph and heading carries an INVISIBLE copy of the
+       pending chrome: a transparent accent bar plus gutter padding, cancelled
+       by a negative margin so text position is identical with or without it.
+       Pending→committed is then a pure COLOR change on the same box — the bar
+       and tint fade out together through the transition below instead of the
+       border popping off — and text never moves. Nested paragraphs
+       (blockquote/list-item bodies) opt back out just after. */
+    .compare-panel-body p,
+    .compare-panel-body h1,
+    .compare-panel-body h2,
+    .compare-panel-body h3 {
+      border-left: 3px solid transparent;
+      padding-left: 0.6rem;
+      margin-left: calc(-0.6rem - 3px);
+      border-radius: 0 3px 3px 0;
+    }
+
+    .compare-panel-body blockquote p,
+    .compare-panel-body li p {
+      border-left: none;
+      padding-left: 0;
+      margin-left: 0;
+    }
+
+    /* `p.…` (not bare class) so this outranks the base rule above at equal
+       specificity. The `:has()` variant keeps the SAME tint on a committed
+       <p> that still hosts a pending continuation span: the highlight covers
+       the whole open paragraph and lifts exactly once, when the block
+       completes — instead of hopping line-by-line from the committed text to
+       each continuation span. */
     p.stream-pending-paragraph,
     p:has(> .stream-pending-paragraph-continuation) {
       background: var(--pending-bg);
-      border-left: 3px solid var(--pending-border);
-      padding-left: 0.6rem;
-      margin: 0.4rem 0 0.4rem calc(-0.6rem - 3px);
-      border-radius: 0 3px 3px 0;
+      border-color: var(--pending-border);
+    }
+
+    /* Hold the tint on the trailing open paragraph for the WHOLE time a
+       stream is live (`.is-streaming`, toggled by the demo driver), not just
+       on frames where the pending tail rendered something. The emitter shows
+       nothing while an unclosed inline span (`**bold …`) is held back, or when
+       a chunk ends exactly on a newline — without this the highlight drops
+       for the whole hold and pops back, which reads as flicker. The trailing
+       <p> stops matching :last-child the moment the next block's element
+       appears, so the highlight lifts exactly when the next item starts; the
+       demo driver removes `.is-streaming` at stream end for a final,
+       still-open paragraph. The DOM-emitter variant applies only while no
+       fence/table is forming (`.stream-forming` still [hidden]) — a forming
+       block after the paragraph means the paragraph is done. */
+    .compare-panel-body.is-streaming > p:last-child,
+    .compare-panel-body.is-streaming
+      .stream-complete:has(+ .stream-forming[hidden])
+      > p:last-child {
+      background: var(--pending-bg);
+      border-color: var(--pending-border);
     }
 
     /* Muted text marks only the UNCOMMITTED text: the whole block while it is
@@ -1445,6 +1486,19 @@ function followBottom(el) {
   followers.set(el, requestAnimationFrame(step));
 }
 
+// Never let a simulated chunk end exactly ON a newline: the pending tail
+// (everything after the last newline) would be empty for one whole tick, so
+// the open block's highlight would drop for a frame and reappear when the
+// next line's first character arrives — a per-line flicker, worst in slow
+// mode. Stepping one char past the newline keeps the pending tail non-empty
+// across line breaks; a chunk landing between the two newlines of a blank
+// line instead swallows both, committing the block in the same tick.
+function advancePos(text, pos, step) {
+  let next = Math.min(pos + step, text.length);
+  if (next < text.length && text[next - 1] === '\n') next++;
+  return next;
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 let heroRenderer = null;
 let heroTimer = null;
@@ -1473,6 +1527,7 @@ function heroReset() {
   if (heroTimer) clearInterval(heroTimer);
   heroOutput.innerHTML = '';
   heroOutput.classList.remove('no-settle');
+  heroOutput.classList.add('is-streaming');
   heroRenderer = new StreamingMarkdownRenderer(heroOutput);
   heroPos = 0;
   heroUpdates = 0;
@@ -1487,6 +1542,7 @@ function heroTick(text) {
     heroPos = text.length;
     clearInterval(heroTimer);
     heroStreaming = false;
+    heroOutput.classList.remove('is-streaming');
     heroDot.classList.remove('active');
     const elapsed = (performance.now() - heroStart) / 1000;
     heroCps.textContent = `${Math.round(text.length / elapsed).toLocaleString()} chars/s`;
@@ -1497,7 +1553,7 @@ function heroTick(text) {
     heroTimer = setTimeout(() => startHero(), 3500);
     return;
   }
-  heroPos = Math.min(heroPos + 6, text.length);
+  heroPos = advancePos(text, heroPos, 6);
   const heroPartial = text.slice(0, heroPos);
   detectExtras(heroPartial);
   heroRenderer.update(heroPartial);
@@ -1555,6 +1611,8 @@ function clearCompare() {
   stringOutput.innerHTML = '';
   domOutput.innerHTML = '';
   domOutput.classList.remove('no-settle');
+  stringOutput.classList.remove('is-streaming');
+  domOutput.classList.remove('is-streaming');
   stringStats.innerHTML = '<span>—</span>';
   domStats.innerHTML = '<span>—</span>';
   fidelityBadge.style.visibility = 'hidden';
@@ -1568,6 +1626,8 @@ function startCompare() {
   stringOutput.innerHTML = '';
   domOutput.innerHTML = '';
   domOutput.classList.remove('no-settle');
+  stringOutput.classList.add('is-streaming');
+  domOutput.classList.add('is-streaming');
   fidelityBadge.style.visibility = 'hidden';
   domRenderer = new StreamingMarkdownRenderer(domOutput);
 
@@ -1587,6 +1647,8 @@ function startCompare() {
       clearInterval(compareTimer);
       compareTimer = null;
       compareStreaming = false;
+      stringOutput.classList.remove('is-streaming');
+      domOutput.classList.remove('is-streaming');
       const elapsed = performance.now() - compareStart;
       stringStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
       domStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
@@ -1597,7 +1659,7 @@ function startCompare() {
       return;
     }
 
-    comparePos = Math.min(comparePos + step, text.length);
+    comparePos = advancePos(text, comparePos, step);
     const partial = text.slice(0, comparePos);
     detectExtras(partial);
 
