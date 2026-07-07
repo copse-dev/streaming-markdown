@@ -18,6 +18,7 @@ it unless you import it. Register each once, before your first render.
 | Raw `<img>` handling | `setRawImageRenderer` | — |
 | Sanitizer allowlist | `setSanitizeExtension` | — |
 | Link scheme allowlist | `setSafeHrefSchemes` | — |
+| Link/image origin policy | `setLinkImagePolicy` | — |
 
 The whole public surface is in [`src/index.ts`](../src/index.ts).
 
@@ -347,6 +348,65 @@ including `javascript:` and `data:` — is dropped. Override it with
 `setSafeHrefSchemes([...])` (case-insensitive; pass `null` to restore the
 default). Narrowing the list is always safe; only widen it with schemes that are
 inert as an `href`, never `javascript`/`data`/`vbscript`/`file`.
+
+## Link/image origin policy
+
+The scheme allowlist above decides which URL *schemes* may render. A separate,
+**opt-in** origin policy decides which *origins* an already-scheme-safe link or
+image may point at — the turnkey equivalent of hand-rolling an allowlist at your
+sink. It is **off by default**: with no policy installed, output is
+byte-identical to today.
+
+```ts
+import { setLinkImagePolicy } from '@copse/streaming-markdown'
+
+setLinkImagePolicy({
+  allowedLinkPrefixes: ['https://docs.example.com/', 'https://github.com/acme/'],
+  allowedImagePrefixes: ['https://cdn.example.com/'],
+  defaultOrigin: 'https://app.example.com',
+  allowDataImages: false, // default true — set false to strip base64 data: images
+  // blockedLinkClass / blockedImageClass — optional, default `blocked-link` / `blocked-image`
+})
+```
+
+Semantics (enforced at the sanitizer sink, so it covers every rendered `<a>` —
+including autolinks — and every `<img>` a host renders, on both sanitizer
+backends and under Trusted Types):
+
+- A link whose destination is **not** under an `allowedLinkPrefixes` entry is
+  rewritten to `defaultOrigin` (or has its `href` dropped when `defaultOrigin`
+  is empty) and tagged with `blockedLinkClass`. Allowed absolute links pass
+  untouched.
+- An image whose `src` is **not** under an `allowedImagePrefixes` entry is
+  neutralized (its `src` is stripped so nothing loads; the element and its `alt`
+  stay) and tagged with `blockedImageClass`.
+- **Relative** URLs resolve against `defaultOrigin`; an allowed one is rewritten
+  to its resolved absolute form. A relative URL with no `defaultOrigin` is
+  blocked.
+- **`data:` images** are governed solely by `allowDataImages` (default `true`),
+  independent of the prefix list; `false` strips them.
+- Pass `null` to remove the policy.
+
+**Interaction with the scheme allowlist.** These are complementary, not
+redundant: `setSafeHrefSchemes` is the scheme gate (it drops `javascript:`/`data:`
+links *before* an `<a>` is built), and `setLinkImagePolicy` is the origin gate
+over the schemes that survive. The origin policy does **not** re-check schemes —
+keep scheme filtering in `setSafeHrefSchemes`.
+
+**Bypass hardening.** Prefixes and each candidate URL are compared on their
+WHATWG-canonical serialization (`new URL(...)` with credentials stripped), which
+is the exact string the browser navigates to. That neutralizes the usual
+allowlist tricks in one place: case-folded scheme/host (`HTTPS://Evil`),
+`\` vs `/` (`https:\\evil`), embedded credentials (`https://good.com@evil.com`
+resolves to `evil.com`, not a `good.com` prefix match), scheme-relative
+`//evil.com`, leading/trailing whitespace, and unicode host confusables (folded
+to punycode). No new runtime dependency is pulled in — the platform URL parser
+does the canonicalization.
+
+The classes it adds (`class` values) are already inside the sink allowlist, so no
+`setSanitizeExtension` widening is needed for the policy itself. For images to
+reach the policy at all, a host must first allow `<img>` through the sink (image
+handling is host-injected — see [Raw images](#raw-images)).
 
 ## Widening the sanitizer allowlist
 

@@ -56,7 +56,11 @@ for await (const chunk of stream) {
   byte-identical to a math-free build (`setMathSyntax` overrides either way).
   See [Math in `docs/EXTENDING.md`](docs/EXTENDING.md#math-katex).
 - **Sanitize at the sink.** Rendered HTML is treated as untrusted and links are
-  scheme-validated; the sink sanitizer is the security gate.
+  scheme-validated; the sink sanitizer is the security gate. An opt-in
+  **link/image origin allowlist** (`setLinkImagePolicy`) layers on top —
+  restrict which origins links/images may point at, rewrite/neutralize the rest,
+  and strip base64 `data:` images — off by default, byte-identical until you set
+  it. See [Link/image origin policy in `docs/EXTENDING.md`](docs/EXTENDING.md#linkimage-origin-policy).
 - **Light by default.** The only runtime dependency is `entities`. highlight.js
   (or Shiki — both ship as backends), DOMPurify, mermaid, and KaTeX are
   **optional and lazy** — never in your bundle unless you opt in. See
