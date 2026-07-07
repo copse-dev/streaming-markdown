@@ -157,6 +157,44 @@ When extending the renderer or its CSS, preserve these rules:
   `class="task-list-item"` and its list `class="contains-task-list"` for bullet-free styling
   ([#614](https://github.com/copse-dev/agent-pane/issues/614)). `input` + `type`/`checked`/`disabled` are on the sanitizer allowlist, and the
   per-element gate drops any non-checkbox `<input>` (see `sanitize.ts`).
+- **GFM footnotes (#72).** Inline `[^label]` references render as
+  `<sup class="footnote-ref"><a href="#fn-<slug>" id="fnref-<slug>">N</a></sup>`,
+  numbered in first-use order; repeated references share N with distinct
+  `fnref-…-2` ids (GitHub's shape). `[^label]: content` definition blocks are
+  collected like link reference definitions (`footnote_def` in
+  `block-tokenizer.ts`, `collectFootnoteDefinitions`; they never render in
+  place) and the referenced ones render as a trailing
+  `<section class="footnotes"><ol>…</ol></section>` in reference order, each
+  item ending with a `<a class="footnote-backref">↩</a>` to its first
+  reference. Unresolved references stay literal (mirroring unresolved link
+  refs); unreferenced definitions are dropped (GitHub behavior). Definitions
+  support indented continuation lines and multi-paragraph content via blank +
+  4-space indent, plus lazy first-paragraph continuation; footnotes inside
+  blockquotes are out of scope. Slugs are deterministic (`footnotes.ts`),
+  attribute-safe, and collision-disambiguated; the sanitizer allowlists
+  `section` + `id` and its element gate strips any id outside the
+  `fn-…`/`fnref-…` shape. The reference state is a per-render
+  `FootnoteContext` installed by `renderMarkdown`, so both streaming emitters
+  (which render through it) converge. Streaming: a half-typed `[^lab` holds
+  via `footnoteHoldStart` (composed into `pendingHoldIndex` like the
+  strikethrough hold), pending definition lines hold entirely
+  (`isPendingFootnoteDefLine`), and the trailing section re-renders as
+  definitions commit — footnote-bearing documents take the frozen-tail
+  full-morph path because a late definition upgrades earlier literal `[^x]`
+  text (see `streaming-frozen-tail.ts`).
+- **GitHub alerts (#72).** A blockquote whose first line is exactly `> [!NOTE]`
+  (or TIP / IMPORTANT / WARNING / CAUTION, case-insensitive, nothing else on the
+  marker line) renders with GitHub-compatible classes:
+  `<blockquote class="markdown-alert markdown-alert-note"><p class="markdown-alert-title">Note</p>…</blockquote>`
+  (`alerts.ts` + `renderBlockquote` in `render-blocks.ts`). Unknown `[!FOO]`
+  markers fall through to a plain blockquote with the marker line literal
+  (GitHub behavior); nested list/blockquote recursion classifies alerts inside
+  containers the same way. While streaming, a complete marker line classifies
+  the *pending* quote too (same classes + title `<p>` on
+  `blockquote.stream-pending-blockquote`), and a half-typed `[!NOT` holds, so a
+  literal marker never flashes and promotion is class-only. The
+  `markdown-alert*` classes pass the sink sanitizer (`class` is allowlisted);
+  `default.css` themes the five types via `--sm-alert-*` custom properties.
 - **Benign raw inline HTML.** Attribute-less phrasing tags models emit in prose
   (`<b> <i> <u> <s> <del> <ins> <sub> <sup> <kbd> <mark> <br>`) pass through unescaped
   (`BENIGN_RAW_INLINE_TAG_RE` in `escape.ts`); the sanitizer sink allowlist mirrors the set.
@@ -233,6 +271,7 @@ When extending the renderer or its CSS, preserve these rules:
   | Lazy list continuation  | `<span class="stream-pending-list-continuation">` in open `<li>` | n/a (plain text)        | yes                |
   | `### Heading`           | `<div class="stream-pending-heading stream-pending-hN">`         | yes                     | yes                |
   | `> quote`               | `<blockquote class="stream-pending-blockquote"><p>…</p>`         | yes                     | yes                |
+  | `> [!NOTE]` marker line | `<blockquote class="stream-pending-blockquote markdown-alert markdown-alert-note"><p class="markdown-alert-title">Note</p>` | yes (half markers hold) | n/a |
   | `---`                   | `<span class="stream-pending">` escaped plain text               | no                      | no                 |
   | Forming `\| H \|` table | `.stream-forming` + `<th>`                                       | pipes = cell boundaries | per cell           |
   | Pending table body row  | `tr.stream-pending-row` + `<td>`                                 | pipes = cell boundaries | per cell           |

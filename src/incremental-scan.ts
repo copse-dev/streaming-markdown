@@ -40,7 +40,14 @@ import { type LinkReference, type LinkReferenceMap } from './link-references.ts'
 
 /** Kinds whose token can absorb later lines across a blank run (see header). */
 function canExtendAcrossBlank(kind: BlockToken['kind']): boolean {
-  return kind === 'list_item' || kind === 'indented_code' || kind === 'blockquote'
+  // A footnote definition (#72) continues across a blank via a 4-column-
+  // indented line (multi-paragraph content), like a list item.
+  return (
+    kind === 'list_item' ||
+    kind === 'indented_code' ||
+    kind === 'blockquote' ||
+    kind === 'footnote_def'
+  )
 }
 
 /**

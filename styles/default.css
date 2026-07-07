@@ -16,12 +16,15 @@
  *   --sm-radius        corner radius                    (4px)
  *   --sm-font-mono     monospace family for code        (system mono stack)
  *   --sm-font-size-sm  size for code / tables           (0.85em)
- *   --sm-fg-muted      secondary text (blockquotes …)   (#999)
+ *   --sm-fg-muted      secondary text (quotes, footnotes) (#999)
  *   --sm-border        borders / rules                  (#3c3c3c)
  *   --sm-accent        links                            (#007acc)
  *   --sm-code-bg       inline/block code + quote bg     (#252526)
  *   --sm-th-stripe     even table-row background        (rgba(255,255,255,.02))
  *   --sm-error         diagram error glyph              (#f48771)
+ *   --sm-alert-note / --sm-alert-tip / --sm-alert-important /
+ *   --sm-alert-warning / --sm-alert-caution
+ *                      GitHub-alert accent per type     (GitHub dark palette)
  *
  * The `.hljs-*` rules below are a VS Code Dark+ palette; override by
  * redeclaring those selectors after this import.
@@ -177,6 +180,48 @@
     margin: var(--sm-space-sm, 8px) 0;
   }
 
+  /* GitHub alerts (#72): content, not quoted speech — normal foreground on a
+     per-type accent border. The pending marker line carries the same classes,
+     so promotion to the committed alert changes nothing visually. */
+  & blockquote.markdown-alert {
+    background: none;
+    color: inherit;
+    border-radius: 0;
+  }
+  & .markdown-alert-title {
+    font-weight: 600;
+  }
+  & blockquote.markdown-alert-note {
+    border-left-color: var(--sm-alert-note, #4493f8);
+  }
+  & blockquote.markdown-alert-note .markdown-alert-title {
+    color: var(--sm-alert-note, #4493f8);
+  }
+  & blockquote.markdown-alert-tip {
+    border-left-color: var(--sm-alert-tip, #3fb950);
+  }
+  & blockquote.markdown-alert-tip .markdown-alert-title {
+    color: var(--sm-alert-tip, #3fb950);
+  }
+  & blockquote.markdown-alert-important {
+    border-left-color: var(--sm-alert-important, #ab7df8);
+  }
+  & blockquote.markdown-alert-important .markdown-alert-title {
+    color: var(--sm-alert-important, #ab7df8);
+  }
+  & blockquote.markdown-alert-warning {
+    border-left-color: var(--sm-alert-warning, #d29922);
+  }
+  & blockquote.markdown-alert-warning .markdown-alert-title {
+    color: var(--sm-alert-warning, #d29922);
+  }
+  & blockquote.markdown-alert-caution {
+    border-left-color: var(--sm-alert-caution, #f85149);
+  }
+  & blockquote.markdown-alert-caution .markdown-alert-title {
+    color: var(--sm-alert-caution, #f85149);
+  }
+
   & hr {
     border: none;
     border-top: 1px solid var(--sm-border, #3c3c3c);
@@ -222,6 +267,28 @@
   }
   & tbody tr:nth-child(even) td {
     background: var(--sm-th-stripe, rgba(255, 255, 255, 0.02));
+  }
+
+  /* GFM footnotes (#72): superscript refs and the trailing section. */
+  & sup.footnote-ref {
+    font-size: 0.75em;
+    line-height: 1;
+  }
+  & sup.footnote-ref a {
+    text-decoration: none;
+  }
+  & section.footnotes {
+    margin-top: var(--sm-space-md, 12px);
+    border-top: 1px solid var(--sm-border, #3c3c3c);
+    padding-top: var(--sm-space-sm, 8px);
+    font-size: var(--sm-font-size-sm, 0.85em);
+    color: var(--sm-fg-muted, #999);
+  }
+  & section.footnotes ol {
+    margin: 0;
+  }
+  & a.footnote-backref {
+    text-decoration: none;
   }
 
   & .mermaid-diagram {

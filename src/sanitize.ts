@@ -65,6 +65,8 @@ const ALLOWED_TAGS = [
   // below, and the core element gate drops any non-checkbox `<input>`, so no
   // interactive/form payload can survive.
   'input',
+  // GFM footnotes (#72): the trailing `<section class="footnotes">` wrapper.
+  'section',
 ]
 
 // `data-browser-link` flags links the renderer routes through the in-app browser
@@ -83,6 +85,10 @@ const ALLOWED_ATTR = [
   'type',
   'checked',
   'disabled',
+  // GFM footnote anchors (#72): `id="fn-…"`/`id="fnref-…"` jump targets. The
+  // element gate below strips any id outside that renderer-emitted shape, so
+  // sanitized fragments can never mint arbitrary page-global names.
+  'id',
 ]
 
 /**
@@ -182,7 +188,18 @@ export function setSanitizeExtension(extension: SanitizeExtension | null): void 
 // The single per-element gate the active backend runs for every kept element.
 // Backend-independent so the security posture is identical across DOMPurify and
 // the native Sanitizer API.
+// The only ids the renderer emits: footnote jump targets (#72). Anything else
+// is stripped so allowlisting `id` cannot enable DOM clobbering of arbitrary
+// page-global names.
+const FOOTNOTE_ID_RE = /^fn(?:ref)?-[A-Za-z0-9_-]+$/
+
 function gateElement(node: Element, tagName: string): void {
+  // The DOMPurify backend's hook also fires for text/comment nodes, which
+  // carry no attributes — only real elements have an id to gate.
+  if (typeof node.getAttribute === 'function') {
+    const id = node.getAttribute('id')
+    if (id !== null && !FOOTNOTE_ID_RE.test(id)) node.removeAttribute('id')
+  }
   if (tagName === 'input') {
     // Only the renderer's read-only task-list checkbox is allowed; drop any
     // other `<input>` (text fields, buttons, image inputs) entirely and force

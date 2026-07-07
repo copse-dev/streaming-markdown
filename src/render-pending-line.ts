@@ -1,3 +1,4 @@
+import { alertTitle, alertTypeFromMarker, isFormingAlertMarker } from './alerts.ts'
 import {
   ATX_HEADING_CAPTURE_RE,
   BLOCKQUOTE_DETECT_RE,
@@ -10,6 +11,7 @@ import {
   listItemContentColumn,
 } from './block-tokenizer.ts'
 import { decodeSafeMarkdownEntities, escapeHtml } from './escape.ts'
+import { isPendingFootnoteDefLine } from './footnotes.ts'
 import { scanCodeSpans } from './inline-code-spans.ts'
 import { pendingHoldIndex } from './inline-emphasis.ts'
 import { renderProseInline } from './render-prose-inline.ts'
@@ -185,6 +187,13 @@ export function renderPendingLine(pending: string, options: RenderPendingLineOpt
     return ''
   }
 
+  // A footnote definition never renders in place — its content commits into
+  // the trailing footnotes section — so hold the whole pending line/block
+  // (`[^la`, `[^label]`, `[^label]: content…`) instead of flashing it (#72).
+  if (isPendingFootnoteDefLine(pending)) {
+    return ''
+  }
+
   if (pendingAtxHeadingLevel(pending) !== null) {
     const title = pendingAtxHeadingTitle(pending)
     if (!title) return ''
@@ -196,6 +205,13 @@ export function renderPendingLine(pending: string, options: RenderPendingLineOpt
 
   if (isPendingBlockquoteLine(pending)) {
     const body = pendingBlockquoteBody(pending)
+    // GitHub alerts (#72): a complete `[!NOTE]` marker classifies the pending
+    // quote (the emitters add the alert classes and wrap this title in
+    // `<p class="markdown-alert-title">`); a still-forming `[!NOT` holds so no
+    // partial marker flashes literally.
+    const alertType = alertTypeFromMarker(body)
+    if (alertType) return escapeHtml(alertTitle(alertType))
+    if (isFormingAlertMarker(body)) return ''
     if (!body.trim()) return ''
     const hold = pendingHoldIndex(body)
     const visible = body.slice(0, hold)

@@ -23,6 +23,13 @@ import {
   mathBlockDelimiterLine,
   mathBlockOpenCandidate,
 } from './math-block.ts'
+import {
+  FOOTNOTE_DEF_LINE_RE,
+  normalizeFootnoteLabel,
+  parseFootnoteDefSlice,
+  type FootnoteDefinition,
+  type FootnoteDefinitionMap,
+} from './footnotes.ts'
 
 export type BlockKind =
   | 'blank'
@@ -37,6 +44,7 @@ export type BlockKind =
   | 'list_item'
   | 'table'
   | 'link_ref_def'
+  | 'footnote_def'
 
 export type BlockStatus = 'complete' | 'open' | 'ambiguous'
 
@@ -264,9 +272,58 @@ function pushBlock(
   blocks.push({ kind, status, start, end })
 }
 
+/**
+ * Extent of a footnote definition block (#72) starting at `lines[i]`, or null.
+ * The block is the `[^label]:` line plus its continuations: 4-column-indented
+ * lines (including after a blank run — GitHub's multi-paragraph form) and lazy
+ * paragraph continuation lines that no other block start claims. Returns the
+ * index just past the block's last line.
+ */
+function tryFootnoteDefBlock(lines: ScannedLine[], i: number): number | null {
+  const startLine = lines[i]
+  if (!startLine || !FOOTNOTE_DEF_LINE_RE.test(startLine.text)) return null
+  let j = i + 1
+  while (j < lines.length) {
+    const next = lines[j]
+    if (!next) break
+    if (next.text.trim() === '') {
+      // A blank ends the definition unless a 4-column-indented continuation
+      // follows the blank run (multi-paragraph content).
+      let k = j + 1
+      while (k < lines.length && lines[k]?.text.trim() === '') k++
+      const after = lines[k]
+      if (after && leadingIndentWidth(after.text) >= 4) {
+        j = k + 1
+        continue
+      }
+      break
+    }
+    if (leadingIndentWidth(next.text) >= 4) {
+      j++
+      continue
+    }
+    if (
+      FOOTNOTE_DEF_LINE_RE.test(next.text) ||
+      ATX_HEADING_RE.test(next.text) ||
+      LIST_ITEM_RE.test(next.text) ||
+      BLOCKQUOTE_RE.test(next.text) ||
+      fenceMarker(next.text) ||
+      isMathBlockInterruptLine(next.text) ||
+      THEMATIC_BREAK_RE.test(next.text)
+    ) {
+      break
+    }
+    // Lazy paragraph continuation of the definition's first paragraph.
+    j++
+  }
+  return j
+}
+
 function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
   const startLine = lines[i]
   if (!startLine || !/^ {0,3}\[/.test(startLine.text)) return null
+  // `[^label]:` is a footnote definition (#72), never a link reference.
+  if (FOOTNOTE_DEF_LINE_RE.test(startLine.text)) return null
   // A definition cannot span a blank line and its continuation lines cannot be
   // block starts, so gather the contiguous run those rules allow.
   let buf = ''
@@ -302,6 +359,8 @@ function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
       indent++
     }
     if (indent > 3 || buf[k] !== '[') break
+    // A footnote definition (#72) ends the run of link reference definitions.
+    if (buf[k + 1] === '^' && FOOTNOTE_DEF_LINE_RE.test(buf.slice(offset))) break
     const def = parseLinkReferenceDefinitionAt(buf, k)
     if (!def || !isValidReferenceLabel(def.label)) break
     const segment = buf.slice(offset, def.end)
@@ -374,6 +433,7 @@ function breaksUnorderedListItem(lines: ScannedLine[], itemStart: number, j: num
     fenceMarker(next.text) ||
     isMathBlockInterruptLine(next.text) ||
     BLOCKQUOTE_RE.test(next.text) ||
+    FOOTNOTE_DEF_LINE_RE.test(next.text) ||
     tryLinkRefDefBlock(lines, j) !== null ||
     (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
   ) {
@@ -506,6 +566,15 @@ export function tokenizeBlocks(source: string): BlockToken[] {
       continue
     }
 
+    const footnoteEnd = tryFootnoteDefBlock(lines, i)
+    if (footnoteEnd !== null) {
+      const last = lines[footnoteEnd - 1] ?? line
+      const status: BlockStatus = last.terminated ? 'complete' : 'open'
+      pushBlock(blocks, 'footnote_def', status, line.start, last.end)
+      i = footnoteEnd
+      continue
+    }
+
     const linkRefEnd = tryLinkRefDefBlock(lines, i)
     if (linkRefEnd !== null) {
       const last = lines[linkRefEnd - 1] ?? line
@@ -549,6 +618,7 @@ export function tokenizeBlocks(source: string): BlockToken[] {
             fenceMarker(next.text) ||
             isMathBlockInterruptLine(next.text) ||
             BLOCKQUOTE_RE.test(next.text) ||
+            FOOTNOTE_DEF_LINE_RE.test(next.text) ||
             tryLinkRefDefBlock(lines, j) !== null ||
             (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
           ) {
@@ -713,6 +783,9 @@ export function tokenizeBlocks(source: string): BlockToken[] {
         isMathBlockInterruptLine(next.text) ||
         // NOTE: a link reference definition cannot interrupt a paragraph
         // (spec 213) — a `[label]: dest` line here is a lazy continuation.
+        // A FOOTNOTE definition can (cmark-gfm parses it as a container
+        // start), so `text[^1]\n[^1]: note` resolves without a blank line.
+        FOOTNOTE_DEF_LINE_RE.test(next.text) ||
         (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
       ) {
         break
@@ -764,6 +837,29 @@ export function collectLinkReferenceDefinitions(
     }
   }
   return refs
+}
+
+/**
+ * Collect footnote definitions with block context (#72): definitions live only
+ * in `footnote_def` blocks (never inside fenced code or paragraph
+ * continuations), mirroring {@link collectLinkReferenceDefinitions}. First
+ * definition wins for a normalized label, in source order. Pass `tokens`
+ * (`tokenizeBlocks(source)`) to reuse an existing tokenization.
+ */
+export function collectFootnoteDefinitions(
+  source: string,
+  tokens?: BlockToken[],
+): FootnoteDefinitionMap {
+  const blocks = tokens ?? tokenizeBlocks(source)
+  const defs = new Map<string, FootnoteDefinition>()
+  for (const token of blocks) {
+    if (token.kind !== 'footnote_def') continue
+    const def = parseFootnoteDefSlice(source.slice(token.start, token.end))
+    if (!def) continue
+    const key = normalizeFootnoteLabel(def.label)
+    if (!defs.has(key)) defs.set(key, def)
+  }
+  return defs
 }
 
 /** Index of the first character that must stay in the pending region. */
