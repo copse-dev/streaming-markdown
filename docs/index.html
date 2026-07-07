@@ -12,16 +12,28 @@
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="manifest" href="./site.webmanifest">
   <meta name="theme-color" content="#0F172A">
-  <!-- Mermaid is an OPTIONAL PEER of the package — never bundled. The lazy
-       backend does `import('mermaid')` at first render; this import map is the
-       demo's stand-in for `npm install mermaid` in a real host. -->
+  <!-- Every heavy backend here is an OPTIONAL PEER of the package — never
+       bundled. The lazy backends resolve their library via this import map at
+       first use; it is the demo's stand-in for `npm install mermaid katex shiki`
+       in a real host. katex and each theme/lang grammar are self-contained ESM
+       files (jsdelivr serves them verbatim); shiki's core + engine pull a small
+       dependency graph, so those two specifiers use esm.sh, which flattens it. -->
   <script type="importmap">
   {
     "imports": {
-      "mermaid": "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+      "mermaid": "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs",
+      "katex": "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.mjs",
+      "shiki/core": "https://esm.sh/shiki@4.3.1/core",
+      "shiki/engine/javascript": "https://esm.sh/shiki@4.3.1/engine/javascript",
+      "shiki/themes/": "https://cdn.jsdelivr.net/npm/@shikijs/themes@4.3.1/dist/",
+      "shiki/langs/": "https://cdn.jsdelivr.net/npm/@shikijs/langs@4.3.1/dist/"
     }
   }
   </script>
+  <!-- KaTeX ships its rendered math as a span/MathML tree that needs its
+       stylesheet + fonts to lay out. Loaded eagerly (small, cached) so hydrated
+       equations are styled the instant the backend flips them to --rendered. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
   <style>
     :root {
       --bg: #0d1117;
@@ -852,6 +864,131 @@
       margin-bottom: 0.25rem;
     }
 
+    /* ── Math (KaTeX) ────────────────────────────────────────
+       Same two-phase contract as mermaid: while pending (backend not loaded /
+       stream still going) the generator emits inert escaped source in a
+       <pre class="math"> (block) or a plain span (inline) — so a half-open
+       `$$` or `\[` never flashes raw. hydratePendingMath swaps in KaTeX and
+       flips the element to --rendered (or --error, source left visible). */
+    .compare-panel-body .math-block { margin: 0.6rem 0; }
+
+    .compare-panel-body .math-block--pending pre.math,
+    .compare-panel-body .math-inline--pending {
+      background: var(--pending-bg);
+      color: var(--pending-text);
+      border-radius: 3px;
+    }
+
+    .compare-panel-body .math-block--pending pre.math {
+      border: 1px solid var(--pending-border);
+      padding: 0.6rem 0.75rem;
+      overflow-x: auto;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.85em;
+    }
+
+    .compare-panel-body .math-inline--pending {
+      padding: 0.05rem 0.25rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.85em;
+    }
+
+    /* Rendered KaTeX: center display blocks, let them scroll on overflow. */
+    .compare-panel-body .math-block--rendered { text-align: center; overflow-x: auto; }
+    .compare-panel-body .math-block--rendered .katex-display { margin: 0.25rem 0; }
+    .compare-panel-body .math-inline--rendered { color: var(--text-bright); }
+
+    /* --error: KaTeX rejected the TeX; the escaped source stays visible. */
+    .compare-panel-body .math-block--error pre.math,
+    .compare-panel-body .math-inline--error {
+      border: 1px solid var(--danger);
+      border-radius: 3px;
+      color: var(--danger);
+    }
+
+    /* ── GitHub alerts (#72) ─────────────────────────────────
+       `> [!NOTE]` etc. classify the blockquote the moment the marker line
+       arrives; the accent + title colour by type. GitHub-dark palette. */
+    .compare-panel-body blockquote.markdown-alert {
+      font-style: normal;
+      color: var(--text);
+      border-left-width: 3px;
+      border-left-style: solid;
+    }
+    .compare-panel-body .markdown-alert-title {
+      font-weight: 600;
+      text-transform: capitalize;
+      margin-bottom: 0.15rem;
+    }
+    .compare-panel-body .markdown-alert-note { border-left-color: #1f6feb; }
+    .compare-panel-body .markdown-alert-note .markdown-alert-title { color: #1f6feb; }
+    .compare-panel-body .markdown-alert-tip { border-left-color: #3fb950; }
+    .compare-panel-body .markdown-alert-tip .markdown-alert-title { color: #3fb950; }
+    .compare-panel-body .markdown-alert-important { border-left-color: #8957e5; }
+    .compare-panel-body .markdown-alert-important .markdown-alert-title { color: #a371f7; }
+    .compare-panel-body .markdown-alert-warning { border-left-color: #d29922; }
+    .compare-panel-body .markdown-alert-warning .markdown-alert-title { color: #d29922; }
+    .compare-panel-body .markdown-alert-caution { border-left-color: #f85149; }
+    .compare-panel-body .markdown-alert-caution .markdown-alert-title { color: #f85149; }
+
+    /* ── Footnotes (#72) ─────────────────────────────────────
+       Superscript refs in prose; a <section class="footnotes"> with an <ol>
+       builds up at the document tail as definitions stream in. */
+    .compare-panel-body sup.footnote-ref { font-size: 0.7em; }
+    .compare-panel-body sup.footnote-ref a { text-decoration: none; }
+    .compare-panel-body .footnotes {
+      margin-top: 1rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.85em;
+      color: var(--text-muted);
+    }
+    .compare-panel-body .footnotes ol { margin-left: 1.2rem; }
+    .compare-panel-body .footnote-backref { text-decoration: none; margin-left: 0.25rem; }
+
+    /* ── Shiki tokens ────────────────────────────────────────
+       The Shiki backend colours tokens with class-based `shiki-<hex>` names
+       (no inline style, so the sink sanitizer passes them). shikiThemeCss()
+       generates the matching rules; the demo injects them into #shiki-theme-css
+       when the backend loads. The four font-style classes are static. */
+    .compare-panel-body .shiki-italic { font-style: italic; }
+    .compare-panel-body .shiki-bold { font-weight: 600; }
+    .compare-panel-body .shiki-underline { text-decoration: underline; }
+    .compare-panel-body .shiki-strikethrough { text-decoration: line-through; }
+
+    /* ── Highlighter toggle (hljs ↔ Shiki) ───────────────────
+       A segmented control demonstrating the pluggable setCodeHighlighter
+       registry: flipping it re-registers the backend and re-renders so fences
+       upgrade in place. */
+    .hl-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+    .hl-toggle-group {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .hl-toggle-group button {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.3rem 0.7rem;
+      font-size: 0.78rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .hl-toggle-group button.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+    .hl-toggle-group button:not(.active):hover { color: var(--text); }
+
     /* ── Fidelity indicator ──────────────────────────────── */
     .fidelity-badge {
       /* Toggled via `visibility` (not display) so appearing at stream end
@@ -937,6 +1074,8 @@
     <div class="lazy-bar" title="Neither library is in the page's main bundle. Each is fetched the first time the stream actually needs it.">
       <span>optional extras — fetched on first use:</span>
       <span class="lazy-chip" data-extra="hljs" data-state="idle"><span class="lazy-dot"></span>highlight.js <em>not loaded</em></span>
+      <span class="lazy-chip" data-extra="shiki" data-state="idle"><span class="lazy-dot"></span>shiki <em>not loaded</em></span>
+      <span class="lazy-chip" data-extra="katex" data-state="idle"><span class="lazy-dot"></span>katex <em>not loaded</em></span>
       <span class="lazy-chip" data-extra="mermaid" data-state="idle"><span class="lazy-dot"></span>mermaid <em>not loaded</em></span>
     </div>
   </div>
@@ -952,6 +1091,8 @@
     <button class="preset-btn active" data-preset="mixed">Mixed</button>
     <button class="preset-btn" data-preset="table">Table</button>
     <button class="preset-btn" data-preset="code">Code</button>
+    <button class="preset-btn" data-preset="math">Math</button>
+    <button class="preset-btn" data-preset="notes">Notes</button>
     <button class="preset-btn" data-preset="diagrams">Diagrams</button>
     <button class="preset-btn" data-preset="lists">Lists</button>
     <button class="preset-btn" data-preset="basic">Basic</button>
@@ -962,6 +1103,13 @@
   <div class="compare-action-bar">
     <button class="btn-primary" id="btn-stream">&#9654; Stream both</button>
     <button class="btn-secondary" id="btn-clear">Clear</button>
+    <span class="hl-toggle" title="Swap the pluggable code highlighter — both are optional peers, loaded on demand. Toggling re-renders so fences upgrade in place.">
+      highlighter:
+      <span class="hl-toggle-group" id="hl-toggle-group">
+        <button data-hl="hljs" class="active">highlight.js</button>
+        <button data-hl="shiki">Shiki</button>
+      </span>
+    </span>
     <label class="speed-toggle">
       <input type="checkbox" id="speed-check" checked>
       Fast
@@ -972,6 +1120,8 @@
   <div class="lazy-bar lazy-bar--inline" title="Neither library is in the page's main bundle. Each is fetched the first time the stream actually needs it.">
     <span>optional extras — fetched on first use:</span>
     <span class="lazy-chip" data-extra="hljs" data-state="idle"><span class="lazy-dot"></span>highlight.js <em>not loaded</em></span>
+    <span class="lazy-chip" data-extra="shiki" data-state="idle"><span class="lazy-dot"></span>shiki <em>not loaded</em></span>
+    <span class="lazy-chip" data-extra="katex" data-state="idle"><span class="lazy-dot"></span>katex <em>not loaded</em></span>
     <span class="lazy-chip" data-extra="mermaid" data-state="idle"><span class="lazy-dot"></span>mermaid <em>not loaded</em></span>
   </div>
 
@@ -1069,15 +1219,17 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
   <div class="section-header">
     <h2>Heavy dependencies are optional — and lazy</h2>
     <p>
-      The core bundle carries <strong>no highlight.js and no mermaid</strong>, so first paint
-      stays fast. Code fences render immediately as escaped plain text with their final
-      <code>hljs lang-*</code> class, and <code>&#96;&#96;&#96;mermaid</code> fences render as inert source.
+      The core bundle carries <strong>no highlight.js, no mermaid, no KaTeX, and no Shiki</strong>,
+      so first paint stays fast. Code fences render immediately as escaped plain text with their
+      final <code>hljs lang-*</code> class; <code>&#96;&#96;&#96;mermaid</code> fences and
+      <code>$$…$$</code> / <code>&#96;&#96;&#96;math</code> blocks render as inert source.
       Each library is fetched only when the stream first needs it — highlight.js grammars as
-      a ~71&nbsp;KB code-split chunk, mermaid as an optional peer dependency the host installs
-      (this page maps it to a CDN). When it arrives, a re-render upgrades what's already on
-      screen in place — no layout shift, because the element classes never change.
-      That's exactly what this page does: watch the status chips above flip as the demo
-      streams its first code fence and first diagram.
+      a ~71&nbsp;KB code-split chunk; mermaid, KaTeX, and Shiki as optional peer dependencies the
+      host installs (this page maps each to a CDN). When one arrives, a re-render upgrades what's
+      already on screen in place — no layout shift, because the element classes never change.
+      That's exactly what this page does: watch the four status chips above flip as the demo
+      streams its first code fence, diagram, and equation — or when you switch the highlighter
+      to Shiki.
       See <a href="https://github.com/copse-dev/streaming-markdown/blob/main/docs/LAZY-LOADING.md">the lazy-loading guide</a>
       for the design.
     </p>
@@ -1112,6 +1264,35 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
 <span class="cmt">// pending &lt;pre class="mermaid"&gt; scaffolding → SVG</span>
 <span class="kw">await</span> <span class="fn">hydratePendingDiagrams</span>(messageEl)</code></pre>
     </div>
+
+    <div class="snippet-card">
+      <div class="snippet-card-header">
+        <span>Lazy math</span> — KaTeX is an optional peer, never bundled
+      </div>
+      <pre><code><span class="kw">import</span> { <span class="fn">hydratePendingMath</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown'</span>
+
+<span class="kw">const</span> { <span class="fn">loadKatex</span> } = <span class="kw">await</span> <span class="fn">import</span>(
+  <span class="str">'@copse/streaming-markdown/math/katex'</span>
+)
+<span class="kw">await</span> <span class="fn">loadKatex</span>() <span class="cmt">// registers the math renderer</span>
+
+<span class="cmt">// pending $$…$$ / \\[…\\] scaffolding → rendered KaTeX</span>
+<span class="kw">await</span> <span class="fn">hydratePendingMath</span>(messageEl)</code></pre>
+    </div>
+
+    <div class="snippet-card">
+      <div class="snippet-card-header">
+        <span>Pluggable highlighter</span> — swap highlight.js for Shiki
+      </div>
+      <pre><code><span class="kw">const</span> { <span class="fn">loadShiki</span>, <span class="fn">shikiThemeCss</span> } = <span class="kw">await</span> <span class="fn">import</span>(
+  <span class="str">'@copse/streaming-markdown/highlighters/shiki'</span>
+)
+<span class="kw">await</span> <span class="fn">loadShiki</span>() <span class="cmt">// registers over setCodeHighlighter</span>
+
+<span class="cmt">// inject the theme palette once (class-based tokens)</span>
+<span class="fn">injectCss</span>(<span class="fn">shikiThemeCss</span>())
+<span class="fn">rerender</span>() <span class="cmt">// fences upgrade in place</span></code></pre>
+    </div>
   </div>
 </div>
 
@@ -1131,8 +1312,13 @@ import {
   isBrowserSanitizerSupported,
   dompurifyBackend,
   hydratePendingDiagrams,
+  hydratePendingMath,
   loadHighlightBackend,
   loadMermaidBackend,
+  loadKatexBackend,
+  loadShikiBackend,
+  shikiThemeCss,
+  useHighlightjs,
 } from './streaming-markdown.browser.mjs';
 
 // Firefox and older browsers lack the native Sanitizer API (Element.setHTML).
@@ -1150,7 +1336,18 @@ if (!isBrowserSanitizerSupported()) {
 const extras = {
   hljs: { promise: null, loaded: false },
   mermaid: { promise: null, loaded: false },
+  katex: { promise: null, loaded: false },
+  shiki: { promise: null, loaded: false },
 };
+
+// Grammars the Shiki backend registers. Kept lean (only the languages the demo
+// samples actually use) so the toggle fetches a handful of grammar chunks
+// rather than the full KNOWN_LANGUAGES set.
+const SHIKI_LANGS = ['javascript', 'typescript', 'python', 'shellscript', 'json'];
+
+// Which code highlighter is currently registered. highlight.js is the default;
+// the toggle flips this and re-renders so committed fences upgrade in place.
+let activeHighlighter = 'hljs';
 
 function setChips(kind, state, detail) {
   document.querySelectorAll(`.lazy-chip[data-extra="${kind}"]`).forEach((chip) => {
@@ -1205,13 +1402,89 @@ function ensureMermaid() {
   return extras.mermaid.promise;
 }
 
+// Register the KaTeX backend on the first math the stream mentions. loadKatex()
+// also installs the renderer (setMathRenderer), so this flips the `$…$`/`$$…$$`
+// math syntax fully on; katex itself (import-map/CDN) is warmed here so the chip
+// times the real network cost and hydration at stream end is instant.
+function ensureKatex() {
+  if (extras.katex.promise) return extras.katex.promise;
+  setChips('katex', 'loading', 'loading from CDN…');
+  const t0 = performance.now();
+  extras.katex.promise = loadKatexBackend()
+    .then(() => import('katex'))
+    .then(() => {
+      extras.katex.loaded = true;
+      setChips('katex', 'loaded', `loaded in ${Math.round(performance.now() - t0)} ms`);
+      // A stream that already settled while katex was in flight: hydrate now.
+      // Streams still running hydrate at their own completion (see the tick
+      // handlers) so we never race the incremental DOM morph.
+      if (!heroStreaming) hydrateMath(heroOutput);
+      if (!compareStreaming) {
+        hydrateMath(stringOutput);
+        hydrateMath(domOutput);
+      }
+    })
+    .catch(() => {
+      setChips('katex', 'error', 'failed to load');
+    });
+  return extras.katex.promise;
+}
+
+// Register the Shiki backend (core + engine + theme + the SHIKI_LANGS grammars,
+// each a code-split chunk via the import map). Idempotent: the first call loads,
+// later toggles reuse the loaded instance. On success we inject the theme's
+// palette stylesheet — host style, so it never passes the sink sanitizer.
+function ensureShiki() {
+  if (extras.shiki.promise) return extras.shiki.promise;
+  setChips('shiki', 'loading', 'loading from CDN…');
+  const t0 = performance.now();
+  extras.shiki.promise = loadShikiBackend({ langs: SHIKI_LANGS })
+    .then(() => {
+      extras.shiki.loaded = true;
+      injectShikiThemeCss();
+      setChips('shiki', 'loaded', `loaded in ${Math.round(performance.now() - t0)} ms`);
+    })
+    .catch(() => {
+      setChips('shiki', 'error', 'failed to load');
+    });
+  return extras.shiki.promise;
+}
+
+// Inject shikiThemeCss() once into a dedicated <style>. The rules colour the
+// class-based `shiki-<hex>` token spans the backend emits.
+function injectShikiThemeCss() {
+  let styleEl = document.getElementById('shiki-theme-css');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'shiki-theme-css';
+    document.head.appendChild(styleEl);
+  }
+  // Scope the generated palette to the panels so it matches the hljs token CSS.
+  const css = shikiThemeCss().replace(/^\.shiki-/gm, '.compare-panel-body .shiki-');
+  styleEl.textContent = css;
+}
+
 // Kick off loads the moment the *streamed* partial first mentions a fence —
 // the fetch overlaps the rest of the stream, so by the time the fence settles
-// the library is usually already there.
+// the library is usually already there. Shiki is NOT auto-loaded: it only loads
+// when the highlighter toggle selects it (highlight.js is the default backend).
 function detectExtras(partial) {
-  if (extras.hljs.loaded && extras.mermaid.loaded) return;
   if (!extras.mermaid.promise && /```mermaid\b/.test(partial)) ensureMermaid();
-  if (!extras.hljs.promise && /```(?!mermaid\b)[a-z0-9]/i.test(partial)) ensureHighlight();
+  if (!extras.hljs.promise && activeHighlighter === 'hljs'
+      && /```(?!mermaid\b)[a-z0-9]/i.test(partial)) ensureHighlight();
+  if (activeHighlighter === 'shiki' && !extras.shiki.promise
+      && /```(?!mermaid\b)[a-z0-9]/i.test(partial)) ensureShiki();
+  // Any of the four math forms: $$…$$, \[…\], inline $…$ / \(…\), or a ```math
+  // fence. Registering the backend early flips prose math on before it settles.
+  if (!extras.katex.promise
+      && /\$\$|\\\[|\\\(|```math|\$[^$\n]+\$/.test(partial)) ensureKatex();
+}
+
+// Hydrate settled pending math under `root` into KaTeX. No-op until the backend
+// is registered; safe to call repeatedly. Only called on a settled stream.
+function hydrateMath(root) {
+  if (!extras.katex.loaded || !root) return;
+  hydratePendingMath(root).catch(() => {});
 }
 
 // Hydrate settled ```mermaid scaffolding under `root` into SVG. No-op until
@@ -1256,7 +1529,7 @@ const PRESETS = {
 
 This demo shows **streaming markdown** rendering with pending block states.
 Blocks are styled differently while they're still *forming*, then settle into
-their final appearance in one step once the whole block completes.
+their final appearance in one step once the whole block completes.[^design]
 
 ## Features
 
@@ -1264,6 +1537,11 @@ their final appearance in one step once the whole block completes.
 - *Lists* show pending items with a tinted highlight until the line commits
 - Tables detect the separator line (\`|---|---|\`) to switch display mode
 - Code fences apply syntax highlighting in real-time
+- **Math**, footnotes, and alerts all parse mid-stream[^gfm]
+
+> [!NOTE]
+> Alerts classify the moment the \`> [!NOTE]\` marker line arrives — the body
+> then streams in as ordinary blockquote content.
 
 ### Example: fibonacci in Python
 
@@ -1297,10 +1575,21 @@ flowchart LR
 | Heading    | \`stream-pending-heading\` | \`<h1>…<h6>\` |
 | Code fence | \`stream-fence-forming\` | \`<pre><code>\` |
 
+### Example: math
+
+Inline math like $e^{i\\pi} + 1 = 0$ renders alongside display blocks:
+
+$$
+\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}
+$$
+
 > "The best way to predict the future is to invent it."
 > — Alan Kay
 
-*Open the DevTools Elements panel while streaming to watch the DOM update live.*`,
+*Open the DevTools Elements panel while streaming to watch the DOM update live.*
+
+[^design]: Pending states keep an element's final layout metrics so promotion only recolours it — no jank.
+[^gfm]: Footnotes and alerts are GitHub-flavoured Markdown constructs LLMs emit constantly.`,
 
   table: `## API Reference
 
@@ -1454,7 +1743,74 @@ Second paragraph after a thematic break. The renderer handles:
 > Blockquotes work too, and they can span
 > multiple lines before the block is complete.
 
-That's it — *start typing in the textarea above* to see your own markdown stream in.`
+That's it — *start typing in the textarea above* to see your own markdown stream in.`,
+
+  math: `## Math with KaTeX
+
+All four LaTeX input forms parse natively — no preprocessing. While streaming,
+a half-open delimiter never flashes raw: the pending state shows inert escaped
+source until the expression closes, then \`hydratePendingMath()\` renders it.
+
+Display math with \`$$…$$\`:
+
+$$
+f(x) = \\int_{-\\infty}^{\\infty} \\hat{f}(\\xi)\\, e^{2\\pi i \\xi x}\\, d\\xi
+$$
+
+Bracket display \`\\[…\\]\` — the delimiter OpenAI-family models emit by default:
+
+\\[
+\\frac{\\partial}{\\partial t} \\Psi = \\frac{i\\hbar}{2m} \\nabla^2 \\Psi
+\\]
+
+Inline \`$…$\`: the quadratic roots are $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$.
+
+Inline \`\\(…\\)\`: Euler's identity \\(e^{i\\pi} + 1 = 0\\) in bracket form.
+
+A currency guard keeps prose safe: "it costs $20 and $30" stays literal text.
+
+A \`\`\`\`math\`\`\`\` fence renders as a display block too:
+
+\`\`\`math
+\\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}
+\`\`\`
+
+> Math is an **optional peer** (KaTeX) — never bundled. This page loads it from
+> a CDN via the import map the first time an expression appears in the stream.`,
+
+  notes: `## Footnotes & alerts
+
+GitHub-flavoured constructs the parser handles in the default pipeline — no
+plug-ins. Both degrade gracefully on renderers that lack them.
+
+### Alerts
+
+> [!NOTE]
+> Useful information users should know, even when skimming.
+
+> [!TIP]
+> Helpful advice for doing things better or more easily.
+
+> [!IMPORTANT]
+> Key information users need to know to achieve their goal.
+
+> [!WARNING]
+> Urgent info that needs immediate user attention to avoid problems.
+
+> [!CAUTION]
+> Advises about risks or negative outcomes of certain actions.
+
+An unknown marker like \`> [!FOO]\` falls through to a plain blockquote.
+
+### Footnotes
+
+Streaming markdown began as a renderer for LLM chat UIs[^chat], where models
+emit citations[^cite] as footnote references constantly. The footnotes section
+below builds up as each definition streams in.
+
+[^chat]: Tokens arrive incrementally, so blocks must render before they finish.
+[^cite]: References are numbered in first-use order; unresolved ones stay literal text.
+`
 };
 
 // ── Smooth auto-follow ──────────────────────────────────────────────────────
@@ -1547,8 +1903,10 @@ function heroTick(text) {
     const elapsed = (performance.now() - heroStart) / 1000;
     heroCps.textContent = `${Math.round(text.length / elapsed).toLocaleString()} chars/s`;
     heroUpdatesEl.textContent = `${heroUpdates} updates`;
-    // The stream has settled — swap any ```mermaid scaffolding for SVG.
+    // The stream has settled — swap any ```mermaid scaffolding for SVG and any
+    // pending math for rendered KaTeX.
     hydrateDiagrams(heroOutput);
+    hydrateMath(heroOutput);
     // restart after pause
     heroTimer = setTimeout(() => startHero(), 3500);
     return;
@@ -1653,9 +2011,12 @@ function startCompare() {
       stringStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
       domStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
       checkFidelity(text);
-      // The stream has settled — swap any ```mermaid scaffolding for SVG.
+      // The stream has settled — swap any ```mermaid scaffolding for SVG and
+      // any pending math for rendered KaTeX.
       hydrateDiagrams(stringOutput);
       hydrateDiagrams(domOutput);
+      hydrateMath(stringOutput);
+      hydrateMath(domOutput);
       return;
     }
 
@@ -1703,7 +2064,7 @@ function rerenderAfterHighlight() {
     heroRenderer = new StreamingMarkdownRenderer(heroOutput);
     heroRenderer.update(heroText.slice(0, heroPos));
     heroOutput.scrollTop = heroOutput.scrollHeight;
-    if (!heroStreaming) hydrateDiagrams(heroOutput);
+    if (!heroStreaming) { hydrateDiagrams(heroOutput); hydrateMath(heroOutput); }
   }
   if (compareText && comparePos > 0) {
     const partial = compareText.slice(0, comparePos);
@@ -1717,9 +2078,28 @@ function rerenderAfterHighlight() {
     if (!compareStreaming) {
       hydrateDiagrams(stringOutput);
       hydrateDiagrams(domOutput);
+      hydrateMath(stringOutput);
+      hydrateMath(domOutput);
     }
   }
 }
+
+// ── Highlighter toggle (hljs ↔ Shiki) ───────────────────────────────────────
+// Demonstrates the pluggable setCodeHighlighter registry. Selecting a backend
+// registers it (loading it lazily the first time), then re-renders both the
+// hero and comparison panes so already-committed fences upgrade in place —
+// exactly the LAZY-LOADING.md rerender() step, reused across highlighters.
+const hlToggleGroup = document.getElementById('hl-toggle-group');
+hlToggleGroup.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-hl]');
+  if (!btn || btn.dataset.hl === activeHighlighter) return;
+  const which = btn.dataset.hl;
+  activeHighlighter = which;
+  hlToggleGroup.querySelectorAll('button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.hl === which));
+  const ready = which === 'shiki' ? ensureShiki() : useHighlightjs();
+  ready.then(() => rerenderAfterHighlight());
+});
 
 // The DOM emitter wraps committed blocks in structural containers
 // (.stream-complete / .stream-forming) and leaves empty scaffold nodes behind,
