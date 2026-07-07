@@ -10,6 +10,7 @@ it unless you import it. Register each once, before your first render.
 | HTML sanitizer | `setSanitizerBackend` | `…/sanitizers/dompurify` |
 | Syntax highlighter | `setCodeHighlighter` | `…/highlighters/highlightjs` |
 | Diagram renderer | `setDiagramRenderer` | `…/diagrams/mermaid` |
+| Math renderer | `setMathRenderer` | `…/math/katex` |
 | Custom fenced blocks | `setFenceHandler` | — (you supply the handler) |
 | Custom inline syntax | `setInlinePasses` | — (you supply the pass) |
 | `<a>` routing | `setLinkDecorator` | — |
@@ -98,9 +99,10 @@ Edges to know about:
   Prefer the exported `setSanitizedHtml(el, html)` — the package's reference
   sink — which sanitizes and blesses in one call (also the right tool inside a
   custom `FenceHandler.sync`).
-- **Mermaid SVG** bypasses the markdown sanitizer by design, so the package
-  never blesses it. Under enforcement, pass `transformSvg` to
-  `hydratePendingDiagrams` and return a `TrustedHTML` minted by your own policy
+- **Mermaid SVG and KaTeX HTML** bypass the markdown sanitizer by design, so
+  the package never blesses them. Under enforcement, pass `transformSvg` to
+  `hydratePendingDiagrams` (or `transformHtml` to `hydratePendingMath`) and
+  return a `TrustedHTML` minted by your own policy
   (e.g. `DOMPurify.sanitize(svg, { RETURN_TRUSTED_TYPE: true })`).
 
 ## Syntax highlighting
@@ -130,23 +132,23 @@ same shape applies to Mermaid.
 
 ## Custom fenced blocks (fence handlers)
 
-Mermaid support is built on a general **fence-handler registry**: which HTML a
-fenced code block emits is looked up by the fence's language (case-insensitive),
-and `mermaid` is simply the built-in entry. Register your own to add
-mermaid-style blocks — math, graphviz, vega, and friends:
+Mermaid and math support are built on a general **fence-handler registry**:
+which HTML a fenced code block emits is looked up by the fence's language
+(case-insensitive), and `mermaid` / `math` are simply the built-in entries.
+Register your own to add mermaid-style blocks — graphviz, vega, and friends:
 
 ```ts
 import { setFenceHandler, escapeHtml, FORMING_FENCE_PRE_CLASS } from '@copse/streaming-markdown'
 
-setFenceHandler('math', {
-  // At-rest HTML for a completed ```math fence. Emitted before the sanitizer
+setFenceHandler('graphviz', {
+  // At-rest HTML for a completed ```graphviz fence. Emitted before the sanitizer
   // sink: stay inside the allowlist (or widen it via setSanitizeExtension).
   render: (code) =>
-    `<div class="math-block math-block--pending"><pre class="math">${escapeHtml(code.trimEnd())}</pre></div>`,
+    `<div class="dot-graph dot-graph--pending"><pre class="dot">${escapeHtml(code.trimEnd())}</pre></div>`,
   // Optional: what the fence shows while still streaming (both emitters).
   forming: {
     html: (code) =>
-      `<div class="math-block math-block--pending ${FORMING_FENCE_PRE_CLASS}"><pre class="math">${escapeHtml(code)}</pre></div>`,
+      `<div class="dot-graph dot-graph--pending ${FORMING_FENCE_PRE_CLASS}"><pre class="dot">${escapeHtml(code)}</pre></div>`,
     // Optional incremental DOM update; default = sanitized innerHTML replace.
     sync: (container, code) => {
       /* patch container in place */
@@ -158,9 +160,53 @@ setFenceHandler('math', {
 The pattern is two-phase, like mermaid: the handler emits inert, escaped
 *scaffolding* at render time, and your app hydrates it into rich output (SVG,
 KaTeX, …) **after** the HTML is sanitized at the sink — mermaid's hydrator is
-`hydratePendingDiagrams`. Fences are opaque to the parser, so handlers change
-emission only. `setFenceHandler('mermaid', null)` removes the built-in and
-renders mermaid fences as ordinary code blocks.
+`hydratePendingDiagrams`, math's is `hydratePendingMath`. Fences are opaque to
+the parser, so handlers change emission only. `setFenceHandler('mermaid', null)`
+(or `'math'`) removes a built-in and renders those fences as ordinary code
+blocks.
+
+## Math (KaTeX)
+
+Math is first-class syntax, on by default. Four surface forms emit the same
+inert two-phase scaffolding:
+
+- ```` ```math ```` fences and `$$ … $$` / `\[ … \]` display blocks (delimiters
+  on their own lines, or a one-line `$$E=mc^2$$` / `\[ E=mc^2 \]`) →
+  `<div class="math-block math-block--pending"><pre class="math">…escaped TeX…</pre></div>`
+- `$x$` / `$$x$$` / `\(x\)` inline math →
+  `<span class="math-inline math-inline--pending">…escaped TeX…</span>`
+
+Single-dollar math carries remark-math's currency guards — no whitespace just
+inside the delimiters and no digit right after the closing `$` — so `$20 and
+$30` stays prose; escaped `\$` and `$` inside code spans/fences/link
+destinations never delimit. While streaming, a half-open `$$` block shows a
+forming pending-math state and a half-open `$x+` holds, so raw delimiters never
+flash. (Recognizing `\(…\)`/`\[…\]` is a deliberate, documented divergence from
+CommonMark's escaped-punctuation reading — OpenAI models emit bracket
+delimiters — gated to non-empty bodies so the spec suites still pass.)
+
+The core ships **zero KaTeX code**: without a backend, pending math shows its
+escaped TeX source. Register the KaTeX backend (an optional peer dependency you
+install) and hydrate after the sink, exactly like mermaid:
+
+```ts
+import { hydratePendingMath } from '@copse/streaming-markdown'
+
+const { loadKatex } = await import('@copse/streaming-markdown/math/katex')
+await loadKatex()                  // registers the backend; library loads lazily
+await hydratePendingMath(messageEl) // pending → rendered KaTeX HTML
+```
+
+Don't forget KaTeX's **stylesheet and fonts** (`katex/dist/katex.min.css`) —
+the rendered HTML is unreadable without them. The backend renders with
+`throwOnError: false` (invalid TeX degrades to highlighted source) and
+`trust: false` (no `\href`/`\html*` commands).
+
+**Trust boundary:** like mermaid SVG, KaTeX HTML is injected **after** the sink
+sanitizer by design and is not re-sanitized. A safety-conscious host can pass
+`hydratePendingMath(root, { transformHtml })` to run it through its own
+sanitizer — and under Trusted Types enforcement that hook is required, exactly
+like mermaid's `transformSvg`.
 
 ## Custom inline syntax (inline passes)
 
@@ -253,7 +299,8 @@ its own tags.
 ## Styling
 
 The renderer emits a documented set of class hooks (`stream-pending-*`,
-`contains-task-list`, `mermaid-diagram`, `hljs-*`, … — see the class contract in
+`contains-task-list`, `mermaid-diagram`, `math-block` / `math-inline` (with
+`--pending` / `--rendered` / `--error` states), `hljs-*`, … — see the class contract in
 [`ARCHITECTURE.md`](ARCHITECTURE.md)) but ships no styles by default, so it stays
 host-independent. Two optional stylesheets are provided; both scope every rule
 under a `.streaming-markdown` class, so add that class to the element you render

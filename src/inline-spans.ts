@@ -4,6 +4,7 @@ import { renderAngleAutolinks } from './inline-autolinks.ts'
 import { renderInlineCode } from './inline-code-spans.ts'
 import { INLINE_HTML_SHIELD_RE, renderEmphasisOutsideInlineHtml } from './inline-emphasis.ts'
 import { renderAnchor, renderInlineLinks, safeLinkHref } from './inline-links.ts'
+import { renderInlineMathSpans } from './inline-math.ts'
 import {
   beginInlinePassRender,
   getInlinePasses,
@@ -39,6 +40,10 @@ function renderInlineSpansBeforeLinks(t: string, linkRefs: LinkReferenceMap): st
   t = encodeBackslashEscapes(t)
   t = renderInlineCode(t)
   t = renderAngleAutolinks(t)
+  // Inline math (#70) runs before emphasis because its content is verbatim,
+  // like code: `$a_i * b$` must reach KaTeX untouched. Emitted scaffolding is
+  // shielded through the inline-pass emit table.
+  t = renderInlineMathSpans(t, linkRefs)
   t = renderEmphasisOutsideInlineHtml(t, linkRefs)
   // GFM strikethrough after emphasis (so `~~*x*~~` nests) and before links (so a
   // struck `~~[a](b)~~` still resolves the link inside the <del>).

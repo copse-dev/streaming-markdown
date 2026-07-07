@@ -1,6 +1,7 @@
 import { renderMarkdown } from './renderer.ts'
 import {
   getIncompleteFenceSource,
+  getIncompleteMathSource,
   getIncompleteTableSource,
   isAmbiguousBlockLine,
   pendingLineBelongsInTable,
@@ -35,6 +36,7 @@ import {
   clearFormingFenceDom,
   syncFormingFenceDom,
 } from './streaming-fence-dom.ts'
+import { buildFormingMathHtml, syncFormingMathDom } from './streaming-math-dom.ts'
 import { FrozenTailRenderer } from './streaming-frozen-tail.ts'
 
 export { pendingHoldIndex } from './inline-emphasis.ts'
@@ -554,14 +556,18 @@ export function renderStreamingMarkdown(content: string): string {
     ? sanitizeRenderedMarkdown(renderMarkdown(complete, { tokens: completeTokens() }))
     : ''
   const fenceSource = formingFenceSource(content, blocks)
-  const tableSource = fenceSource
-    ? null
-    : formingTableSource(complete, content, pending, blocks, completeTokensForPending)
+  const mathSource = fenceSource ? null : getIncompleteMathSource(content, blocks)
+  const tableSource =
+    fenceSource || mathSource
+      ? null
+      : formingTableSource(complete, content, pending, blocks, completeTokensForPending)
   const formingHtml = fenceSource
     ? buildFormingFenceHtml(fenceSource)
-    : tableSource
-      ? buildFormingTableHtml(tableSource)
-      : ''
+    : mathSource
+      ? buildFormingMathHtml(mathSource)
+      : tableSource
+        ? buildFormingTableHtml(tableSource)
+        : ''
 
   if (formingHtml) {
     return `${rendered}${formingHtml}`
@@ -658,9 +664,14 @@ export class StreamingMarkdownRenderer {
     // last O(prefix)-per-commit DOM cost after the frozen/tail split (#21).
     const mayHaveCommittedTable = this.committedHasPipe
     const fenceSource = formingFenceSource(content, blocks)
-    const tableSource = formingTableSource(complete, content, pending, blocks, completeTokensForPending)
-    if (fenceSource || tableSource) {
+    const mathSource = fenceSource ? null : getIncompleteMathSource(content, blocks)
+    const tableSource =
+      fenceSource || mathSource
+        ? null
+        : formingTableSource(complete, content, pending, blocks, completeTokensForPending)
+    if (fenceSource || mathSource || tableSource) {
       if (fenceSource) syncFormingFenceDom(formingEl, fenceSource)
+      else if (mathSource) syncFormingMathDom(formingEl, mathSource)
       else if (tableSource) syncFormingTableDom(formingEl, tableSource)
       formingEl.hidden = false
       const committed = mayHaveCommittedTable ? this.findLastCommittedTable() : null
@@ -671,7 +682,7 @@ export class StreamingMarkdownRenderer {
       if (mayHaveCommittedTable) this.syncCommittedTableRow(complete, pending, completeTokensForPending)
     }
 
-    const formingActive = fenceSource !== null || tableSource !== null
+    const formingActive = fenceSource !== null || mathSource !== null || tableSource !== null
     const { pendingInner, pendingVisible } = renderPendingTail(
       split,
       complete,

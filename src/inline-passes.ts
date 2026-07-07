@@ -111,11 +111,11 @@ export const inlinePassContext: InlinePassContext = {
  * Prepare untrusted text for a render that may run inline passes: strip any
  * literal placeholder characters (so markdown text can never address the emit
  * table) and reset the table — placeholders never outlive the single
- * `renderInlineSpans` call that created them. No-op when no passes are
- * registered.
+ * `renderInlineSpans` call that created them. Unconditional since the built-in
+ * inline-math pass (#70) emits through the table on every render, host passes
+ * or not.
  */
 export function beginInlinePassRender(text: string): string {
-  if (inlinePasses.length === 0) return text
   emitted.clear()
   nextEmitId = 0
   return text.replace(TOKEN_CHAR_RE, '')

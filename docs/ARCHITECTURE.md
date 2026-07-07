@@ -66,6 +66,27 @@ When extending the renderer or its CSS, preserve these rules:
   re-sanitized (see the sanitize-at-the-sink note); `hydratePendingDiagrams`'s `transformSvg`
   option is the seam for a host that wants to. `mermaid` must not be imported outside
   `mermaid-mermaidjs.ts`. See [`LAZY-LOADING.md`](LAZY-LOADING.md).
+- **Pluggable math renderer (#70).** KaTeX is never bundled — the generator emits inert
+  scaffolding for every math form: `math-block--pending` + `<pre class="math">` for
+  ```` ```math ```` fences and `$$ … $$` / `\[ … \]` display blocks (own-line delimiters
+  or a one-line `$$E=mc^2$$`; a tokenizer construct, `math_block`), and
+  `math-inline--pending` spans for `$…$` / `$$…$$` / `\(…\)` inline math (a built-in
+  pass in `inline-math.ts`, shielded through the inline-pass emit table). Single-dollar
+  math carries remark-math's currency guards (no whitespace just inside the delimiters,
+  no digit after the closing `$`), so `$20 and $30` stays prose; escaped `\$`, code
+  spans/fences, and link destinations never delimit. Recognizing `\(…\)` / `\[…\]` — the
+  OpenAI delimiter style — deliberately diverges from CommonMark's escaped-punctuation
+  reading, gated to non-empty bodies so both conformance baselines are unchanged.
+  `math.ts` holds the registry (`setMathRenderer`) plus `hydratePendingMath`, which
+  renders each pending element (display mode for blocks, inline for spans) and flips it
+  to `--rendered` or `--error` (escaped source kept visible). The KaTeX backend
+  (`math-katex.ts`, `katexMathRenderer` / `loadKatex`, `throwOnError:false` +
+  `trust:false`) is imported only via the `@copse/streaming-markdown/math/katex` entry,
+  with `katex` an optional peer dependency; the host loads the KaTeX stylesheet/fonts.
+  KaTeX HTML is injected after the sink sanitizer and not re-sanitized (the mermaid
+  trust boundary); `hydratePendingMath`'s `transformHtml` option is the seam for a host
+  that wants to. `katex` must not be imported outside `math-katex.ts`. See
+  [`LAZY-LOADING.md`](LAZY-LOADING.md).
 - **Package boundary.** The core stays app-independent so it can version and ship on
   its own, so host-specific behaviour is **injected, not hard-coded**:
   - `setLinkDecorator` (`inline-links.ts`) — a `LinkDecorator` returns the attributes
@@ -111,7 +132,9 @@ When extending the renderer or its CSS, preserve these rules:
   using tags/attributes beyond the core allowlist must widen it via `setSanitizeExtension`.
   Passes may run more than once over nested link-label text and must be idempotent
   (placeholder tokens make emitted output inert automatically).
-- **Inline formatting order.** Fenced code → inline code → emphasis (delimiter stack) →
+- **Inline formatting order.** Fenced code → inline code → inline math (#70; before
+  emphasis because math content is verbatim, like code — `$a_i * b$` must reach KaTeX
+  untouched) → emphasis (delimiter stack) →
   GFM strikethrough → registered `before-links` inline passes → markdown links → bare HTTP
   autolinks → registered `after-links` passes. Emphasis runs before links so
   `*foo [bar](/url)*` resolves correctly; link labels may already contain `<em>` / `<strong>`
@@ -214,6 +237,8 @@ When extending the renderer or its CSS, preserve these rules:
   | Forming `\| H \|` table | `.stream-forming` + `<th>`                                       | pipes = cell boundaries | per cell           |
   | Pending table body row  | `tr.stream-pending-row` + `<td>`                                 | pipes = cell boundaries | per cell           |
   | Open fenced code        | `.stream-forming pre.stream-fence-forming`                       | yes                     | highlighted        |
+  | Open `$$` / `\[` math   | `.stream-forming .math-block--pending.stream-fence-forming`      | yes                     | no (verbatim TeX)  |
+  | Half-open `$x+` inline  | held via `pendingHoldIndex` (nothing shown past the `$`)         | yes                     | n/a                |
 
   These class hooks are exercised by the optional reference stylesheets in
   [`styles/`](../styles) — `core.css` (structural rules the output needs to render

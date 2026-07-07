@@ -44,17 +44,21 @@ for await (const chunk of stream) {
 ## Highlights
 
 - **Streaming-safe.** Pending block states show partial structure (tables, lists,
-  code, diagrams) without flashing raw syntax; a re-render upgrades in place.
+  code, diagrams, math) without flashing raw syntax; a re-render upgrades in place.
 - **CommonMark + GFM** — tables, task lists, strikethrough, autolinks, indented
   and fenced code. Tracked against the spec's conformance suite.
+- **First-class math.** ```` ```math ```` fences, `$$…$$` and `\[…\]` display
+  blocks (the OpenAI delimiter style), and `$…$` / `\(…\)` inline math with
+  currency guards (`$20 and $30` stays prose) — rendered lazily via KaTeX,
+  streamed without delimiter flash. See [Math in `docs/EXTENDING.md`](docs/EXTENDING.md#math-katex).
 - **Sanitize at the sink.** Rendered HTML is treated as untrusted and links are
   scheme-validated; the sink sanitizer is the security gate.
 - **Light by default.** The only runtime dependency is `entities`. highlight.js,
-  DOMPurify, and mermaid are **optional and lazy** — never in your bundle unless
-  you opt in. See [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md).
-- **Pluggable everything** — sanitizer, syntax highlighter, mermaid & custom
-  fenced blocks, custom inline syntax (citations, highlights), and `<a>` routing
-  are all injectable.
+  DOMPurify, mermaid, and KaTeX are **optional and lazy** — never in your bundle
+  unless you opt in. See [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md).
+- **Pluggable everything** — sanitizer, syntax highlighter, mermaid & math &
+  custom fenced blocks, custom inline syntax (citations, highlights), and `<a>`
+  routing are all injectable.
 
 ## Extending
 

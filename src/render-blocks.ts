@@ -27,6 +27,7 @@ import { getFenceHandler } from './fence-handlers.ts'
 import { fenceCodeClass, highlightFenceCode } from './highlight.ts'
 import { dedentBlock, isIndentedHtmlBlock } from './indented-html.ts'
 import { type LinkReferenceMap } from './link-references.ts'
+import { mathBlockHtml, parseMathBlockSlice } from './math-block.ts'
 import { renderProseBlock } from './render-prose-inline.ts'
 
 export interface RenderBlocksOptions {
@@ -498,6 +499,11 @@ function renderSingleBlock(
       const { lang, code } = parseFenceSlice(slice)
       return renderFencedBlock(lang, code)
     }
+    // Display math (#70): `$$ … $$` / `\[ … \]` emits the same inert pending
+    // scaffolding as a ```math fence; `hydratePendingMath` upgrades it after
+    // the sink sanitizer (the mermaid two-phase shape).
+    case 'math_block':
+      return mathBlockHtml(parseMathBlockSlice(slice).trim())
     case 'atx_heading':
       return renderAtxHeading(slice, linkRefs)
     case 'setext_heading':

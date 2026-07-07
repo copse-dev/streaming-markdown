@@ -1,4 +1,5 @@
 import { escapeMermaidHtml } from './escape.ts'
+import { mathBlockHtml, syncFormingMathBlockDom } from './math-block.ts'
 
 // The fence-handler registry (#53): the generalization of the mermaid special
 // case. A fenced code block whose info-string language has a registered
@@ -93,6 +94,27 @@ const mermaidFenceHandler: FenceHandler = {
 }
 
 /**
+ * The built-in math handler (#70): ```` ```math ```` fences emit the same inert
+ * display-math scaffolding as `$$ … $$` blocks (`math-block--pending` +
+ * `<pre class="math">`, math-block.ts); the KaTeX backend stays behind
+ * `@copse/streaming-markdown/math/katex` and hydrates the scaffolding via
+ * `hydratePendingMath` (`math.ts`).
+ */
+const mathFenceHandler: FenceHandler = {
+  render(code) {
+    return mathBlockHtml(code.trimEnd())
+  },
+  forming: {
+    html(code) {
+      return mathBlockHtml(code, FORMING_FENCE_PRE_CLASS)
+    },
+    sync(container, code) {
+      syncFormingMathBlockDom(container, code, FORMING_FENCE_PRE_CLASS)
+    },
+  },
+}
+
+/**
  * Handler lookup is case-insensitive on the fence language (```` ```MERMAID ````
  * matches like GitHub's), keyed on the first info-string word after the
  * tokenizer's backslash/entity decoding (`fenceInfoLanguage`).
@@ -101,7 +123,10 @@ function normalizeFenceLang(lang: string): string {
   return lang.trim().toLowerCase()
 }
 
-const fenceHandlers = new Map<string, FenceHandler>([['mermaid', mermaidFenceHandler]])
+const fenceHandlers = new Map<string, FenceHandler>([
+  ['mermaid', mermaidFenceHandler],
+  ['math', mathFenceHandler],
+])
 
 /**
  * Register a {@link FenceHandler} for a fence language, replacing any existing

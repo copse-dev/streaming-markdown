@@ -17,25 +17,29 @@ import { StreamingMarkdownRenderer } from './streaming.ts'
 // language, with the built-in mermaid scaffolding as the reference handler.
 
 // A minimal math-style handler emitting only allowlisted tags (div/pre + class).
+// Registering it under 'math' shadows the built-in handler for these tests —
+// which emits the same scaffolding shape — proving hosts can replace built-ins.
 const mathHandler: FenceHandler = {
   render(code) {
     return `<div class="math-block math-block--pending"><pre class="math">${escapeHtml(code.trimEnd())}</pre></div>`
   },
 }
 
-// Capture the built-in mermaid handler once so cleanup can restore it after
-// tests that unregister it.
+// Capture the built-in handlers once so cleanup can restore them after tests
+// that unregister or shadow them.
 const BUILTIN_MERMAID = getFenceHandler('mermaid')
+const BUILTIN_MATH = getFenceHandler('math')
 
 afterEach(() => {
-  setFenceHandler('math', null)
+  setFenceHandler('math', BUILTIN_MATH)
   setFenceHandler('mermaid', BUILTIN_MERMAID)
 })
 
 describe('fence handler registry', () => {
-  it('ships the built-in mermaid handler', () => {
+  it('ships the built-in mermaid and math handlers', () => {
     assert.ok(getFenceHandler('mermaid'))
-    assert.equal(getFenceHandler('math'), null)
+    assert.ok(getFenceHandler('math'))
+    assert.equal(getFenceHandler('graphviz'), null)
   })
 
   it('resolves the fence language case-insensitively', () => {
