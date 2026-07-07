@@ -389,11 +389,11 @@ header comment in [`styles/default.css`](../styles/default.css) for the full lis
 The stylesheets are authored with native CSS nesting; bundle with a target that
 supports it (any current engine) or let your bundler lower it.
 
-### Host-UI recipes
+### UI recipes
 
-Chrome that sits on top of the render — copy buttons on code blocks, download
-links, streaming carets — is host-owned (the same host-independence reason the
-stylesheets are optional). [`RECIPES.md`](RECIPES.md) walks through building them
+Widgets on top of the render — copy buttons on code blocks, download links,
+carets — aren't part of the library; you add them in your own app (the same reason
+the stylesheets are optional). [`RECIPES.md`](RECIPES.md) walks through building them
 against the class hooks above, starting with **copy buttons** and the streaming
 gotcha they hit: the incremental emitter *morphs* the DOM on every `update()`, so a
 naïvely appended button gets reconciled away. It shows the correct

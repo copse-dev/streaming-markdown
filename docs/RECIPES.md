@@ -1,8 +1,8 @@
-# Host-UI recipes
+# UI recipes
 
-Widgets layered on top of rendered markdown (copy buttons, download links, carets)
-are not shipped by the core — the host owns them, using the emitted class hooks.
-This covers **copy buttons on code blocks**.
+Widgets layered on top of rendered markdown — copy buttons on code blocks, download
+links, carets — aren't part of the library; you add them in your own app using the
+emitted class hooks. This covers **copy buttons on code blocks**.
 
 ## The catch
 
