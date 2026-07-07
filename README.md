@@ -63,7 +63,9 @@ for await (const chunk of stream) {
   [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md).
 - **Pluggable everything** — sanitizer, syntax highlighter, mermaid & math &
   custom fenced blocks, custom inline syntax (citations, highlights), and `<a>`
-  routing are all injectable.
+  routing are all injectable. Emoji shortcodes (`:smile:` → 😄) ship as an
+  optional inline pass behind `@copse/streaming-markdown/inline/emoji` — a
+  GitHub/gemoji-aligned map, zero bytes in your bundle unless imported.
 
 ## Extending
 
