@@ -287,6 +287,23 @@ describe('renderStreamingMarkdown (holds unresolved bold)', () => {
     assert.doesNotMatch(html, /stream-pending/)
   })
 
+  it('keeps header cells visible while the separator row streams in (#62 regression)', () => {
+    const header = 'intro\n\n| Block type | Pending class | Settled class |\n'
+    for (const cut of ['|', '|-', '|---', '|---|', '|------------|---------']) {
+      const html = renderStreamingMarkdown(`${header}${cut}`)
+      assert.match(
+        html,
+        /<th>Block type<\/th>/,
+        `header hidden at separator ${JSON.stringify(cut)}`,
+      )
+      assert.doesNotMatch(
+        html,
+        /<t[dh][^>]*>\s*-{2,}/,
+        `dashes leaked into a cell at separator ${JSON.stringify(cut)}`,
+      )
+    }
+  })
+
   it('shows a forming fenced code block with highlighting while streaming', () => {
     const html = renderStreamingMarkdown('intro\n```ts\nconst x = 1')
     assert.match(html, /<p>intro<\/p>/)

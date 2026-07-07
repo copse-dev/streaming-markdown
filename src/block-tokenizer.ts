@@ -635,7 +635,12 @@ export function tokenizeBlocks(source: string): BlockToken[] {
         while (j < lines.length) {
           const nl = lines[j]
           if (!nl) break
-          if (TABLE_SEP_RE.test(nl.text)) break
+          // A *terminated* separator line ends the potential-table scan: the
+          // header/separator pair is judged by the definitive branch above on
+          // the next pass. An unterminated one is the streaming tail of this
+          // forming table (`|---` may yet gain columns) — hold it here so the
+          // header and its half-arrived separator stay one block.
+          if (nl.terminated && TABLE_SEP_RE.test(nl.text)) break
           if (
             !isTableRow(nl.text) &&
             !isPartialTableSeparatorLine(nl.text) &&

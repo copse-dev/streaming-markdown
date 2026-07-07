@@ -68,6 +68,22 @@ describe('tokenizeBlocks', () => {
     assert.equal(block.status, 'open')
   })
 
+  it('keeps a header and its still-streaming separator as one open table block', () => {
+    // `|---` matches TABLE_SEP_RE but has fewer columns than the header while it
+    // streams; splitting them made the header vanish and the partial separator
+    // render as a dashes-only forming table.
+    const blocks = tokenizeBlocks('| A | B | C |\n|---')
+    assert.deepEqual(blocks, [{ kind: 'table', status: 'open', start: 0, end: 18 }])
+  })
+
+  it('still rejects a terminated separator whose column count mismatches (spec 203)', () => {
+    const blocks = tokenizeBlocks('| A | B |\n| - |\nbody\n')
+    assert.equal(
+      blocks.some((b) => b.kind === 'table' && b.status === 'complete'),
+      false,
+    )
+  })
+
   it('marks a lone final text line as an open paragraph (setext waits for next line)', () => {
     const blocks = tokenizeBlocks('Heading')
     const block = blocks[0]
