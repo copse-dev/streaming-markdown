@@ -482,25 +482,79 @@
        the element it will commit to, so promotion only changes color. The
        accent bar hangs in the left gutter via a negative margin that exactly
        cancels its border + padding. */
-    /* `p.…` (not bare class) so this outranks `.compare-panel-body p`'s
-       margin shorthand, which would otherwise reset margin-left to 0. */
-    p.stream-pending-paragraph {
-      background: var(--pending-bg);
-      border-left: 3px solid var(--pending-border);
+    /* Every top-level paragraph and heading carries an INVISIBLE copy of the
+       pending chrome: a transparent accent bar plus gutter padding, cancelled
+       by a negative margin so text position is identical with or without it.
+       Pending→committed is then a pure COLOR change on the same box — the bar
+       and tint fade out together through the transition below instead of the
+       border popping off — and text never moves. Nested paragraphs
+       (blockquote/list-item bodies) opt back out just after. */
+    .compare-panel-body p,
+    .compare-panel-body h1,
+    .compare-panel-body h2,
+    .compare-panel-body h3 {
+      border-left: 3px solid transparent;
       padding-left: 0.6rem;
-      margin: 0.4rem 0 0.4rem calc(-0.6rem - 3px);
-      color: var(--pending-text);
+      margin-left: calc(-0.6rem - 3px);
       border-radius: 0 3px 3px 0;
     }
 
+    .compare-panel-body blockquote p,
+    .compare-panel-body li p {
+      border-left: none;
+      padding-left: 0;
+      margin-left: 0;
+    }
+
+    /* `p.…` (not bare class) so this outranks the base rule above at equal
+       specificity. The `:has()` variant keeps the SAME tint on a committed
+       <p> that still hosts a pending continuation span: the highlight covers
+       the whole open paragraph and lifts exactly once, when the block
+       completes — instead of hopping line-by-line from the committed text to
+       each continuation span. */
+    p.stream-pending-paragraph,
+    p:has(> .stream-pending-paragraph-continuation) {
+      background: var(--pending-bg);
+      border-color: var(--pending-border);
+    }
+
+    /* Hold the tint on the trailing open paragraph for the WHOLE time a
+       stream is live (`.is-streaming`, toggled by the demo driver), not just
+       on frames where the pending tail rendered something. The emitter shows
+       nothing while an unclosed inline span (`**bold …`) is held back, or when
+       a chunk ends exactly on a newline — without this the highlight drops
+       for the whole hold and pops back, which reads as flicker. The trailing
+       <p> stops matching :last-child the moment the next block's element
+       appears, so the highlight lifts exactly when the next item starts; the
+       demo driver removes `.is-streaming` at stream end for a final,
+       still-open paragraph. The DOM-emitter variant applies only while no
+       fence/table is forming (`.stream-forming` still [hidden]) — a forming
+       block after the paragraph means the paragraph is done. */
+    .compare-panel-body.is-streaming > p:last-child,
+    .compare-panel-body.is-streaming
+      .stream-complete:has(+ .stream-forming[hidden])
+      > p:last-child {
+      background: var(--pending-bg);
+      border-color: var(--pending-border);
+    }
+
+    /* Muted text marks only the UNCOMMITTED text: the whole block while it is
+       fully pending, then just the continuation span (via `.stream-pending`)
+       once earlier lines have committed — committed text keeps its final color
+       so it never flips back. */
+    p.stream-pending-paragraph { color: var(--pending-text); }
+
     /* No bar/indent on pending list items — the tinted background and accent
        marker are the pending cue; the text sits where the committed <li>'s
-       text will land. */
-    .stream-pending-list-item {
+       text will land. As with paragraphs, an <li> hosting a continuation span
+       keeps the whole-item tint until the item completes. */
+    .stream-pending-list-item,
+    li:has(> .stream-pending-list-continuation) {
       background: var(--pending-bg);
-      color: var(--pending-text);
       border-radius: 3px;
     }
+
+    .stream-pending-list-item { color: var(--pending-text); }
 
     .stream-pending-list-item::marker { color: var(--accent); }
 
@@ -568,12 +622,11 @@
 
     /* A pending line that lazily continues the open paragraph renders as a
        span INSIDE that <p> (after a real soft break), so commit just recolors
-       it in place — the text never jumps up from a separate block (#11). */
-    .stream-pending-paragraph-continuation,
-    .stream-pending-list-continuation {
-      background: var(--pending-bg);
-      border-radius: 3px;
-    }
+       it in place — the text never jumps up from a separate block (#11).
+       The span carries NO background of its own: the block-level `:has()`
+       highlight on its host paragraph/list item (above) is the pending cue,
+       so nothing un-highlights until the whole block commits. Its muted text
+       color comes from `.stream-pending`. */
 
     /* Subtle settle-in for blocks the incremental DOM emitter commits: new
        nodes fade up from the pending tint instead of popping. Scoped to
@@ -586,11 +639,38 @@
       .stream-complete tbody tr:not(.stream-pending-row) {
         animation: stream-settle 0.25s ease-out;
       }
+
+      /* Fade the pending recolors instead of snapping. Transitions only fire
+         on nodes that keep identity across the change, i.e. the incremental
+         DOM emitter's output (the string emitter rebuilds every node per
+         update, so this is inert there). This also swallows the single-frame
+         highlight dip when a chunk ends exactly on a newline (pending is
+         momentarily empty before the next line's first characters arrive).
+         Colors only — the structural chrome (bar width, padding, negative
+         margin) cancels out by design and must keep snapping as one unit. */
+      .compare-panel-body p,
+      .compare-panel-body li,
+      .compare-panel-body blockquote,
+      .compare-panel-body td {
+        transition: background-color 0.3s ease-out, border-color 0.3s ease-out,
+          color 0.3s ease-out;
+      }
     }
 
     @keyframes stream-settle {
       from { opacity: 0.55; }
       to { opacity: 1; }
+    }
+
+    /* rerenderAfterHighlight() rebuilds a pane in place (fresh renderer, fresh
+       nodes) to upgrade fences that committed before highlight.js loaded. New
+       nodes would replay stream-settle across the WHOLE pane — one subtle
+       full-output blink. The class suppresses the animation from the rebuild
+       until the pane's next reset; higher specificity than the rule above. */
+    .no-settle .stream-complete > :not(.stream-pending-block),
+    .no-settle .stream-complete li,
+    .no-settle .stream-complete tbody tr {
+      animation: none;
     }
 
     /* ── Code snippet section ────────────────────────────── */
@@ -1176,7 +1256,7 @@ const PRESETS = {
 
 This demo shows **streaming markdown** rendering with pending block states.
 Blocks are styled differently while they're still *forming*, then settle into
-their final appearance once the next newline arrives.
+their final appearance in one step once the whole block completes.
 
 ## Features
 
@@ -1377,6 +1457,48 @@ Second paragraph after a thematic break. The renderer handles:
 That's it — *start typing in the textarea above* to see your own markdown stream in.`
 };
 
+// ── Smooth auto-follow ──────────────────────────────────────────────────────
+// Assigning `scrollTop = scrollHeight` on every stream tick snaps the pane a
+// full line at a time. Instead, each streaming pane eases toward the bottom on
+// animation frames, spreading each line-height jump over a few frames. Under
+// prefers-reduced-motion the follow snaps directly, as before.
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const followers = new Map(); // pane element -> requestAnimationFrame id
+
+function followBottom(el) {
+  if (reducedMotion.matches) {
+    el.scrollTop = el.scrollHeight;
+    return;
+  }
+  if (followers.has(el)) return; // already easing toward the bottom
+  const step = () => {
+    const target = el.scrollHeight - el.clientHeight;
+    const delta = target - el.scrollTop;
+    if (delta <= 0.5) {
+      el.scrollTop = target;
+      followers.delete(el);
+      return;
+    }
+    // Exponential ease-out with a minimum step so it always converges.
+    el.scrollTop += Math.max(delta * 0.18, Math.min(delta, 1.5));
+    followers.set(el, requestAnimationFrame(step));
+  };
+  followers.set(el, requestAnimationFrame(step));
+}
+
+// Never let a simulated chunk end exactly ON a newline: the pending tail
+// (everything after the last newline) would be empty for one whole tick, so
+// the open block's highlight would drop for a frame and reappear when the
+// next line's first character arrives — a per-line flicker, worst in slow
+// mode. Stepping one char past the newline keeps the pending tail non-empty
+// across line breaks; a chunk landing between the two newlines of a blank
+// line instead swallows both, committing the block in the same tick.
+function advancePos(text, pos, step) {
+  let next = Math.min(pos + step, text.length);
+  if (next < text.length && text[next - 1] === '\n') next++;
+  return next;
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 let heroRenderer = null;
 let heroTimer = null;
@@ -1404,6 +1526,8 @@ const heroUpdatesEl = document.getElementById('hero-updates');
 function heroReset() {
   if (heroTimer) clearInterval(heroTimer);
   heroOutput.innerHTML = '';
+  heroOutput.classList.remove('no-settle');
+  heroOutput.classList.add('is-streaming');
   heroRenderer = new StreamingMarkdownRenderer(heroOutput);
   heroPos = 0;
   heroUpdates = 0;
@@ -1418,6 +1542,7 @@ function heroTick(text) {
     heroPos = text.length;
     clearInterval(heroTimer);
     heroStreaming = false;
+    heroOutput.classList.remove('is-streaming');
     heroDot.classList.remove('active');
     const elapsed = (performance.now() - heroStart) / 1000;
     heroCps.textContent = `${Math.round(text.length / elapsed).toLocaleString()} chars/s`;
@@ -1428,13 +1553,13 @@ function heroTick(text) {
     heroTimer = setTimeout(() => startHero(), 3500);
     return;
   }
-  heroPos = Math.min(heroPos + 6, text.length);
+  heroPos = advancePos(text, heroPos, 6);
   const heroPartial = text.slice(0, heroPos);
   detectExtras(heroPartial);
   heroRenderer.update(heroPartial);
   // Keep the newest content in view as the stream grows. The pane is its own
   // scroll container (overflow-y:auto), so this never moves the page.
-  heroOutput.scrollTop = heroOutput.scrollHeight;
+  followBottom(heroOutput);
   heroUpdates++;
   const elapsed = (performance.now() - heroStart) / 1000 || 0.001;
   heroCps.textContent = `${Math.round(heroPos / elapsed).toLocaleString()} chars/s`;
@@ -1485,6 +1610,9 @@ function clearCompare() {
   comparePos = 0;
   stringOutput.innerHTML = '';
   domOutput.innerHTML = '';
+  domOutput.classList.remove('no-settle');
+  stringOutput.classList.remove('is-streaming');
+  domOutput.classList.remove('is-streaming');
   stringStats.innerHTML = '<span>—</span>';
   domStats.innerHTML = '<span>—</span>';
   fidelityBadge.style.visibility = 'hidden';
@@ -1497,6 +1625,9 @@ function startCompare() {
 
   stringOutput.innerHTML = '';
   domOutput.innerHTML = '';
+  domOutput.classList.remove('no-settle');
+  stringOutput.classList.add('is-streaming');
+  domOutput.classList.add('is-streaming');
   fidelityBadge.style.visibility = 'hidden';
   domRenderer = new StreamingMarkdownRenderer(domOutput);
 
@@ -1516,6 +1647,8 @@ function startCompare() {
       clearInterval(compareTimer);
       compareTimer = null;
       compareStreaming = false;
+      stringOutput.classList.remove('is-streaming');
+      domOutput.classList.remove('is-streaming');
       const elapsed = performance.now() - compareStart;
       stringStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
       domStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
@@ -1526,7 +1659,7 @@ function startCompare() {
       return;
     }
 
-    comparePos = Math.min(comparePos + step, text.length);
+    comparePos = advancePos(text, comparePos, step);
     const partial = text.slice(0, comparePos);
     detectExtras(partial);
 
@@ -1541,8 +1674,8 @@ function startCompare() {
 
     // Keep the newest content in view; each panel is its own scroll container,
     // so this never moves the page.
-    stringOutput.scrollTop = stringOutput.scrollHeight;
-    domOutput.scrollTop = domOutput.scrollHeight;
+    followBottom(stringOutput);
+    followBottom(domOutput);
 
     compareUpdates++;
     const elapsed = performance.now() - compareStart;
@@ -1561,6 +1694,11 @@ function startCompare() {
 // from the first paint, so the upgrade only swaps text for token spans.
 function rerenderAfterHighlight() {
   if (heroText && heroPos > 0) {
+    // Every node in the pane is about to be recreated with identical layout —
+    // suppress the settle animation until the next reset, or the whole pane
+    // re-fades as one subtle blink. (Blocks committed during the remainder of
+    // this stream skip their settle fade too; next loop restores it.)
+    heroOutput.classList.add('no-settle');
     heroOutput.innerHTML = '';
     heroRenderer = new StreamingMarkdownRenderer(heroOutput);
     heroRenderer.update(heroText.slice(0, heroPos));
@@ -1570,6 +1708,7 @@ function rerenderAfterHighlight() {
   if (compareText && comparePos > 0) {
     const partial = compareText.slice(0, comparePos);
     stringOutput.innerHTML = renderStreamingMarkdown(partial);
+    domOutput.classList.add('no-settle');
     domOutput.innerHTML = '';
     domRenderer = new StreamingMarkdownRenderer(domOutput);
     domRenderer.update(partial);
