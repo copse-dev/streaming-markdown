@@ -311,6 +311,24 @@ setInlinePasses([
 
 With no passes registered the pipeline is unchanged and output is byte-identical.
 
+**Or use the shipped emoji pass.** Emoji shortcodes (`:smile:` → 😄) are the same
+recipe promoted to a built-in, optional pass — so hosts don't hand-roll the
+shortcode map. It lives behind its own subpath (zero bytes in the main bundle
+unless imported) and ships a GitHub/gemoji-aligned table so `:shortcode:`s an LLM
+emits resolve to the glyph GitHub would render:
+
+```ts
+import { setInlinePasses } from '@copse/streaming-markdown'
+import { emojiInlinePass } from '@copse/streaming-markdown/inline/emoji'
+
+setInlinePasses([emojiInlinePass]) // once, before the first render
+```
+
+It obeys the full contract for free: `` `:smile:` `` and `\:smile:` stay literal,
+unknown codes pass through, and a half-typed `:smi` holds mid-stream. Extend or
+replace the table with `createEmojiInlinePass(customMap)`, or read the shipped
+`emojiShortcodes` map from the same entry.
+
 ## Link routing (`LinkDecorator`)
 
 A `LinkDecorator` returns the attribute string appended after `href` on every

@@ -48,6 +48,11 @@
       "import": "./dist/math-katex.js",
       "default": "./dist/math-katex.js"
     },
+    "./inline/emoji": {
+      "types": "./dist/emoji-shortcodes.d.ts",
+      "import": "./dist/emoji-shortcodes.js",
+      "default": "./dist/emoji-shortcodes.js"
+    },
     "./sanitizers/browser": {
       "types": "./dist/sanitize-browser.d.ts",
       "import": "./dist/sanitize-browser.js",
