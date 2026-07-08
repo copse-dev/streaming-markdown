@@ -72,6 +72,12 @@ for await (const chunk of stream) {
   routing are all injectable. Emoji shortcodes (`:smile:` → 😄) ship as an
   optional inline pass behind `@copse/streaming-markdown/inline/emoji` — a
   GitHub/gemoji-aligned map, zero bytes in your bundle unless imported.
+- **Optional reveal smoothing.** An opt-in helper
+  (`@copse/streaming-markdown/smoothing`) steadies chunky token arrival into a
+  smooth character-cadence reveal by throttling the *input* fed to
+  `renderer.update()`. Off by default and zero bytes unless imported; honours
+  `prefers-reduced-motion` and flushes immediately on stream end. See
+  [Input smoothing in `docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md#input-smoothing--an-opt-in-reveal-cadence-84).
 
 ## Extending
 
