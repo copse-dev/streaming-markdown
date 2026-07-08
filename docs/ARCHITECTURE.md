@@ -95,6 +95,21 @@ When extending the renderer or its CSS, preserve these rules:
   trust boundary); `hydratePendingMath`'s `transformHtml` option is the seam for a host
   that wants to. `katex` must not be imported outside `math-katex.ts`. See
   [`LAZY-LOADING.md`](LAZY-LOADING.md).
+- **Entity decoding is a pluggable, dependency-free default** (`entity-decoder.ts`, a
+  leaf shared by `backslash-escapes.ts`, `link-references.ts`, and `block-patterns.ts`).
+  CommonMark decodes the full HTML5 named + numeric reference set, but the full named
+  table is ~2,100 entries (~23 KB gzip — ~half the core's transfer size), and models
+  emit almost exclusively its Latin-1 / typographic / math tail. So the default decoder
+  carries the 252 classic HTML4 named references (values pinned to their HTML5 code
+  points, so any built-in name decodes byte-identically to the full table) plus all
+  numeric references, which are algorithmic (Windows-1252 C1 remap + surrogate/range →
+  U+FFFD, matching `entities`/`he`). Across the whole CommonMark spec that subset costs
+  exactly one example (#25). `setEntityDecoder` swaps in full coverage: `browserEntityDecoder`
+  borrows the browser's own parser table through a detached `<textarea>` (zero bundle
+  cost, strict because only complete `&name;` tokens are handed to it, so the parser's
+  semicolon-less legacy decoding never fires), or the `@copse/streaming-markdown/entities/full`
+  entry registers the `entities`-backed decoder (`entities` an optional peer dependency).
+  `addNamedEntities` / `setNamedEntities` extend the built-in set without a full decoder.
 - **Package boundary.** The core stays app-independent so it can version and ship on
   its own, so host-specific behaviour is **injected, not hard-coded**:
   - `setLinkDecorator` (`inline-links.ts`) — a `LinkDecorator` returns the attributes

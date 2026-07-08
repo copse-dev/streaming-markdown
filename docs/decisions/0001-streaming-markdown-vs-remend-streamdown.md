@@ -18,7 +18,7 @@ These are not the same kind of tool, so a flat "A vs B" is the wrong axis:
 | What it is             | Full renderer (markdown → HTML/DOM)            | String **pre-processor** ("self-healing")        | React **component**                     |
 | Streaming strategy     | Native incremental state machine — holds/reveals partial tokens via designed pending states | Append synthetic closing markers, then re-parse the whole string | remend + remark/rehype, re-render each token |
 | Framework              | Host-independent                               | Framework-agnostic (healer only)                 | React-bound                             |
-| Deps                   | `entities`, `dompurify`, `highlight.js`        | **zero**                                          | React + remark + rehype + shiki + katex + mermaid |
+| Deps                   | **zero required** (`dompurify`, `highlight.js`, `entities`, … all optional) | **zero**                             | React + remark + rehype + shiki + katex + mermaid |
 | Streaming-layer output | HTML string **or** incremental DOM patches     | a *healed markdown string* (still needs a renderer) | rendered React tree                  |
 
 **Two philosophies:**

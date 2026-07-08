@@ -61,13 +61,27 @@ for await (const chunk of stream) {
   restrict which origins links/images may point at, rewrite/neutralize the rest,
   and strip base64 `data:` images — off by default, byte-identical until you set
   it. See [Link/image origin policy in `docs/EXTENDING.md`](docs/EXTENDING.md#linkimage-origin-policy).
-- **Light by default.** The only runtime dependency is `entities`. highlight.js
-  (or Shiki — both ship as backends), DOMPurify, mermaid, and KaTeX are
-  **optional and lazy** — never in your bundle unless you opt in. See
+- **Zero runtime dependencies.** The core carries no required dependency. HTML
+  character references decode against a built-in set (the 252 classic HTML4 named
+  references plus all numeric references) that covers essentially everything real
+  markdown emits; the full ~2,100-entry HTML5 table (~23 KB gzip) is opt-in via
+  `browserEntityDecoder` (zero bundle cost in the DOM) or the
+  `@copse/streaming-markdown/entities/full` entry — see
+  [Entity decoding in `docs/EXTENDING.md`](docs/EXTENDING.md#entity-decoding).
+  highlight.js (or Shiki — both ship as backends), DOMPurify, mermaid, and KaTeX
+  are **optional and lazy** — never in your bundle unless you opt in. See
   [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md).
 - **Pluggable everything** — sanitizer, syntax highlighter, mermaid & math &
   custom fenced blocks, custom inline syntax (citations, highlights), and `<a>`
-  routing are all injectable.
+  routing are all injectable. Emoji shortcodes (`:smile:` → 😄) ship as an
+  optional inline pass behind `@copse/streaming-markdown/inline/emoji` — a
+  GitHub/gemoji-aligned map, zero bytes in your bundle unless imported.
+- **Optional reveal smoothing.** An opt-in helper
+  (`@copse/streaming-markdown/smoothing`) steadies chunky token arrival into a
+  smooth character-cadence reveal by throttling the *input* fed to
+  `renderer.update()`. Off by default and zero bytes unless imported; honours
+  `prefers-reduced-motion` and flushes immediately on stream end. See
+  [Input smoothing in `docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md#input-smoothing--an-opt-in-reveal-cadence-84).
 
 ## Extending
 
@@ -107,6 +121,8 @@ variables, and native-nesting note — are in [`docs/EXTENDING.md`](docs/EXTENDI
 
 - **[`docs/EXTENDING.md`](docs/EXTENDING.md)** — every plug point (sanitizer,
   highlighter, custom fenced blocks, link routing, images, scheme allowlist) and styling.
+- **[`docs/RECIPES.md`](docs/RECIPES.md)** — UI recipes: how to add copy
+  buttons (and similar widgets) to code blocks without fighting the streaming morph.
 - **[`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md)** — why the heavy deps are
   optional and lazy, and how the code-split loading works.
 - **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — design invariants, the

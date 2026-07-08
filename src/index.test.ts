@@ -22,6 +22,14 @@ const EXPECTED_FUNCTIONS = [
   'escapeHtml',
   'escapeHtmlTextNodes',
   'decodeSafeMarkdownEntities',
+  'decodeHtmlEntities',
+  'setEntityDecoder',
+  'getEntityDecoder',
+  'setNamedEntities',
+  'addNamedEntities',
+  'getNamedEntities',
+  'resetEntityDecoder',
+  'browserEntityDecoder',
   'fenceCodeClass',
   'getCodeHighlighter',
   'highlightFenceCode',
@@ -72,6 +80,8 @@ describe('public API barrel (index.ts)', () => {
     assert.ok(Array.isArray(api.DEFAULT_SAFE_HREF_SCHEMES))
     assert.ok(api.DEFAULT_SAFE_HREF_SCHEMES.includes('https'))
     assert.ok(api.KNOWN_LANGUAGES instanceof Set || Array.isArray(api.KNOWN_LANGUAGES))
+    assert.equal(typeof api.BUILTIN_NAMED_ENTITIES, 'object')
+    assert.equal(api.BUILTIN_NAMED_ENTITIES['copy'], '©')
   })
 
   it('the barrel adds no unexpected runtime exports', () => {
@@ -88,6 +98,7 @@ describe('public API barrel (index.ts)', () => {
       'DEFAULT_SAFE_HREF_SCHEMES',
       'KNOWN_LANGUAGES',
       'browserSanitizerBackend',
+      'BUILTIN_NAMED_ENTITIES',
     ].sort()
     assert.deepEqual(runtimeExports, expected)
   })

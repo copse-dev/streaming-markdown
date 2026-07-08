@@ -312,6 +312,24 @@ setInlinePasses([
 
 With no passes registered the pipeline is unchanged and output is byte-identical.
 
+**Or use the shipped emoji pass.** Emoji shortcodes (`:smile:` → 😄) are the same
+recipe promoted to a built-in, optional pass — so hosts don't hand-roll the
+shortcode map. It lives behind its own subpath (zero bytes in the main bundle
+unless imported) and ships a GitHub/gemoji-aligned table so `:shortcode:`s an LLM
+emits resolve to the glyph GitHub would render:
+
+```ts
+import { setInlinePasses } from '@copse/streaming-markdown'
+import { emojiInlinePass } from '@copse/streaming-markdown/inline/emoji'
+
+setInlinePasses([emojiInlinePass]) // once, before the first render
+```
+
+It obeys the full contract for free: `` `:smile:` `` and `\:smile:` stay literal,
+unknown codes pass through, and a half-typed `:smi` holds mid-stream. Extend or
+replace the table with `createEmojiInlinePass(customMap)`, or read the shipped
+`emojiShortcodes` map from the same entry.
+
 ## Link routing (`LinkDecorator`)
 
 A `LinkDecorator` returns the attribute string appended after `href` on every
@@ -407,6 +425,49 @@ The classes it adds (`class` values) are already inside the sink allowlist, so n
 `setSanitizeExtension` widening is needed for the policy itself. For images to
 reach the policy at all, a host must first allow `<img>` through the sink (image
 handling is host-injected — see [Raw images](#raw-images)).
+## Entity decoding
+
+CommonMark decodes the full HTML5 named + numeric character-reference set, but
+the full named table is ~2,100 entries (~23 KB gzip — roughly half the core's
+transfer size). Models overwhelmingly emit only the Latin-1 / typographic / math
+tail of it, so the **default decoder is dependency-free**: it carries the 252
+classic HTML4 named references plus *all* numeric references (which need no table
+— they are algorithmic). Across the entire CommonMark spec that subset costs
+exactly **one** example (#25, which packs HTML5-only names like `&Dcaron;` and
+`&HilbertSpace;`).
+
+Need the full HTML5 set? Register a decoder — no change to how you call the
+renderer, decoding routes through it automatically:
+
+```ts
+import { setEntityDecoder, browserEntityDecoder } from '@copse/streaming-markdown'
+
+// Option A — the browser's own parser table, via a detached <textarea>.
+// Full HTML5 coverage at ZERO bundle cost. DOM only.
+setEntityDecoder(browserEntityDecoder)
+
+// Option B — the `entities` package (install it as a peer dep). Works anywhere,
+// adds the ~23 KB table to your bundle. Best for Node/SSR without a DOM.
+import { installFullEntityDecoder } from '@copse/streaming-markdown/entities/full'
+installFullEntityDecoder()
+```
+
+Both are strict (a trailing `;` is required, per CommonMark) and decode any name
+in the built-in set byte-identically to the full table.
+
+Just need a handful of extra names? Extend the built-in set instead of shipping
+the whole table:
+
+```ts
+import { addNamedEntities } from '@copse/streaming-markdown'
+
+addNamedEntities({ checkmark: '✓', myco: '🌱' }) // keys are bare names, no &/;
+```
+
+`addNamedEntities` merges (user entries win on collision), `setNamedEntities`
+replaces the user layer, `getNamedEntities` returns the effective set, and
+`resetEntityDecoder` restores the default decoder and clears user names. These
+affect the built-in decoder only — a `setEntityDecoder` decoder owns its own set.
 
 ## Widening the sanitizer allowlist
 
@@ -448,3 +509,14 @@ header comment in [`styles/default.css`](../styles/default.css) for the full lis
 
 The stylesheets are authored with native CSS nesting; bundle with a target that
 supports it (any current engine) or let your bundler lower it.
+
+### UI recipes
+
+Widgets on top of the render — copy buttons on code blocks, download links,
+carets — aren't part of the library; you add them in your own app (the same reason
+the stylesheets are optional). [`RECIPES.md`](RECIPES.md) walks through building them
+against the class hooks above, starting with **copy buttons** and the streaming
+gotcha they hit: the incremental emitter *morphs* the DOM on every `update()`, so a
+naïvely appended button gets reconciled away. It shows the correct
+delegation + idempotent re-attach pattern and how to copy clean source rather than
+tokenized markup.
