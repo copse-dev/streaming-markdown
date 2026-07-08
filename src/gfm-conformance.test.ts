@@ -26,6 +26,7 @@ import { resolve } from 'node:path'
 import { renderMarkdown } from './renderer.ts'
 import { stripAppCodeDecorations } from './highlight.ts'
 import { installHighlightjs } from './highlight-hljs.ts'
+import { installFullEntityDecoder } from './entity-decoder-full.ts'
 import { stripAppImageAttributes, stripAppLinkAttributes } from './inline-links.ts'
 import { normalizeHtml } from '../tests/commonmark/normalize.ts'
 import {
@@ -61,6 +62,11 @@ function runGfmConformance(): void {
 // The baseline was recorded with highlighting on; register the backend so the
 // conformance render matches it (span decorations are stripped before comparison).
 installHighlightjs()
+// GFM is a strict superset of CommonMark, so — like the CommonMark harness — the
+// entity section exercises the full HTML5 named-reference set (e.g. `&HilbertSpace;`).
+// The default decoder ships only the HTML4 subset, so register the full
+// `entities`-backed decoder here to measure conformance under config #3 (full).
+installFullEntityDecoder()
 
 const SPEC_VERSION = gfmSpecVersion()
 const spec = loadGfmSpec()
