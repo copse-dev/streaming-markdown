@@ -69,7 +69,9 @@ for await (const chunk of stream) {
   [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md).
 - **Pluggable everything** — sanitizer, syntax highlighter, mermaid & math &
   custom fenced blocks, custom inline syntax (citations, highlights), and `<a>`
-  routing are all injectable.
+  routing are all injectable. Emoji shortcodes (`:smile:` → 😄) ship as an
+  optional inline pass behind `@copse/streaming-markdown/inline/emoji` — a
+  GitHub/gemoji-aligned map, zero bytes in your bundle unless imported.
 
 ## Extending
 
@@ -109,6 +111,8 @@ variables, and native-nesting note — are in [`docs/EXTENDING.md`](docs/EXTENDI
 
 - **[`docs/EXTENDING.md`](docs/EXTENDING.md)** — every plug point (sanitizer,
   highlighter, custom fenced blocks, link routing, images, scheme allowlist) and styling.
+- **[`docs/RECIPES.md`](docs/RECIPES.md)** — UI recipes: how to add copy
+  buttons (and similar widgets) to code blocks without fighting the streaming morph.
 - **[`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md)** — why the heavy deps are
   optional and lazy, and how the code-split loading works.
 - **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — design invariants, the
