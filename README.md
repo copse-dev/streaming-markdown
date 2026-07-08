@@ -57,9 +57,15 @@ for await (const chunk of stream) {
   See [Math in `docs/EXTENDING.md`](docs/EXTENDING.md#math-katex).
 - **Sanitize at the sink.** Rendered HTML is treated as untrusted and links are
   scheme-validated; the sink sanitizer is the security gate.
-- **Light by default.** The only runtime dependency is `entities`. highlight.js
-  (or Shiki — both ship as backends), DOMPurify, mermaid, and KaTeX are
-  **optional and lazy** — never in your bundle unless you opt in. See
+- **Zero runtime dependencies.** The core carries no required dependency. HTML
+  character references decode against a built-in set (the 252 classic HTML4 named
+  references plus all numeric references) that covers essentially everything real
+  markdown emits; the full ~2,100-entry HTML5 table (~23 KB gzip) is opt-in via
+  `browserEntityDecoder` (zero bundle cost in the DOM) or the
+  `@copse/streaming-markdown/entities/full` entry — see
+  [Entity decoding in `docs/EXTENDING.md`](docs/EXTENDING.md#entity-decoding).
+  highlight.js (or Shiki — both ship as backends), DOMPurify, mermaid, and KaTeX
+  are **optional and lazy** — never in your bundle unless you opt in. See
   [`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md).
 - **Pluggable everything** — sanitizer, syntax highlighter, mermaid & math &
   custom fenced blocks, custom inline syntax (citations, highlights), and `<a>`

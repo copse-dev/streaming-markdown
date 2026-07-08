@@ -282,6 +282,14 @@ describe('innerHTML chokepoint guard', () => {
     // Assignment sinks only — reads like `const s = el.innerHTML` stay legal.
     const sinkRe =
       /\.(?:innerHTML|outerHTML)\s*=[^=]|\.insertAdjacentHTML\s*\(|document\.write/
+    // A line may carry an explicit, auditable exemption when the sink provably
+    // cannot inject markup — annotate it with `html-sink-exempt: <reason>`. This
+    // keeps the guard default-deny while making every exception greppable and
+    // reviewed. Current exemptions:
+    //   - entity-decoder.ts: a detached <textarea> used only to DECODE a strict
+    //     `&name;` token (regex-bounded, cannot contain `<`); its `.value` is read
+    //     as text and never re-injected as HTML.
+    const exemptRe = /html-sink-exempt:/
     for (const file of readdirSync(srcDir, { recursive: true }) as string[]) {
       if (!file.endsWith('.ts') || file.endsWith('.test.ts') || file === 'html-sink.ts') continue
       const lines = readFileSync(join(srcDir, file), 'utf8').split('\n')
@@ -290,7 +298,7 @@ describe('innerHTML chokepoint guard', () => {
         // Prose references in comments (e.g. "identical to `innerHTML = html`")
         // are fine; only code can reach a sink.
         if (trimmed.startsWith('//') || trimmed.startsWith('*')) return
-        if (sinkRe.test(line)) offenders.push(`${file}:${i + 1}: ${trimmed}`)
+        if (sinkRe.test(line) && !exemptRe.test(line)) offenders.push(`${file}:${i + 1}: ${trimmed}`)
       })
     }
     assert.deepEqual(
