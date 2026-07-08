@@ -311,6 +311,24 @@ setInlinePasses([
 
 With no passes registered the pipeline is unchanged and output is byte-identical.
 
+**Or use the shipped emoji pass.** Emoji shortcodes (`:smile:` → 😄) are the same
+recipe promoted to a built-in, optional pass — so hosts don't hand-roll the
+shortcode map. It lives behind its own subpath (zero bytes in the main bundle
+unless imported) and ships a GitHub/gemoji-aligned table so `:shortcode:`s an LLM
+emits resolve to the glyph GitHub would render:
+
+```ts
+import { setInlinePasses } from '@copse/streaming-markdown'
+import { emojiInlinePass } from '@copse/streaming-markdown/inline/emoji'
+
+setInlinePasses([emojiInlinePass]) // once, before the first render
+```
+
+It obeys the full contract for free: `` `:smile:` `` and `\:smile:` stay literal,
+unknown codes pass through, and a half-typed `:smi` holds mid-stream. Extend or
+replace the table with `createEmojiInlinePass(customMap)`, or read the shipped
+`emojiShortcodes` map from the same entry.
+
 ## Link routing (`LinkDecorator`)
 
 A `LinkDecorator` returns the attribute string appended after `href` on every
@@ -388,3 +406,14 @@ header comment in [`styles/default.css`](../styles/default.css) for the full lis
 
 The stylesheets are authored with native CSS nesting; bundle with a target that
 supports it (any current engine) or let your bundler lower it.
+
+### UI recipes
+
+Widgets on top of the render — copy buttons on code blocks, download links,
+carets — aren't part of the library; you add them in your own app (the same reason
+the stylesheets are optional). [`RECIPES.md`](RECIPES.md) walks through building them
+against the class hooks above, starting with **copy buttons** and the streaming
+gotcha they hit: the incremental emitter *morphs* the DOM on every `update()`, so a
+naïvely appended button gets reconciled away. It shows the correct
+delegation + idempotent re-attach pattern and how to copy clean source rather than
+tokenized markup.

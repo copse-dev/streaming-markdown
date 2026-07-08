@@ -179,6 +179,25 @@ re-sanitized, matching the mermaid invariant; `hydratePendingMath(root,
 { transformHtml })` is the seam for a host that wants to (and the required hook
 under Trusted Types enforcement).
 
+## Emoji shortcodes — a lazy data subpath, no peer
+
+Emoji shortcodes (#86) reuse the split for a *data* payload rather than a
+library. The optional pass and its GitHub/gemoji-aligned map live in
+`src/emoji-shortcodes.ts` / `src/emoji-shortcode-map.ts` behind
+`@copse/streaming-markdown/inline/emoji`; the ~50 KB alias table is pulled into a
+bundle only when a host imports that entry, so a consumer that never opts in pays
+zero bytes for it (`src/emoji-shortcodes.test.ts` asserts this with an esbuild
+bundle of the main entry). Unlike the highlighter/mermaid/KaTeX backends there is
+no optional peer dependency — the pass is pure string work built on the public
+`setInlinePasses` contract, so it needs no registry in the core at all.
+
+```ts
+import { setInlinePasses } from '@copse/streaming-markdown'
+import { emojiInlinePass } from '@copse/streaming-markdown/inline/emoji'
+
+setInlinePasses([emojiInlinePass]) // `:smile:` → 😄; see EXTENDING.md#custom-inline-syntax-inline-passes
+```
+
 ## Input smoothing — an opt-in reveal cadence (#84)
 
 Chunky token arrival shows as chunky updates: an LLM transport delivers text in
