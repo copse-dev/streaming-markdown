@@ -56,7 +56,11 @@ for await (const chunk of stream) {
   byte-identical to a math-free build (`setMathSyntax` overrides either way).
   See [Math in `docs/EXTENDING.md`](docs/EXTENDING.md#math-katex).
 - **Sanitize at the sink.** Rendered HTML is treated as untrusted and links are
-  scheme-validated; the sink sanitizer is the security gate.
+  scheme-validated; the sink sanitizer is the security gate. An opt-in
+  **link/image origin allowlist** (`setLinkImagePolicy`) layers on top —
+  restrict which origins links/images may point at, rewrite/neutralize the rest,
+  and strip base64 `data:` images — off by default, byte-identical until you set
+  it. See [Link/image origin policy in `docs/EXTENDING.md`](docs/EXTENDING.md#linkimage-origin-policy).
 - **Zero runtime dependencies.** The core carries no required dependency. HTML
   character references decode against a built-in set (the 252 classic HTML4 named
   references plus all numeric references) that covers essentially everything real

@@ -52,6 +52,8 @@ const EXPECTED_FUNCTIONS = [
   'renderAnchor',
   'setLinkDecorator',
   'setSafeHrefSchemes',
+  'getLinkImagePolicy',
+  'setLinkImagePolicy',
   'stripAppImageAttributes',
   'stripAppLinkAttributes',
   'isWorkspaceMarkdownLinkHref',

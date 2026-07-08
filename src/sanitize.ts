@@ -1,3 +1,4 @@
+import { applyLinkImagePolicy } from './link-image-policy.ts'
 import { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize-browser.ts'
 
 // Defense-in-depth over the hand-assembled HTML that `renderMarkdown()` emits.
@@ -211,6 +212,10 @@ function gateElement(node: Element, tagName: string): void {
     node.setAttribute('disabled', '')
     return
   }
+  // Core link/image origin policy (opt-in, off by default) — a no-op unless a
+  // policy is installed. Runs before the host hook so the host sees the already
+  // origin-vetted `<a>`/`<img>`, and composes with (never replaces) it.
+  applyLinkImagePolicy(node, tagName)
   // Host-specific gating (e.g. a remote-artifact `<img>` policy) runs here.
   sanitizeExtension?.onElement?.(node, tagName)
 }

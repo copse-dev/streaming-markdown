@@ -20,6 +20,14 @@ export {
   type SanitizerBackend,
   type SanitizerConfig,
 } from './sanitize.ts'
+// Opt-in link/image origin allowlist (#83). Off by default (byte-identical
+// output until installed); composes with the scheme allowlist and sink
+// sanitizer rather than replacing them. See docs/EXTENDING.md.
+export {
+  getLinkImagePolicy,
+  type LinkImagePolicy,
+  setLinkImagePolicy,
+} from './link-image-policy.ts'
 // Trusted Types support: every internal `innerHTML` write routes through the
 // html-sink chokepoint, which sanitizes and then blesses the markup with a TT
 // policy when one is active (a lazily created `streaming-markdown` policy by
