@@ -135,17 +135,46 @@ function renderedBareLink(label: string, href: string): string {
 const BARE_HTTP_URL_RE = /(^|[\s(])((?:https?:\/\/)[^\s<]+)/gi
 const TRAILING_URL_PUNCTUATION_RE = /[),.;:!?_]+$/
 
+/**
+ * Opt-in override (default `null`) that flags CJK / full-width punctuation as a
+ * bare-autolink boundary — the seam the CJK entry
+ * (`@copse/streaming-markdown/cjk`, `src/cjk.ts`) uses so a run-together URL like
+ * `https://example.com。次` does not swallow the trailing `。次` into the `href`.
+ * Left `null` in the default build (Latin URLs never contain these code points),
+ * so non-CJK output is byte-identical.
+ */
+let bareUrlCjkBoundary: ((ch: string) => boolean) | null = null
+
+/** Inject (or clear with `null`) the bare-autolink CJK-punctuation boundary. */
+export function setBareUrlCjkBoundary(fn: ((ch: string) => boolean) | null): void {
+  bareUrlCjkBoundary = fn
+}
+
+/** Split a captured bare URL at the first CJK-punctuation boundary, if any. */
+function splitBareUrlAtCjkBoundary(rawUrl: string): { url: string; tail: string } {
+  const boundary = bareUrlCjkBoundary
+  if (boundary !== null) {
+    for (let i = 0; i < rawUrl.length; i++) {
+      if (boundary(rawUrl[i] ?? '')) return { url: rawUrl.slice(0, i), tail: rawUrl.slice(i) }
+    }
+  }
+  return { url: rawUrl, tail: '' }
+}
+
 function renderBareHttpLinks(text: string): string {
   return text
     .split(INLINE_HTML_SHIELD_RE)
     .map((segment, index) => {
       if (index % 2 === 1) return segment
       return segment.replace(BARE_HTTP_URL_RE, (_match, prefix: string, rawUrl: string) => {
-        const trailing = rawUrl.match(TRAILING_URL_PUNCTUATION_RE)?.[0] ?? ''
-        const url = trailing ? rawUrl.slice(0, -trailing.length) : rawUrl
+        // A CJK full-width punctuation mark ends the URL and stays as prose.
+        const { url: beforeCjk, tail: cjkTail } = splitBareUrlAtCjkBoundary(rawUrl)
+        if (beforeCjk === '') return `${prefix}${rawUrl}`
+        const asciiTrailing = beforeCjk.match(TRAILING_URL_PUNCTUATION_RE)?.[0] ?? ''
+        const url = asciiTrailing ? beforeCjk.slice(0, -asciiTrailing.length) : beforeCjk
         const href = safeLinkHref(url)
         if (!href) return `${prefix}${rawUrl}`
-        return `${prefix}${renderedBareLink(url, href)}${trailing}`
+        return `${prefix}${renderedBareLink(url, href)}${asciiTrailing}${cjkTail}`
       })
     })
     .join('')

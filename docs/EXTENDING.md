@@ -14,6 +14,7 @@ it unless you import it. Register each once, before your first render.
 | Math prose syntax (override) | `setMathSyntax` | — |
 | Custom fenced blocks | `setFenceHandler` | — (you supply the handler) |
 | Custom inline syntax | `setInlinePasses` | — (you supply the pass) |
+| CJK-friendly emphasis / autolinks | `setCjkFriendly` | `…/cjk` |
 | `<a>` routing | `setLinkDecorator` | — |
 | Raw `<img>` handling | `setRawImageRenderer` | — |
 | Sanitizer allowlist | `setSanitizeExtension` | — |
@@ -330,6 +331,53 @@ unknown codes pass through, and a half-typed `:smi` holds mid-stream. Extend or
 replace the table with `createEmojiInlinePass(customMap)`, or read the shipped
 `emojiShortcodes` map from the same entry.
 
+## CJK / East-Asian text
+
+East-Asian (Chinese / Japanese / Korean) output splits cleanly into two layers,
+and the honest scope split matters: **most of it is the host's CSS, and only a
+small, real slice belongs in the renderer.**
+
+**Renderer layer — opt-in JS behind `@copse/streaming-markdown/cjk`.** CommonMark's
+emphasis *flanking* rules count full-width / ideographic punctuation (`「」`,
+`。`, `！`, `（）`, …) as ordinary Unicode punctuation, so a `**` between a CJK
+character and one of those marks fails to flank and the emphasis never pairs —
+`これは**「強調」**です` stays literal. That is a documented CommonMark
+limitation, not a bug in this renderer (the reference implementation produces the
+same literal output), so it is an **extension**, off by default. A post-process
+inline pass cannot fix it — by the time passes run, the `**` have already been
+left as text — so it is a default-off hook in the flanking classifier instead.
+Turn it on (once, before the first render) and it also stops a run-together bare
+autolink at the first full-width mark (`https://example.com。次` → link + prose):
+
+```ts
+import { setCjkFriendly } from '@copse/streaming-markdown/cjk'
+
+setCjkFriendly(true) // markdown-cjk-friendly emphasis + autolink boundaries
+```
+
+Like the other optional backends, the range table lives behind its own entry —
+nothing is pulled into your bundle unless you import `…/cjk`. With it off (the
+default), Latin output and the CommonMark/GFM conformance suites are
+byte-identical. `setCjkFriendly(false)` restores stock flanking.
+
+**Host layer — CSS.** Line breaking (ideographs wrap between any two characters,
+Kinsoku start/end constraints), inter-script spacing (the gap between CJK and
+Latin/numbers), and full-width-punctuation kerning are **presentation the host
+owns** — the renderer emits the same structural HTML for every script and does
+*not* guess a language. Ship the ready-made optional sheet and tell the browser
+the language:
+
+```ts
+import '@copse/streaming-markdown/styles/cjk.css'
+el.lang = 'ja' // or 'zh' / 'ko'; or add class 'sm-cjk' to the container
+```
+
+`styles/cjk.css` is not imported by `core.css` / `default.css` and is pure CSS
+(`word-break`, `line-break: strict`, and progressive `text-autospace` /
+`text-spacing-trim`), scoped under `.streaming-markdown` and gated on `:lang()`
+or a `.sm-cjk` class hook — see the header comment in the file. It needs no JS,
+and the JS entry needs no CSS; use either, both, or neither.
+
 ## Link routing (`LinkDecorator`)
 
 A `LinkDecorator` returns the attribute string appended after `href` on every
@@ -501,6 +549,9 @@ el.classList.add('streaming-markdown')
   spacing, or typography. Pair it with your own theme.
 - **`styles/default.css`** — imports `core.css` and adds a batteries-included look
   (spacing, typography, tables, links, and a highlight.js VS Code Dark+ palette).
+- **`styles/cjk.css`** — optional East-Asian line-break / spacing rules, gated on
+  `:lang()` or a `.sm-cjk` class hook. Not imported by the other two; see the
+  [CJK / East-Asian text](#cjk--east-asian-text) section above.
 
 Retheme `default.css` by setting `--sm-*` custom properties on `.streaming-markdown`
 (or any ancestor) — each has a fallback, so the sheet also stands alone. See the

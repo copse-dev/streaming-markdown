@@ -102,11 +102,19 @@ Pages that enforce [Trusted Types](https://developer.mozilla.org/en-US/docs/Web/
 backend — see [Trusted Types in `docs/EXTENDING.md`](docs/EXTENDING.md#trusted-types)
 for the CSP policy names and the `setTrustedTypesPolicy` hook.
 
+Chinese / Japanese / Korean output has an opt-in entry too: `setCjkFriendly(true)`
+from `@copse/streaming-markdown/cjk` makes emphasis and bare autolinks behave
+around full-width punctuation (`**「強調」**`, `https://example.com。`), and the
+optional `styles/cjk.css` carries the line-break / spacing CSS the host owns —
+see [CJK / East-Asian text](docs/EXTENDING.md#cjk--east-asian-text). Both are
+off by default; Latin output is byte-identical.
+
 ## Styling
 
 The renderer emits documented class hooks but ships no styles by default.
-Two optional stylesheets are provided (`styles/core.css`, structural only;
-`styles/default.css`, a batteries-included theme); both scope every rule under a
+Optional stylesheets are provided (`styles/core.css`, structural only;
+`styles/default.css`, a batteries-included theme; `styles/cjk.css`, opt-in
+East-Asian line-break / spacing); each scopes every rule under a
 `.streaming-markdown` class:
 
 ```ts

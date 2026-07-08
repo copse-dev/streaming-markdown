@@ -58,6 +58,11 @@
       "import": "./dist/sanitize-browser.js",
       "default": "./dist/sanitize-browser.js"
     },
+    "./cjk": {
+      "types": "./dist/cjk.d.ts",
+      "import": "./dist/cjk.js",
+      "default": "./dist/cjk.js"
+    },
     "./entities/full": {
       "types": "./dist/entity-decoder-full.d.ts",
       "import": "./dist/entity-decoder-full.js",
@@ -69,7 +74,8 @@
       "default": "./dist/smoothing.js"
     },
     "./styles/core.css": "./styles/core.css",
-    "./styles/default.css": "./styles/default.css"
+    "./styles/default.css": "./styles/default.css",
+    "./styles/cjk.css": "./styles/cjk.css"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
