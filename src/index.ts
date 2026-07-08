@@ -20,6 +20,14 @@ export {
   type SanitizerBackend,
   type SanitizerConfig,
 } from './sanitize.ts'
+// Opt-in link/image origin allowlist (#83). Off by default (byte-identical
+// output until installed); composes with the scheme allowlist and sink
+// sanitizer rather than replacing them. See docs/EXTENDING.md.
+export {
+  getLinkImagePolicy,
+  type LinkImagePolicy,
+  setLinkImagePolicy,
+} from './link-image-policy.ts'
 // Trusted Types support: every internal `innerHTML` write routes through the
 // html-sink chokepoint, which sanitizes and then blesses the markup with a TT
 // policy when one is active (a lazily created `streaming-markdown` policy by
@@ -46,6 +54,25 @@ export {
   type NormalizeImagePathOptions,
 } from './raw-images.ts'
 export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './escape.ts'
+// HTML character-reference decoding is a pluggable backend (#594). The default
+// decoder carries the 252 classic HTML4 named references plus all numeric refs
+// (~1 KB) rather than the full ~2,100-entry HTML5 table (~23 KB gzip). Hosts that
+// need the full set register a decoder — `browserEntityDecoder` (zero bundle cost
+// in the DOM) or the `@copse/streaming-markdown/entities/full` entry (backed by
+// the `entities` peer dependency) — or extend the built-in set with
+// `addNamedEntities`. See docs/ARCHITECTURE.md.
+export {
+  addNamedEntities,
+  BUILTIN_NAMED_ENTITIES,
+  browserEntityDecoder,
+  decodeHtmlEntities,
+  type EntityDecoder,
+  getEntityDecoder,
+  getNamedEntities,
+  resetEntityDecoder,
+  setEntityDecoder,
+  setNamedEntities,
+} from './entity-decoder.ts'
 // Syntax highlighting is a pluggable backend. The core (`highlight.ts`) carries
 // no highlight.js code and renders escaped plain text until a backend is
 // registered; the highlight.js backend stays behind the

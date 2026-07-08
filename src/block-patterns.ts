@@ -1,5 +1,5 @@
 /** Shared block-level line patterns and fence helpers (tokenizer + renderer). */
-import { decodeHTMLStrict } from 'entities'
+import { decodeHtmlEntities } from './entity-decoder.ts'
 
 /** Width of a line's leading whitespace in columns, expanding tabs to 4-col stops. */
 export function leadingIndentWidth(line: string): number {
@@ -157,7 +157,7 @@ const FENCE_INFO_BACKSLASH_RE = /\\([!-/:-@[-`{-~])/g
 export function fenceInfoLanguage(info: string): string {
   const firstWord = info.trim().split(/\s+/)[0] ?? ''
   if (!firstWord) return ''
-  return decodeHTMLStrict(firstWord.replace(FENCE_INFO_BACKSLASH_RE, '$1'))
+  return decodeHtmlEntities(firstWord.replace(FENCE_INFO_BACKSLASH_RE, '$1'))
 }
 
 export function fenceCloses(marker: string, len: number, line: string): boolean {

@@ -48,6 +48,11 @@
       "import": "./dist/math-katex.js",
       "default": "./dist/math-katex.js"
     },
+    "./inline/emoji": {
+      "types": "./dist/emoji-shortcodes.d.ts",
+      "import": "./dist/emoji-shortcodes.js",
+      "default": "./dist/emoji-shortcodes.js"
+    },
     "./sanitizers/browser": {
       "types": "./dist/sanitize-browser.d.ts",
       "import": "./dist/sanitize-browser.js",
@@ -57,6 +62,16 @@
       "types": "./dist/cjk.d.ts",
       "import": "./dist/cjk.js",
       "default": "./dist/cjk.js"
+    },
+    "./entities/full": {
+      "types": "./dist/entity-decoder-full.d.ts",
+      "import": "./dist/entity-decoder-full.js",
+      "default": "./dist/entity-decoder-full.js"
+    },
+    "./smoothing": {
+      "types": "./dist/smoothing.d.ts",
+      "import": "./dist/smoothing.js",
+      "default": "./dist/smoothing.js"
     },
     "./styles/core.css": "./styles/core.css",
     "./styles/default.css": "./styles/default.css",
@@ -100,11 +115,9 @@
     "registry": "https://registry.npmjs.org",
     "access": "public"
   },
-  "dependencies": {
-    "entities": "^8.0.0"
-  },
   "peerDependencies": {
     "dompurify": "^3.4.11",
+    "entities": "^8.0.0",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.0 || ^0.17.0",
     "mermaid": "^11.0.0",
@@ -112,6 +125,9 @@
   },
   "peerDependenciesMeta": {
     "dompurify": {
+      "optional": true
+    },
+    "entities": {
       "optional": true
     },
     "highlight.js": {
@@ -133,6 +149,7 @@
     "c8": "^11.0.0",
     "commonmark-spec": "0.31.2",
     "dompurify": "^3.4.11",
+    "entities": "^8.0.0",
     "esbuild": "^0.28.1",
     "highlight.js": "^11.11.1",
     "jsdom": "^29.1.1",
