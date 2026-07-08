@@ -58,6 +58,11 @@
       "import": "./dist/sanitize-browser.js",
       "default": "./dist/sanitize-browser.js"
     },
+    "./smoothing": {
+      "types": "./dist/smoothing.d.ts",
+      "import": "./dist/smoothing.js",
+      "default": "./dist/smoothing.js"
+    },
     "./styles/core.css": "./styles/core.css",
     "./styles/default.css": "./styles/default.css"
   },
