@@ -79,3 +79,34 @@ jobs:
       # python3 (preinstalled on the runner; also present in the ci-runners image).
       - name: Normalizer parity
         run: npm run check:normalizer-parity
+
+  # Canary: typecheck + build against the next TypeScript major (7.x, the
+  # Go-native compiler) before the `typescript` devDependency crosses the
+  # `^6` cap. `continue-on-error: true` makes this advisory — a break here is
+  # visible but never blocks a required check or reddens an unrelated PR.
+  # `npm i typescript@7 --no-save` overrides the resolved compiler for this run
+  # only, leaving package.json / package-lock.json untouched. Safe because this
+  # repo touches TypeScript exclusively through the `tsc` CLI (typecheck +
+  # build) — it uses no programmatic compiler API, which isn't stable until 7.1.
+  # Remove this job once the `^7` bump lands and `build` covers it directly.
+  typescript-7-canary:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install TypeScript 7 (this run only)
+        run: npm i -D typescript@7 --no-save
+
+      - name: Typecheck (TS 7)
+        run: npm run typecheck
+
+      - name: Build (TS 7)
+        run: npm run build
