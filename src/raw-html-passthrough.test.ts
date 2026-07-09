@@ -1,0 +1,183 @@
+// Uses jsdom because the passthrough model defers to the DOMPurify sink as the
+// sole arbiter — "renders as an element" / "is stripped" is a property of the
+// SANITIZED output, not of the raw renderer string (#600). See
+// docs/decisions/0002-raw-html-passthrough-default.md.
+import '../tests/setup-dom-jsdom.ts'
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { renderMarkdown } from './renderer.ts'
+import { renderStreamingMarkdown, StreamingMarkdownRenderer } from './streaming.ts'
+import { sanitizeRenderedMarkdown } from './sanitize.ts'
+
+/** The default (passthrough) render, through the reference sink — the real path. */
+const sank = (md: string): string => sanitizeRenderedMarkdown(renderMarkdown(md))
+
+describe('raw-HTML passthrough at rest (#600)', () => {
+  it('renders allowlisted tags as real elements, preserving allowlisted attributes', () => {
+    assert.equal(sank('<span class="x">hi</span>'), '<p><span class="x">hi</span></p>')
+    // A block-level allowlisted tag renders as an element too (the sink reparents
+    // it out of the auto-wrapped paragraph, which is fine — it is a real <div>).
+    assert.match(sank('<div>hello</div>'), /<div>hello<\/div>/)
+    // A hand-typed allowlisted table is a real table after the sink normalizes it.
+    assert.match(sank('<table><tr><td>c</td></tr></table>'), /<table><tbody><tr><td>c<\/td>/)
+  })
+
+  it('unwraps a benign non-allowlisted tag to its text instead of literalizing it', () => {
+    const html = sank('<article>content</article>')
+    assert.match(html, /content/) // text survives
+    assert.doesNotMatch(html, /<article/i) // tag is gone (stripped/unwrapped)
+    assert.doesNotMatch(html, /&lt;article/i) // and NOT literalized as escaped prose
+  })
+
+  it('removes <script> entirely, contents included', () => {
+    const html = sank('before<script>alert(document.cookie)</script>after')
+    assert.match(html, /before/)
+    assert.match(html, /after/)
+    assert.doesNotMatch(html, /<script/i)
+    assert.doesNotMatch(html, /alert/) // the script body is dropped, not just the tags
+  })
+
+  it('drops event handlers and dangerous hrefs on otherwise-allowlisted tags', () => {
+    assert.doesNotMatch(sank('<a href="javascript:alert(1)">x</a>'), /javascript:/i)
+    assert.doesNotMatch(sank('<span onclick="steal()">x</span>'), /onclick/i)
+  })
+
+  it('emits the raw tag verbatim from the (unsanitized) renderer string', () => {
+    // The renderer defers to the sink: its own string output is intentionally
+    // NOT self-safe under passthrough — hosts must sanitize (or opt into escape).
+    assert.equal(renderMarkdown('<div>hi</div>'), '<p><div>hi</div></p>')
+  })
+})
+
+describe("htmlPolicy: 'escape' opt-out reproduces the historical literal-escape output", () => {
+  it('literalizes every tag outside the benign inline allowlist', () => {
+    assert.equal(renderMarkdown('<div>hi</div>', { htmlPolicy: 'escape' }), '<p>&lt;div&gt;hi&lt;/div&gt;</p>')
+    assert.equal(
+      renderMarkdown('<script>x</script>', { htmlPolicy: 'escape' }),
+      '<p>&lt;script&gt;x&lt;/script&gt;</p>',
+    )
+  })
+
+  it('still passes the benign attribute-less inline allowlist through', () => {
+    assert.equal(renderMarkdown('a <sub>2</sub> b', { htmlPolicy: 'escape' }), '<p>a <sub>2</sub> b</p>')
+  })
+
+  it('leaves ordinary escaped text (a lone `<`, `a < b`) identical under both policies', () => {
+    for (const md of ['a < b', '5 < 6 && 7 > 3', 'x <3 y']) {
+      assert.equal(renderMarkdown(md), renderMarkdown(md, { htmlPolicy: 'escape' }), md)
+    }
+  })
+})
+
+describe('raw-HTML passthrough while streaming (#600, #21/#29)', () => {
+  it('holds a tag arriving in fragments — no partial/unsafe DOM before it closes', () => {
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    // Feed the tag one character at a time; until the `>` arrives the forming
+    // tag is held out of the visible tail.
+    const full = 'intro <div class="x">hi</div>'
+    for (let i = 1; i <= 'intro <div class="x"'.length; i++) {
+      r.update(full.slice(0, i))
+      const text = host.textContent ?? ''
+      // The half-typed tag source never surfaces as visible text…
+      assert.doesNotMatch(text, /<div/)
+      assert.doesNotMatch(text, /class=/)
+      // …and no partial/dangerous element is ever attached.
+      assert.equal(host.querySelectorAll('script').length, 0)
+    }
+  })
+
+  it('a raw element straddling the freeze boundary settles byte-identically to at rest', () => {
+    // `<div>…</div>` opens, spans a blank-line block boundary, and closes — the
+    // hard case the design note calls out. Stream it in small chunks, then assert
+    // the committed DOM equals a fresh full sanitized render (the #21/#29
+    // frozen-tail byte-identity invariant).
+    // Trailing blank line so the final `after` paragraph also commits — then the
+    // whole committed region must equal a fresh full sanitized render.
+    const doc = 'para one\n\n<div class="card">body <b>x</b></div>\n\nafter\n\n'
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    for (let i = 1; i <= doc.length; i++) r.update(doc.slice(0, i))
+    const committed = host.querySelector('.stream-complete')?.innerHTML ?? ''
+    assert.equal(committed, sank(doc))
+    assert.match(committed, /<div class="card">body <b>x<\/b><\/div>/)
+  })
+
+  it('never leaks partial tag source or an unsanitized script across any prefix cut', () => {
+    const doc = 'lead <span class="k">key</span> and <script>bad()</script> tail\n\nnext'
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    for (let i = 1; i <= doc.length; i++) {
+      r.update(doc.slice(0, i))
+      assert.equal(host.querySelectorAll('script').length, 0)
+      assert.doesNotMatch(host.innerHTML, /bad\(\)/)
+    }
+    // The committed frame renders the allowlisted span and drops the script body.
+    const committed = host.querySelector('.stream-complete')?.innerHTML ?? ''
+    assert.match(committed, /<span class="k">key<\/span>/)
+    assert.doesNotMatch(committed, /bad\(\)/)
+  })
+
+  it('the string streaming path commits raw HTML identically to the at-rest render', () => {
+    // For a fully-committed prefix (trailing blank line), the streaming string
+    // emitter must equal the at-rest sanitized render of the same prefix.
+    const prefix = '# Title\n\n<div class="note"><b>hi</b></div>\n\n'
+    assert.equal(renderStreamingMarkdown(prefix), sank(prefix))
+  })
+})
+
+// A realistic agent-style document that embeds raw HTML — the at-rest
+// regression fixture. Allowlisted structure renders; non-allowlisted
+// (<details>/<summary>) unwraps; a stray script is removed entirely.
+const RAW_HTML_DOCUMENT = [
+  '# Release notes',
+  '',
+  'Highlights this cycle:',
+  '',
+  '<ul>',
+  '<li>Faster streaming</li>',
+  '<li>Raw-HTML <b>passthrough</b></li>',
+  '</ul>',
+  '',
+  '<details>',
+  '<summary>Internal details</summary>',
+  'Deferred to the sink sanitizer.',
+  '</details>',
+  '',
+  '<div class="callout">See the <a href="https://example.com/docs">docs</a>.</div>',
+  '',
+  '<script>trackPageView()</script>',
+  '',
+  'Thanks for reading.',
+].join('\n')
+
+describe('raw-HTML at-rest regression fixture (#600)', () => {
+  const html = sank(RAW_HTML_DOCUMENT)
+
+  it('renders allowlisted structure as real elements', () => {
+    assert.match(html, /<ul>/)
+    assert.match(html, /<li>Faster streaming<\/li>/)
+    assert.match(html, /Raw-HTML <b>passthrough<\/b>/)
+    assert.match(html, /<div class="callout">/)
+    assert.match(html, /<a href="https:\/\/example\.com\/docs"[^>]*>docs<\/a>/)
+  })
+
+  it('unwraps non-allowlisted <details>/<summary> to their text', () => {
+    assert.doesNotMatch(html, /<details/i)
+    assert.doesNotMatch(html, /<summary/i)
+    assert.doesNotMatch(html, /&lt;details/i) // not literalized either
+    assert.match(html, /Internal details/)
+    assert.match(html, /Deferred to the sink sanitizer\./)
+  })
+
+  it('removes the embedded script entirely', () => {
+    assert.doesNotMatch(html, /<script/i)
+    assert.doesNotMatch(html, /trackPageView/)
+  })
+
+  it("escape mode literalizes the same document's structural tags", () => {
+    const escaped = renderMarkdown(RAW_HTML_DOCUMENT, { htmlPolicy: 'escape' })
+    assert.match(escaped, /&lt;div class=&quot;callout&quot;&gt;/)
+    assert.match(escaped, /&lt;script&gt;trackPageView\(\)&lt;\/script&gt;/)
+  })
+})

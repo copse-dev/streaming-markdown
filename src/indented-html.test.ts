@@ -24,11 +24,19 @@ describe('dedentBlock', () => {
 })
 
 describe('indented HTML at top level (#616)', () => {
-  it('renders indented HTML as escaped prose, not a <pre> code block', () => {
+  it('renders indented HTML as prose following the raw-HTML policy, not a <pre> code block', () => {
+    // Default (passthrough, #600): the reclassified prose emits real tags for
+    // the sink to arbitrate — never a literal `<pre><code>` dump.
     const html = renderMarkdown('    <div>\n    <p>hi</p>\n    </div>')
     assert.doesNotMatch(html, /<pre>/)
-    assert.match(html, /&lt;div&gt;/)
-    assert.match(html, /&lt;p&gt;hi&lt;\/p&gt;/)
+    assert.match(html, /<div>/)
+    assert.match(html, /<p>hi<\/p>/)
+    // Escape opt-out literalizes the same reclassified prose (byte-for-byte the
+    // historical output).
+    const escaped = renderMarkdown('    <div>\n    <p>hi</p>\n    </div>', { htmlPolicy: 'escape' })
+    assert.doesNotMatch(escaped, /<pre>/)
+    assert.match(escaped, /&lt;div&gt;/)
+    assert.match(escaped, /&lt;p&gt;hi&lt;\/p&gt;/)
   })
 
   it('matches the un-indented raw-HTML rendering (policy parity)', () => {

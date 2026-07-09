@@ -49,8 +49,14 @@ const SPEC_VERSION = commonMarkSpecVersion()
 const spec = loadCommonMarkSpec()
 
 function conforms(example: SpecExample): boolean {
+  // Pin the harness to the escape policy so the baseline measures the historical
+  // raw-HTML behavior and does not churn now that passthrough is the default
+  // (#600). Escape mode is guaranteed to reproduce today's output byte-for-byte;
+  // the true passthrough spec ceiling is a deliberate follow-up re-baseline.
   const html = stripAppCodeDecorations(
-    stripAppImageAttributes(stripAppLinkAttributes(renderMarkdown(example.markdown))),
+    stripAppImageAttributes(
+      stripAppLinkAttributes(renderMarkdown(example.markdown, { htmlPolicy: 'escape' })),
+    ),
   )
   return normalizeHtml(html) === normalizeHtml(example.html)
 }

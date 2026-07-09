@@ -218,11 +218,22 @@ When extending the renderer or its CSS, preserve these rules:
   literal marker never flashes and promotion is class-only. The
   `markdown-alert*` classes pass the sink sanitizer (`class` is allowlisted);
   `default.css` themes the five types via `--sm-alert-*` custom properties.
-- **Benign raw inline HTML.** Attribute-less phrasing tags models emit in prose
-  (`<b> <i> <u> <s> <del> <ins> <sub> <sup> <kbd> <mark> <br>`) pass through unescaped
-  (`BENIGN_RAW_INLINE_TAG_RE` in `escape.ts`); the sanitizer sink allowlist mirrors the set.
-  Anything with attributes, and all block/structural raw HTML, stays escaped — see the
-  raw-HTML policy discussion in [#600](https://github.com/copse-dev/agent-pane/issues/600) before widening this.
+- **Raw-HTML policy (`htmlPolicy`, #600).** The default is **passthrough**: the
+  renderer emits any well-formed raw HTML tag verbatim and defers entirely to the
+  sink sanitizer (`sanitize.ts`) as the sole arbiter — allowlisted tags render as
+  real elements, everything else is stripped/unwrapped, `<script>` and event
+  handlers are removed. The keep/escape decision lives in `escapeHtmlOutsideSafeTags`
+  (`escape.ts`, gated on `getHtmlPolicy()`); a lone `<`, a `<` that never forms a
+  tag (`a < b`, `<3`), and an unterminated `<div` stay literal under either policy.
+  The opt-out `htmlPolicy: 'escape'` (on `renderMarkdown` / the streaming entry
+  points, or process-wide via `setHtmlPolicy`) reproduces the historical behavior
+  byte-for-byte: every tag outside the benign attribute-less inline allowlist
+  (`<b> <i> <u> <s> <del> <ins> <sub> <sup> <kbd> <mark> <br>`,
+  `BENIGN_RAW_INLINE_TAG_RE`) is escaped into literal prose. Block-level raw HTML
+  is not a distinct token — it tokenizes as a prose paragraph and follows the same
+  path (as does indented raw HTML, reclassified by `isIndentedHtmlBlock`). See
+  [docs/decisions/0002-raw-html-passthrough-default.md](decisions/0002-raw-html-passthrough-default.md).
+  The sanitizer allowlist is **not** widened by this policy.
 - **Indented code blocks (#9).** 4-column-indented lines **are** rendered as CommonMark
   indented code (`<pre><code>`), and this construct **conforms** — `summaryBySection` in the
   conformance baseline records **Indented code blocks: 12/12**. Recognition happens in the block
@@ -301,6 +312,7 @@ When extending the renderer or its CSS, preserve these rules:
   | Open fenced code        | `.stream-forming pre.stream-fence-forming`                       | yes                     | highlighted        |
   | Open `$$` / `\[` math   | `.stream-forming .math-block--pending.stream-fence-forming`      | yes                     | no (verbatim TeX)  |
   | Half-open `$x+` inline  | held via `pendingHoldIndex` (nothing shown past the `$`)         | yes                     | n/a                |
+  | Forming `<div class="`  | held via `pendingHoldIndex` (`rawHtmlTagHoldStart`); reveals as a real element on `>` | yes (passthrough) | n/a       |
 
   These class hooks are exercised by the optional reference stylesheets in
   [`styles/`](../styles) — `core.css` (structural rules the output needs to render
@@ -416,8 +428,9 @@ loaded from the pinned `commonmark-spec` devDependency at runtime
 (`tests/commonmark/load-spec.ts`), so the ~650 examples are **not** vendored into
 this repo — comparing output to the expected HTML after the spec's own normalizer
 (`tests/commonmark/normalize.ts`, a faithful port of `normalize.py`). This is **at
-rest only** — streaming output intentionally differs (the live tail is escaped
-plain text) and is not conformance-tested.
+rest only** — streaming output intentionally differs (the live tail holds/reveals
+forming constructs) and is not conformance-tested. The harness is also pinned to
+`htmlPolicy: 'escape'` (see the raw-HTML policy note below).
 
 The renderer is app-specific in places (decorated links, highlighted code), but
 CommonMark is the structural reference. The set of examples we currently satisfy
@@ -434,19 +447,22 @@ baseline.
 
 #### Raw-HTML policy and the in-scope conformance ceiling ([#600](https://github.com/copse-dev/agent-pane/issues/600))
 
-**100% CommonMark is deliberately not the goal.** The renderer escapes untrusted
-HTML rather than passing it through — the sanitize-at-the-sink invariant above.
-Two spec sections are therefore expected to fail by design:
+**100% CommonMark is deliberately not the goal — and the conformance harnesses
+are pinned to `htmlPolicy: 'escape'`, not the runtime default.** The default is
+now passthrough (raw HTML deferred to the sink sanitizer), but the harnesses run
+in `'escape'` mode so the pinned baselines measure the historical raw-HTML
+behavior and do not churn. Under `'escape'`, two spec sections are expected to
+fail by design:
 
 | Section     | Baseline | Why it caps out                                                                      |
 | ----------- | -------- | ------------------------------------------------------------------------------------ |
 | HTML blocks | 2/44     | Full conformance needs `<script>`/`<style>`/`<div>`/arbitrary custom tags verbatim.  |
 | Raw HTML    | 8/20     | Same — no inline allowlist ever reaches 20/20 without passing attacker HTML through. |
 
-The only raw HTML that passes through is the **benign attribute-less inline
-allowlist** (`b i u s del ins sub sup kbd mark br`, `BENIGN_RAW_INLINE_TAG_RE` in
-`escape.ts`), mirrored by the sanitizer sink. Everything with attributes, and all
-block/structural raw HTML, stays escaped.
+Under `'escape'`, the only raw HTML that passes through is the **benign
+attribute-less inline allowlist** (`b i u s del ins sub sup kbd mark br`,
+`BENIGN_RAW_INLINE_TAG_RE` in `escape.ts`), mirrored by the sanitizer sink.
+Everything with attributes, and all block/structural raw HTML, stays escaped.
 
 So the realistic ceiling excludes those **64 HTML examples**: **588 in-scope
 examples**, of which the renderer currently satisfies **573 (~97%)**. Counting all
@@ -454,14 +470,19 @@ examples**, of which the renderer currently satisfies **573 (~97%)**. Counting a
 conformance grows — `summaryBySection` in the baseline JSON carries the live
 per-section counts; treat the two headline figures here as approximate.
 
-**Passthrough is a future library option, not an app mode.** A `rawHtml:
-'escape' | 'passthrough'` switch (see [#600](https://github.com/copse-dev/agent-pane/issues/600)) would let the conformance harness
-measure the true spec ceiling while the app keeps `escape` + sink sanitization;
-`escape` stays the default because passthrough drops from two defense layers to
-one. This belongs to the extracted package's public API ([#601](https://github.com/copse-dev/agent-pane/issues/601)) and is not
-implemented yet. HTML **block recognition** in `block-tokenizer.ts` can still land
-with emission escaped, and `<details>`/`<summary>` stay excluded until it does
-(they pair across blocks and would emit unbalanced tags mid-stream).
+**Passthrough is now the runtime default** (`htmlPolicy: 'passthrough'`,
+`html-policy.ts`): the renderer emits well-formed raw HTML and the sink sanitizer
+is the sole arbiter (allowlisted → element; otherwise stripped/unwrapped). The
+security posture is unchanged — the sink allowlist is the boundary and stays
+narrow — but the renderer no longer does a *second, redundant* escape. The
+`'escape'` opt-out is retained for a host that consumes the renderer string
+without a sink. **Measuring the true passthrough spec ceiling** (re-baselining the
+harnesses in passthrough mode) is a deliberate follow-up, not done here. HTML
+**block recognition** in `block-tokenizer.ts` is still not a distinct token —
+block HTML tokenizes as prose and follows the inline policy — and elements that
+pair across blank-line block boundaries (`<details>`/`<summary>`) simply unwrap at
+the sink because they are not allowlisted (see the decision note's fallback
+discussion).
 
 ### GFM conformance (`gfm-conformance.test.ts`, via `npm test`)
 
@@ -499,7 +520,7 @@ counts). Current state:
 | Tables                  | 2/8      | Gaps: column alignment (`:-:`/`--:` → `align`), escaped `\|` in cells, column-count normalization, delimiter/header mismatch rejection. |
 | Task list items         | 0/2      | Renderer output diverges on purpose — it adds `class="task-list-item"`/`contains-task-list` and a `disabled` checkbox for app styling ([#614](https://github.com/copse-dev/agent-pane/issues/614)), which the spec's bare `<input>` output does not.  |
 | Autolinks (extension)   | 0/11     | Only bare `http(s)://` is linked (`inline-spans.ts`); no `www.`, no bare email, and trailing-punctuation trimming is a simplified regex, not GFM's balanced-paren/entity rules.                 |
-| Disallowed Raw HTML     | 0/1      | The renderer escapes *all* attributed/structural raw HTML, which is stricter than GFM's tag filter — so the filtered-passthrough output never matches.                                          |
+| Disallowed Raw HTML     | 0/1      | In the harness's pinned `'escape'` mode the renderer escapes *all* attributed/structural raw HTML, which is stricter than GFM's tag filter — so the filtered-passthrough output never matches. |
 
 Strikethrough is the only fully-conforming extension; the others cap out on real
 grammar gaps (tables, extended autolinks) or deliberate divergence (task-list
