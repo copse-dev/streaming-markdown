@@ -3,11 +3,11 @@
 // SANITIZED output, not of the raw renderer string (#600). See
 // docs/decisions/0002-raw-html-passthrough-default.md.
 import '../tests/setup-dom-jsdom.ts'
-import { describe, it } from 'node:test'
+import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderMarkdown } from './renderer.ts'
 import { renderStreamingMarkdown, StreamingMarkdownRenderer } from './streaming.ts'
-import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import { sanitizeRenderedMarkdown, setSanitizeExtension } from './sanitize.ts'
 
 /** The default (passthrough) render, through the reference sink — the real path. */
 const sank = (md: string): string => sanitizeRenderedMarkdown(renderMarkdown(md))
@@ -123,6 +123,90 @@ describe('raw-HTML passthrough while streaming (#600, #21/#29)', () => {
     // emitter must equal the at-rest sanitized render of the same prefix.
     const prefix = '# Title\n\n<div class="note"><b>hi</b></div>\n\n'
     assert.equal(renderStreamingMarkdown(prefix), sank(prefix))
+  })
+
+  it('a block element opened and closed across blank-line blocks freezes byte-identically', () => {
+    // `<div>` (allowlisted) opens, spans blank-line block boundaries, then closes.
+    // The frozen-tail path must not close it early per-fragment (which would spill
+    // the inner blocks OUT of the element) — every committed frame must match the
+    // whole-string render. Regression for the passthrough freeze guard (#600).
+    const doc = 'p0\n\n<div class="wrap">\n\ninner one\n\ninner two\n\n</div>\n\nafter\n\n'
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    for (let i = 1; i <= doc.length; i++) r.update(doc.slice(0, i))
+    const committed = host.querySelector('.stream-complete')?.innerHTML ?? ''
+    assert.equal(committed, sank(doc))
+    // The inner blocks are INSIDE the div, not siblings after it.
+    assert.match(committed, /<div class="wrap">[\s\S]*inner one[\s\S]*inner two[\s\S]*<\/div>/)
+  })
+})
+
+// A collapsible element that HIDES its children by default: the streaming tail
+// must not flash the collapsed body, and committed children must live inside the
+// element (not spill out as visible siblings). Needs the host to allowlist
+// details/summary so they render as real elements.
+describe('raw-HTML passthrough: forming <details> (#600)', () => {
+  afterEach(() => setSanitizeExtension(null))
+
+  const DOC = [
+    '<details>',
+    '<summary>Click to expand</summary>',
+    '',
+    'secret one',
+    '',
+    'secret two',
+    '',
+    '</details>',
+    '',
+    'after the details.',
+    '',
+  ].join('\n')
+
+  it('keeps committed children inside the collapsed <details>, byte-identical to at rest', () => {
+    setSanitizeExtension({ allowedTags: ['details', 'summary'] })
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    for (let i = 1; i <= DOC.length; i++) r.update(DOC.slice(0, i))
+    const committed = host.querySelector('.stream-complete')?.innerHTML ?? ''
+    assert.equal(committed, sank(DOC))
+    // Both body paragraphs are inside the <details>, before its close.
+    assert.match(committed, /<details>[\s\S]*secret one[\s\S]*secret two[\s\S]*<\/details>/)
+  })
+
+  it('never flashes the collapsed body in the pending tail while the body streams', () => {
+    setSanitizeExtension({ allowedTags: ['details', 'summary'] })
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    // Cut mid-body: `secret two` is still forming and `</details>` has not arrived.
+    const cut = '<details>\n<summary>Click to expand</summary>\n\nsecret one\n\nsecret tw'
+    for (let i = 1; i <= cut.length; i++) {
+      r.update(cut.slice(0, i))
+      const pendingEls = host.querySelectorAll(
+        '.stream-pending-block, .stream-pending:not([hidden])',
+      )
+      for (const el of pendingEls) {
+        assert.doesNotMatch(el.textContent ?? '', /secret (one|two)/)
+      }
+    }
+  })
+
+  it('holds the pending tail in the string path too while <details> is open', () => {
+    setSanitizeExtension({ allowedTags: ['details', 'summary'] })
+    const cut = '<details>\n<summary>Click to expand</summary>\n\nsecret one\n\nsecret tw'
+    const out = renderStreamingMarkdown(cut)
+    assert.doesNotMatch(out, /stream-pending/)
+    assert.doesNotMatch(out, /secret tw/) // the forming body line is held, not shown
+    assert.match(out, /<summary>Click to expand<\/summary>/) // the summary still committed
+  })
+
+  it('reveals the pending tail again once the <details> closes', () => {
+    setSanitizeExtension({ allowedTags: ['details', 'summary'] })
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    // Full details committed, then a new paragraph streams after it.
+    r.update('<details>\n<summary>S</summary>\n\nbody\n\n</details>\n\nafter tai')
+    const pending = host.querySelector('.stream-pending-block, .stream-pending:not([hidden])')
+    assert.match(pending?.textContent ?? '', /after tai/)
   })
 })
 

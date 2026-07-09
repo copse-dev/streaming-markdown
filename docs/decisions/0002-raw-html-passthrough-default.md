@@ -114,19 +114,44 @@ which the invariant explicitly permits, and it settles to the shared render on
 the next block boundary. No partial `<`, no unterminated tag, and no dangerous
 tag reaches a sink un-sanitized.
 
-### Element pairing across blocks (documented fallback boundary)
+### Element pairing across blocks (the frozen-tail freeze guard)
 
-Tags that pair across blank-line block boundaries (`<details>`/`<summary>`,
-raw `<ul>`/`<li>`, a hand-typed `<table>` split by blank lines) tokenize as
-*separate* paragraph blocks, so passthrough emits an unbalanced open tag in one
-block and a stray close in another. This is **not a new hazard**: the sink
-sanitizer balances/reparents the tree, and — crucially — `details`/`summary` and
-friends are **not on the allowlist**, so the sanitizer unwraps them to their text
-content, which is the intended "everything else is stripped" behavior. Allowlisted
-block tags (`<div>`, `<blockquote>`, `<ul>`…) split this way produce a
-structurally odd but safe and byte-identical-to-at-rest tree. We therefore do
-**not** special-case them; the shared-path guarantee holds and the sink is the
-arbiter. No sub-case required a feature-wide fallback to escaping.
+Tags that pair across blank-line block boundaries (`<details>`/`<summary>`, a
+hand-typed `<div>`/`<table>` split by blank lines) tokenize as *separate*
+paragraph blocks, so the element opens in one committed block and closes in a
+later one. At rest this is fine: `renderMarkdown` emits the whole document and
+the sink parses it as **one string**, so the parser keeps the element open across
+the blocks and the children land inside it.
+
+The streaming **DOM (frozen-tail) path is different** — it renders and sanitizes
+each settled block group *independently* to freeze it. Sanitizing an open
+`<details>` group on its own auto-closes it, so a later body block would freeze as
+a **sibling after** the element — the children spill OUT, diverging from the
+at-rest tree (and, for `<details>`, showing content that should be collapsed).
+
+The frozen-tail already had exactly this guard for unbalanced benign inline tags
+(`hasUnbalancedBenignRawInline`: never freeze a delta with an open `<b>`, because
+per-fragment sanitization can't reproduce the whole-string formatting-element
+reconstruction). Passthrough widened what can be unbalanced across blocks, so the
+guard is **generalized** (`hasUnbalancedRawHtml`, passthrough only): a delta
+containing *any* unbalanced raw element forces the full-morph fallback, which
+renders the whole committed prefix as one string — byte-identical to at rest. The
+element stays whole in the (re-rendered) committed region until its close arrives,
+then freezes normally. This degrades that stream to non-incremental commits while
+the element is open (documented tradeoff), never to wrong output.
+
+One element also needs a **pending hold**: `<details>` collapses its children by
+default, so the still-forming tail (rendered as a fragment appended *after* the
+committed, auto-closed element) would flash the collapsed body. While a
+`<details>` is open in the committed prefix (`hasOpenDetailsElement`, passthrough
+only), the streaming tail is held until the element closes — the analogue of the
+inline forming-tag hold, one level up. The `<summary>` (its own block, committed
+before the body streams) still streams normally.
+
+`details`/`summary` are **not on the sink allowlist**, so a host that has not
+widened it sees them unwrapped to text either way; the hold and guard matter for a
+host that allowlists them (via `setSanitizeExtension`) to get real collapsible
+sections. No sub-case required a feature-wide fallback to escaping.
 
 ## Security argument
 

@@ -479,10 +479,12 @@ narrow — but the renderer no longer does a *second, redundant* escape. The
 without a sink. **Measuring the true passthrough spec ceiling** (re-baselining the
 harnesses in passthrough mode) is a deliberate follow-up, not done here. HTML
 **block recognition** in `block-tokenizer.ts` is still not a distinct token —
-block HTML tokenizes as prose and follows the inline policy — and elements that
-pair across blank-line block boundaries (`<details>`/`<summary>`) simply unwrap at
-the sink because they are not allowlisted (see the decision note's fallback
-discussion).
+block HTML tokenizes as prose and follows the inline policy. An element that pairs
+across blank-line block boundaries (`<details>`, a hand-typed `<div>`) can't be
+frozen per-block without closing it early, so the frozen-tail freeze guard
+(`hasUnbalancedRawHtml`) full-morphs while it is open, and a still-forming
+`<details>` holds the streaming tail (`hasOpenDetailsElement`) so its collapsed
+body is not flashed — see the decision note's freeze-guard discussion.
 
 ### GFM conformance (`gfm-conformance.test.ts`, via `npm test`)
 

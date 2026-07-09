@@ -39,7 +39,7 @@ import {
   syncFormingFenceDom,
 } from './streaming-fence-dom.ts'
 import { buildFormingMathHtml, syncFormingMathDom } from './streaming-math-dom.ts'
-import { FrozenTailRenderer } from './streaming-frozen-tail.ts'
+import { FrozenTailRenderer, hasOpenDetailsElement } from './streaming-frozen-tail.ts'
 
 export { pendingHoldIndex } from './inline-emphasis.ts'
 export { splitAtLastNewline, splitForStreaming } from './streaming-split.ts'
@@ -594,9 +594,12 @@ function renderStreamingMarkdownCore(content: string): string {
   let completeTokensCache: BlockToken[] | null = null
   const completeTokens = (): BlockToken[] => (completeTokensCache ??= tokenizeBlocks(complete))
   const completeTokensForPending = pending.includes('|') ? completeTokens() : undefined
-  const rendered = complete
-    ? sanitizeRenderedMarkdown(renderMarkdown(complete, { tokens: completeTokens() }))
-    : ''
+  const renderedRaw = complete ? renderMarkdown(complete, { tokens: completeTokens() }) : ''
+  const rendered = renderedRaw ? sanitizeRenderedMarkdown(renderedRaw) : ''
+  // Inside a still-forming `<details>` the committed children render inside the
+  // (collapsed) element; a pending sibling would flash the collapsed body, so
+  // hold the whole tail until the element closes (#600).
+  if (hasOpenDetailsElement(renderedRaw)) return rendered
   const fenceSource = formingFenceSource(content, blocks)
   const mathSource = fenceSource ? null : getIncompleteMathSource(content, blocks)
   const tableSource =
@@ -714,6 +717,19 @@ export class StreamingMarkdownRenderer {
       )
       this.lastComplete = complete
     }
+
+    // Inside a still-forming `<details>`: its committed children already render
+    // inside the (collapsed) element, and a pending sibling here would flash the
+    // collapsed body as a visible tail. Hold the whole tail — forming and
+    // pending — until the element closes (#600).
+    if (this.frozenTail.committedHasOpenDetails) {
+      clearFormingDom(formingEl)
+      formingEl.hidden = true
+      clearBlockPendingDom(completedEl, ['continuation', 'paragraph-continuation', 'direct-blocks'])
+      syncInlinePendingDom(pendingEl, '', false)
+      return
+    }
+
     const completeTokensForPending = pending.includes('|') ? this.committedTokens : undefined
 
     // A committed GFM table always contains `|`; without one there is no table
