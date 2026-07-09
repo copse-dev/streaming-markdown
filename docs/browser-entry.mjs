@@ -9,6 +9,14 @@ export {
 
 export { dompurifyBackend } from '../dist/sanitize-dompurify.js'
 
+// The OPTIONAL input smoother (#84). It ships behind the
+// '@copse/streaming-markdown/smoothing' subpath and is never in the main entry,
+// so importing it here mirrors a host adding `import { createInputSmoother }
+// from '@copse/streaming-markdown/smoothing'`. It carries no external
+// dependency (unlike the CDN peers above), so the demo pulls it in eagerly
+// rather than lazily — there is no network cost to defer.
+export { createInputSmoother } from '../dist/smoothing.js'
+
 // Lazy backends (see docs/LAZY-LOADING.md). These dynamic imports become
 // separate code-split chunks under esbuild --splitting, so the demo fetches
 // them over the network only when first called — the same shape a bundler
