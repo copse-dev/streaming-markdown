@@ -2,13 +2,16 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderMarkdown } from './renderer.ts'
 
-// The renderer preserves a small set of its own generated inline tags through
-// the text-escaping pass (SAFE_OUTER_TAG_RE in escape.ts). Those tags are matched
-// by shape, which a model can forge in raw prose, so the pass also re-validates
-// tag CONTENT. These cases pin that boundary: forged/dangerous tags must be
-// escaped, while the renderer's own legitimate output must survive verbatim.
-describe('raw-HTML escaping boundary', () => {
-  const escaped = (md: string) => renderMarkdown(md)
+// Under the `'escape'` policy (the historical behavior, now an explicit opt-out
+// — passthrough is the default, #600) the renderer preserves a small set of its
+// own generated inline tags through the text-escaping pass (SAFE_OUTER_TAG_RE in
+// escape.ts). Those tags are matched by shape, which a model can forge in raw
+// prose, so the pass also re-validates tag CONTENT. These cases pin that
+// boundary AND double as the guarantee that escape mode reproduces today's
+// literal-escape output exactly: forged/dangerous tags must be escaped, while
+// the renderer's own legitimate output must survive verbatim.
+describe('raw-HTML escaping boundary (htmlPolicy: escape)', () => {
+  const escaped = (md: string) => renderMarkdown(md, { htmlPolicy: 'escape' })
 
   it('escapes a raw javascript: anchor typed in prose', () => {
     const html = escaped('<a href="javascript:alert(1)">click</a>')

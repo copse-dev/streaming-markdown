@@ -554,9 +554,13 @@ describe('renderMarkdown', () => {
   })
 })
 
+// Raw-HTML passthrough is now the default and defers to the sink sanitizer
+// (#600); the cases below assert the `'escape'` opt-out, which reproduces the
+// historical literal-escape output. Passthrough-default + sink behavior is
+// covered in `raw-html-passthrough.test.ts`.
 describe('renderMarkdown sanitization (#115)', () => {
   it('escapes raw HTML tags from untrusted text so no live element is emitted', () => {
-    const html = renderMarkdown('<img src=x onerror=alert(1)>')
+    const html = renderMarkdown('<img src=x onerror=alert(1)>', { htmlPolicy: 'escape' })
     assert.doesNotMatch(html, /<img/)
     assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/)
   })
@@ -564,6 +568,7 @@ describe('renderMarkdown sanitization (#115)', () => {
   it('escapes raw <img> tags by default (image handling is host-injected)', () => {
     const html = renderMarkdown(
       '<img alt="C-S-S New Tab Page rendered" src="artifacts/screenshots/css-new-tab.png" />',
+      { htmlPolicy: 'escape' },
     )
     assert.doesNotMatch(html, /<img\b/)
     assert.match(html, /&lt;img/)
@@ -594,7 +599,7 @@ describe('renderMarkdown sanitization (#115)', () => {
   })
 
   it('escapes script tags rather than executing them', () => {
-    const html = renderMarkdown('<script>alert(document.cookie)</script>')
+    const html = renderMarkdown('<script>alert(document.cookie)</script>', { htmlPolicy: 'escape' })
     assert.doesNotMatch(html, /<script>/)
     assert.match(html, /&lt;script&gt;/)
   })
@@ -616,6 +621,7 @@ describe('renderMarkdown sanitization (#115)', () => {
   it('renders benign raw inline tags but keeps attributed/structural markup escaped', () => {
     const html = renderMarkdown(
       ['| H |', '| - |', '| <b>x</b> <b onclick="p()">y</b> <div>z</div> |'].join('\n'),
+      { htmlPolicy: 'escape' },
     )
     assert.match(html, /<td><b>x<\/b>/)
     // The attributed opener stays escaped; its bare closer passes through and

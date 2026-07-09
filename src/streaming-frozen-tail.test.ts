@@ -407,6 +407,20 @@ describe('review regressions (#21 PR review)', () => {
     assert.equal(completeEl(host).innerHTML, sanitizeRenderedMarkdown(renderMarkdown(md)))
   })
 
+  it('an unclosed benign raw inline tag keeps byte-parity in escape mode too', () => {
+    // Escape mode passes the benign inline allowlist through, so the same
+    // formatting-element hazard applies; its (narrower, byte-identical) balance
+    // check must still force the full-morph fallback (#600).
+    const md = 'before <b>bold\n\nafter words\n\nmore trailing\n\n'
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host, { htmlPolicy: 'escape' })
+    for (let cut = 1; cut <= md.length; cut++) r.update(md.slice(0, cut))
+    assert.equal(
+      completeEl(host).innerHTML,
+      sanitizeRenderedMarkdown(renderMarkdown(md, { htmlPolicy: 'escape' })),
+    )
+  })
+
   it('a block keeps its DOM node instance across its own freeze transition', () => {
     // Settling must adopt the existing tail nodes (one combined morph), not
     // parse fresh frozen nodes — otherwise every block is torn down exactly

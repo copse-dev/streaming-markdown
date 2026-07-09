@@ -60,6 +60,8 @@ const EXPECTED_FUNCTIONS = [
   'workspaceLinkTargetFromHref',
   'getInlinePasses',
   'setInlinePasses',
+  'getHtmlPolicy',
+  'setHtmlPolicy',
 ] as const
 
 describe('public API barrel (index.ts)', () => {

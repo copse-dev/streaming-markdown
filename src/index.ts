@@ -6,10 +6,16 @@
  * See README.md for the design invariants and the streaming architecture.
  */
 export { renderMarkdown, type RenderMarkdownOptions } from './renderer.ts'
+// Raw-HTML policy (#600). `'passthrough'` (default) emits well-formed raw HTML
+// for the sink sanitizer to arbitrate; `'escape'` literalizes it. Per-render
+// via `renderMarkdown`/streaming `htmlPolicy`, or process-wide via
+// `setHtmlPolicy`. See docs/decisions/0002-raw-html-passthrough-default.md.
+export { getHtmlPolicy, type HtmlPolicy, setHtmlPolicy } from './html-policy.ts'
 export {
   renderStreamingMarkdown,
   splitForStreaming,
   StreamingMarkdownRenderer,
+  type StreamingMarkdownOptions,
 } from './streaming.ts'
 export {
   sanitizeRenderedMarkdown,

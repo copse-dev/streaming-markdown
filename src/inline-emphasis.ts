@@ -3,7 +3,9 @@
  * Shared by the at-rest renderer and the streaming hold logic.
  */
 import { trailingEntityHoldStart } from './backslash-escapes.ts'
+import { rawHtmlTagHoldStart } from './escape.ts'
 import { footnoteHoldStart } from './footnotes.ts'
+import { getHtmlPolicy } from './html-policy.ts'
 import { scanCodeSpans } from './inline-code-spans.ts'
 import { linkOrImageEndAt, linkOrImageStartsAt } from './inline-links.ts'
 import { mathHoldStart } from './inline-math.ts'
@@ -469,6 +471,14 @@ export function pendingHoldIndex(s: string): number {
   // A half-typed footnote reference (`[^lab`) holds like a half-open `~~` so
   // the bracket syntax never flashes raw before it closes (#72).
   cut = Math.min(cut, footnoteHoldStart(s, mask))
+
+  // Raw-HTML passthrough (#600): a still-forming trailing tag (`<div class="`)
+  // holds until its `>` arrives, so a real element reveals atomically instead
+  // of flashing escaped tag source. Escape mode keeps today's behavior (the
+  // half-typed tag renders as literal `&lt;div…` text), so this is gated off.
+  if (getHtmlPolicy() === 'passthrough') {
+    cut = Math.min(cut, rawHtmlTagHoldStart(s, mask))
+  }
 
   // Registered inline passes contribute their own holds (#53), composing the
   // same way the strikethrough hold does — a half-open `[@doe` or `==foo`

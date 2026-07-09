@@ -1,4 +1,5 @@
 import { decodeEscapedPunctuationRaw } from './backslash-escapes.ts'
+import { getHtmlPolicy } from './html-policy.ts'
 import { decodeHtmlCharRefs } from './link-references.ts'
 
 const HTML_ESCAPES: Record<string, string> = {
@@ -61,17 +62,58 @@ function isSanctionedRendererTag(tag: string): boolean {
   return !DANGEROUS_HREF_SCHEME_RE.test(url)
 }
 
+/**
+ * A single well-formed HTML open/self-closing/close tag (`<div>`, `<br/>`,
+ * `<a href="…">`, `</section>`). Under the passthrough policy this is the whole
+ * keep/escape test: a syntactically-valid tag is emitted verbatim and the sink
+ * sanitizer decides its fate (allowlisted → element; otherwise stripped), while
+ * a lone `<`, a `<` that never forms a tag (`a < b`, `<3`), and an unterminated
+ * `<div` (escaped by the surrounding split leaving no closing `>`) stay literal.
+ * Deliberately liberal — even attributed/event-handler tags pass, because
+ * `sanitize.ts` is the sole arbiter (#600); it is NOT a safety filter.
+ */
+const PASSTHROUGH_TAG_RE = /^<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?\/?>$/
+
+function keepRawTag(part: string, passthrough: boolean): boolean {
+  if (passthrough) return PASSTHROUGH_TAG_RE.test(part)
+  // Escape policy: only renderer-generated tags (re-validated for forged
+  // content) and the benign attribute-less inline allowlist survive.
+  return (
+    (SAFE_OUTER_TAG_RE.test(part) && isSanctionedRendererTag(part)) ||
+    BENIGN_RAW_INLINE_TAG_RE.test(part)
+  )
+}
+
 function escapeHtmlOutsideSafeTags(html: string): string {
+  const passthrough = getHtmlPolicy() === 'passthrough'
   return html
     .split(/(<[^>]+>)/g)
-    .map((part) =>
-      part.startsWith('<') &&
-      ((SAFE_OUTER_TAG_RE.test(part) && isSanctionedRendererTag(part)) ||
-        BENIGN_RAW_INLINE_TAG_RE.test(part))
-        ? part
-        : escapeHtml(part),
-    )
+    .map((part) => (part.startsWith('<') && keepRawTag(part, passthrough) ? part : escapeHtml(part)))
     .join('')
+}
+
+/**
+ * Streaming hold: start index of a trailing, still-forming raw HTML tag/comment
+ * so the passthrough tail never flashes a half-typed `<div class="` as escaped
+ * source before its `>` arrives (cf. the entity/strikethrough/math holds it
+ * composes with in `pendingHoldIndex`). Returns `s.length` when the trailing
+ * `<` is already closed, is not tag-like (`< 3`, `<3`, `<=`), or is masked
+ * (inside a code span). Only meaningful under the passthrough policy — the
+ * caller gates on it so escape mode reproduces today's tail output.
+ */
+export function rawHtmlTagHoldStart(s: string, mask: boolean[]): number {
+  // Native `lastIndexOf` keeps this a cheap check on the pending tail; only a
+  // `<` inside a code span (rare) forces a step back to the previous one.
+  for (let i = s.lastIndexOf('<'); i >= 0; i = s.lastIndexOf('<', i - 1)) {
+    if (mask[i]) continue
+    const segment = s.slice(i)
+    // A closed trailing tag is complete: nothing forming to hold.
+    if (segment.includes('>')) return s.length
+    // Hold only a genuine tag/comment start (`<`, `<x`, `</x`, `<!--`); a `<`
+    // followed by a space/digit/etc. is literal text and reveals as `&lt;`.
+    return /^<(?:[a-zA-Z/!]|$)/.test(segment) ? i : s.length
+  }
+  return s.length
 }
 
 /** Escape literal text while preserving Copse-generated inline HTML tags. */

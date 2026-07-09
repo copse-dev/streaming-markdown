@@ -73,14 +73,18 @@ describe('renderStreamingMarkdown', () => {
   })
 
   it('fully escapes the in-progress tail, including & and quotes (#115)', () => {
-    const html = renderStreamingMarkdown('done\n<img src=x onerror=alert(1)> "a" & b')
+    // htmlPolicy: 'escape' opt-out — passthrough is the default now (#600), see
+    // raw-html-passthrough.test.ts for the default streaming-tail behavior.
+    const html = renderStreamingMarkdown('done\n<img src=x onerror=alert(1)> "a" & b', {
+      htmlPolicy: 'escape',
+    })
     assert.match(html, /<span class="stream-pending stream-pending-paragraph-continuation[^"]*">/)
     assert.doesNotMatch(html, /<img/)
     assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt; &quot;a&quot; &amp; b/)
   })
 
   it('escapes raw HTML in completed lines while streaming', () => {
-    const html = renderStreamingMarkdown('<script>alert(1)</script>\n')
+    const html = renderStreamingMarkdown('<script>alert(1)</script>\n', { htmlPolicy: 'escape' })
     assert.doesNotMatch(html, /<script>/)
     assert.match(html, /&lt;script&gt;/)
   })
@@ -413,8 +417,9 @@ describe('StreamingMarkdownRenderer (#119 incremental render)', () => {
   })
 
   it('escapes the live tail rather than injecting markup', () => {
+    // htmlPolicy: 'escape' opt-out (passthrough is the default now, #600).
     const host = document.createElement('div')
-    const r = new StreamingMarkdownRenderer(host)
+    const r = new StreamingMarkdownRenderer(host, { htmlPolicy: 'escape' })
     r.update('safe\n<img src=x onerror=alert(1)>')
     assert.equal(host.querySelectorAll('img').length, 0)
     const pending = host.querySelector('.stream-pending-block') as HTMLElement

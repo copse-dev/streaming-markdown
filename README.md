@@ -56,7 +56,12 @@ for await (const chunk of stream) {
   byte-identical to a math-free build (`setMathSyntax` overrides either way).
   See [Math in `docs/EXTENDING.md`](docs/EXTENDING.md#math-katex).
 - **Sanitize at the sink.** Rendered HTML is treated as untrusted and links are
-  scheme-validated; the sink sanitizer is the security gate. An opt-in
+  scheme-validated; the sink sanitizer is the security gate. Raw HTML is
+  **passed through by default** (`htmlPolicy: 'passthrough'`) and the sink
+  sanitizer is the sole arbiter — allowlisted tags render as elements, everything
+  else (including `<script>`) is stripped/unwrapped; pass `htmlPolicy: 'escape'`
+  (or `setHtmlPolicy('escape')`) to literalize raw HTML instead, e.g. if you write
+  the renderer string to a sink without sanitizing. An opt-in
   **link/image origin allowlist** (`setLinkImagePolicy`) layers on top —
   restrict which origins links/images may point at, rewrite/neutralize the rest,
   and strip base64 `data:` images — off by default, byte-identical until you set

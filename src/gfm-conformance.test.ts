@@ -72,8 +72,12 @@ const SPEC_VERSION = gfmSpecVersion()
 const spec = loadGfmSpec()
 
 function conforms(example: SpecExample): boolean {
+  // Pinned to the escape policy so the baseline stays stable now that
+  // passthrough is the default (#600); see the CommonMark harness for rationale.
   const html = stripAppCodeDecorations(
-    stripAppImageAttributes(stripAppLinkAttributes(renderMarkdown(example.markdown))),
+    stripAppImageAttributes(
+      stripAppLinkAttributes(renderMarkdown(example.markdown, { htmlPolicy: 'escape' })),
+    ),
   )
   return normalizeHtml(html) === normalizeHtml(example.html)
 }

@@ -52,6 +52,7 @@ import {
   scanListGroup,
   type ListGroupSignature,
 } from './render-blocks.ts'
+import { getHtmlPolicy } from './html-policy.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml, setSanitizedHtml } from './html-sink.ts'
@@ -257,6 +258,66 @@ function hasUnbalancedBenignRawInline(html: string): boolean {
   return false
 }
 
+// HTML void elements — no end tag, so they never contribute to open/close
+// balance (a self-closing `/>` is treated the same way).
+const VOID_HTML_TAGS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
+  'param', 'source', 'track', 'wbr',
+])
+
+const HTML_TAG_SCAN_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)(?:\s[^<>]*?)?(\/?)>/g
+
+/**
+ * Passthrough generalization of {@link hasUnbalancedBenignRawInline}: true when
+ * ANY non-void tag in `html` is unbalanced (#600). Under passthrough a raw block
+ * element (`<details>`, `<div>`, `<table>`…) can open in one committed block and
+ * close in a later one; freezing the delta that cut through it would close it
+ * early per-fragment (children spill OUT of the element), diverging from the
+ * whole-string render where the parser keeps it open across blocks. Renderer-
+ * generated tags are always balanced within a delta of complete blocks, so they
+ * net to zero and never trip this — only a cross-block raw element does.
+ */
+function hasUnbalancedRawHtml(html: string): boolean {
+  const balance = new Map<string, number>()
+  for (let m = HTML_TAG_SCAN_RE.exec(html); m; m = HTML_TAG_SCAN_RE.exec(html)) {
+    const name = (m[2] ?? '').toLowerCase()
+    if (VOID_HTML_TAGS.has(name) || m[3] === '/') continue
+    balance.set(name, (balance.get(name) ?? 0) + (m[1] === '/' ? -1 : 1))
+  }
+  for (const net of balance.values()) if (net !== 0) return true
+  return false
+}
+
+/**
+ * Whether freezing `html` as a per-fragment delta would diverge from the
+ * whole-string render, so the commit must fall back to a full morph. Escape mode
+ * only ever passes the benign inline allowlist through, so its (byte-identical,
+ * cheaper) check is retained; passthrough must guard every raw tag.
+ */
+function hasUnfreezableRawHtml(html: string): boolean {
+  return getHtmlPolicy() === 'passthrough'
+    ? hasUnbalancedRawHtml(html)
+    : hasUnbalancedBenignRawInline(html)
+}
+
+const DETAILS_OPEN_RE = /<details(?=[\s>])/gi
+const DETAILS_CLOSE_RE = /<\/details>/gi
+
+/**
+ * True when the committed render `html` leaves a `<details>` element open (more
+ * opens than closes). `<details>` collapses its children by default, so while it
+ * is still forming the streaming pending tail must be held rather than shown as a
+ * sibling *after* the (auto-closed) element, where it would flash the collapsed
+ * body (#600). Scans rendered HTML, so code spans/blocks — where the tag is
+ * escaped, not a real element — never count.
+ */
+export function hasOpenDetailsElement(html: string): boolean {
+  if (!html.includes('<details')) return false
+  const opens = html.match(DETAILS_OPEN_RE)?.length ?? 0
+  const closes = html.match(DETAILS_CLOSE_RE)?.length ?? 0
+  return opens > closes
+}
+
 /**
  * Incremental committed-prefix renderer. Owns the frozen/tail split of a single
  * `completedEl`; call {@link reset} when that element is rebuilt (see gap D).
@@ -272,6 +333,14 @@ export class FrozenTailRenderer {
   private frozenNodeCount = 0
   /** Serialized committed link-ref map at the last commit (invalidation guard). */
   private lastLinkRefKey = ''
+  /**
+   * Whether the committed prefix leaves a `<details>` open (#600). Read by the
+   * streaming renderer to hold the pending tail so a collapsed body is not
+   * flashed as a sibling after the element. Set on every commit; a still-open
+   * `<details>` always takes the full-morph path (its unbalanced tag trips the
+   * freeze guard), so this is computed there from the unsanitized render.
+   */
+  committedHasOpenDetails = false
   /**
    * Diagnostic: cumulative count of HTML characters this renderer has produced
    * (delta + tail per commit, or the whole document on a full-morph fallback).
@@ -313,6 +382,7 @@ export class FrozenTailRenderer {
     this.frozenHasHtml = false
     this.frozenNodeCount = 0
     this.lastLinkRefKey = ''
+    this.committedHasOpenDetails = false
     this.resetListState()
   }
 
@@ -336,6 +406,9 @@ export class FrozenTailRenderer {
       this.reset()
       return
     }
+    // Recomputed below (in fullMorph when a `<details>` is still open); default
+    // to closed so it never persists stale across a commit that resolved it.
+    this.committedHasOpenDetails = false
 
     const linkRefs = providedLinkRefs ?? collectLinkReferenceDefinitions(complete, tokens)
     const linkRefKey = serializeLinkRefs(linkRefs)
@@ -406,12 +479,12 @@ export class FrozenTailRenderer {
     const deltaHtml = deltaTokens.length
       ? renderBlocks(complete, deltaTokens, { linkRefs, ...RENDER_OPTS })
       : ''
-    // An unbalanced benign raw inline tag (`<b>` left open) makes whole-string
-    // sanitization re-open the tag into every later block; per-fragment
-    // sanitization cannot reproduce that, so never freeze such a delta. The
-    // fallback repeats each commit (frozenEnd stays 0), degrading that stream to
-    // the old full-morph behaviour — correct, just not incremental.
-    if (deltaHtml !== '' && hasUnbalancedBenignRawInline(deltaHtml)) {
+    // An unbalanced raw tag (`<b>` or a block-spanning `<details>` left open)
+    // makes whole-string sanitization keep the element open across later blocks;
+    // per-fragment sanitization closes it early, so never freeze such a delta.
+    // The fallback repeats each commit (frozenEnd stays 0), degrading that
+    // stream to the old full-morph behaviour — correct, just not incremental.
+    if (deltaHtml !== '' && hasUnfreezableRawHtml(deltaHtml)) {
       this.fullMorph(completedEl, complete, tokens, linkRefKey)
       return
     }
@@ -570,8 +643,8 @@ export class FrozenTailRenderer {
 
     const delta = renderListItemsSlice(complete, deltaItems, this.listLoose, linkRefs)
     // Same hazard as the top-level delta (gap F): never freeze an item slice
-    // whose raw benign inline tags are unbalanced.
-    if (delta.itemsHtml !== '' && hasUnbalancedBenignRawInline(delta.itemsHtml)) return 'fallback'
+    // whose raw tags (benign inline, or any element under passthrough) are unbalanced.
+    if (delta.itemsHtml !== '' && hasUnfreezableRawHtml(delta.itemsHtml)) return 'fallback'
     const tail = renderListItemsSlice(complete, tailItems, this.listLoose, linkRefs)
     this.renderedChars += delta.itemsHtml.length + tail.itemsHtml.length
 
@@ -630,7 +703,12 @@ export class FrozenTailRenderer {
     tokens: BlockToken[],
     linkRefKey: string,
   ): void {
-    const html = sanitizeRenderedMarkdown(renderMarkdown(complete, { tokens }))
+    const rawHtml = renderMarkdown(complete, { tokens })
+    // A still-forming `<details>` reaches here every commit (its unbalanced tag
+    // trips the freeze guard); flag it off the unsanitized render, before the
+    // sink balances the tree.
+    this.committedHasOpenDetails = hasOpenDetailsElement(rawHtml)
+    const html = sanitizeRenderedMarkdown(rawHtml)
     this.renderedChars += html.length
     morphInnerHtml(completedEl, html)
     this.frozenEnd = 0

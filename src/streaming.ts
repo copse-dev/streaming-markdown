@@ -22,6 +22,7 @@ import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from '.
 import { IncrementalSourceScanner } from './incremental-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
+import { type HtmlPolicy, setHtmlPolicy } from './html-policy.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml } from './html-sink.ts'
 import {
@@ -38,7 +39,7 @@ import {
   syncFormingFenceDom,
 } from './streaming-fence-dom.ts'
 import { buildFormingMathHtml, syncFormingMathDom } from './streaming-math-dom.ts'
-import { FrozenTailRenderer } from './streaming-frozen-tail.ts'
+import { FrozenTailRenderer, hasOpenDetailsElement } from './streaming-frozen-tail.ts'
 
 export { pendingHoldIndex } from './inline-emphasis.ts'
 export { splitAtLastNewline, splitForStreaming } from './streaming-split.ts'
@@ -557,12 +558,35 @@ function renderPendingTail(
   return { pendingInner, pendingVisible }
 }
 
+/** Options shared by the streaming emitters. */
+export interface StreamingMarkdownOptions {
+  /**
+   * Raw-HTML handling (#600), matching `renderMarkdown`'s option: `'passthrough'`
+   * (default) emits well-formed tags for the sink sanitizer to arbitrate;
+   * `'escape'` literalizes them. Omit to inherit the process-wide default.
+   */
+  htmlPolicy?: HtmlPolicy
+}
+
 /**
  * Render assistant text while it is still streaming.
  * Completed blocks (per the block tokenizer) are markdown-rendered; the pending
  * tail only renders safe inline markdown once its block context is unambiguous.
  */
-export function renderStreamingMarkdown(content: string): string {
+export function renderStreamingMarkdown(
+  content: string,
+  options: StreamingMarkdownOptions = {},
+): string {
+  if (options.htmlPolicy === undefined) return renderStreamingMarkdownCore(content)
+  const previous = setHtmlPolicy(options.htmlPolicy)
+  try {
+    return renderStreamingMarkdownCore(content)
+  } finally {
+    setHtmlPolicy(previous)
+  }
+}
+
+function renderStreamingMarkdownCore(content: string): string {
   const split = splitForStreaming(content)
   const { complete, pending, openListItemFirstLine, blocks } = split
   // Tokenize `complete` at most once and reuse it for the render and the
@@ -570,9 +594,12 @@ export function renderStreamingMarkdown(content: string): string {
   let completeTokensCache: BlockToken[] | null = null
   const completeTokens = (): BlockToken[] => (completeTokensCache ??= tokenizeBlocks(complete))
   const completeTokensForPending = pending.includes('|') ? completeTokens() : undefined
-  const rendered = complete
-    ? sanitizeRenderedMarkdown(renderMarkdown(complete, { tokens: completeTokens() }))
-    : ''
+  const renderedRaw = complete ? renderMarkdown(complete, { tokens: completeTokens() }) : ''
+  const rendered = renderedRaw ? sanitizeRenderedMarkdown(renderedRaw) : ''
+  // Inside a still-forming `<details>` the committed children render inside the
+  // (collapsed) element; a pending sibling would flash the collapsed body, so
+  // hold the whole tail until the element closes (#600).
+  if (hasOpenDetailsElement(renderedRaw)) return rendered
   const fenceSource = formingFenceSource(content, blocks)
   const mathSource = fenceSource ? null : getIncompleteMathSource(content, blocks)
   const tableSource =
@@ -643,13 +670,29 @@ export class StreamingMarkdownRenderer {
   private readonly contentScanner = new IncrementalSourceScanner()
   private readonly completeScanner = new IncrementalSourceScanner()
   private readonly host: HTMLElement
+  /** Raw-HTML policy applied around every commit (#600); default passthrough. */
+  private readonly htmlPolicy: HtmlPolicy | undefined
 
-  constructor(host: HTMLElement) {
+  constructor(host: HTMLElement, options: StreamingMarkdownOptions = {}) {
     this.host = host
+    this.htmlPolicy = options.htmlPolicy
   }
 
   /** Render `content` (the full message text so far) into the host incrementally. */
   update(content: string): void {
+    if (this.htmlPolicy === undefined) {
+      this.updateWithPolicy(content)
+      return
+    }
+    const previous = setHtmlPolicy(this.htmlPolicy)
+    try {
+      this.updateWithPolicy(content)
+    } finally {
+      setHtmlPolicy(previous)
+    }
+  }
+
+  private updateWithPolicy(content: string): void {
     const split = splitForStreamingFrom(content, this.contentScanner.tokenize(content))
     const { complete, pending, openListItemFirstLine, blocks } = split
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
@@ -674,6 +717,19 @@ export class StreamingMarkdownRenderer {
       )
       this.lastComplete = complete
     }
+
+    // Inside a still-forming `<details>`: its committed children already render
+    // inside the (collapsed) element, and a pending sibling here would flash the
+    // collapsed body as a visible tail. Hold the whole tail — forming and
+    // pending — until the element closes (#600).
+    if (this.frozenTail.committedHasOpenDetails) {
+      clearFormingDom(formingEl)
+      formingEl.hidden = true
+      clearBlockPendingDom(completedEl, ['continuation', 'paragraph-continuation', 'direct-blocks'])
+      syncInlinePendingDom(pendingEl, '', false)
+      return
+    }
+
     const completeTokensForPending = pending.includes('|') ? this.committedTokens : undefined
 
     // A committed GFM table always contains `|`; without one there is no table
