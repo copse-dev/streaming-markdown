@@ -68,7 +68,11 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          # Node 24 bundles npm 11.x (>= 11.5.1), which npm Trusted Publishing
+          # requires. Using it avoids upgrading npm in place at publish time —
+          # that in-place self-upgrade could prune npm's own bundled `sigstore`
+          # dependency and break provenance generation during `npm publish`.
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
           scope: '@copse'
@@ -144,8 +148,8 @@ jobs:
           set -euo pipefail
           # Trusted Publishing authenticates via the GitHub OIDC token (see the
           # id-token permission above) — no NPM_TOKEN needed. It requires npm
-          # >= 11.5.1; the Node 22 runner ships npm 10, so upgrade first.
-          npm install -g npm@latest
+          # >= 11.5.1, which the Node 24 runner ships out of the box (see the
+          # setup-node step above), so no npm self-upgrade is needed here.
           # publishConfig pins the public registry + `--access public`, and
           # provenance is attached automatically under trusted publishing.
           npm publish
