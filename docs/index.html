@@ -2204,11 +2204,17 @@ startCompare();
 // left burst-for-burst, showing the before/after in one place.
 const SMOOTH_SOURCE = `## Streaming a model reply
 
-Tokens arrive in **irregular bursts**, exactly as an LLM transport delivers
-them — several characters at once, at uneven intervals.
+When a model streams, whole phrases can land in a single frame — then nothing
+for a beat, then another lump. Watch the two panes diverge: the **raw** pane on
+the left commits each lump the instant it arrives, so the text leaps a sentence
+at a time. The **smoothed** pane on the right feeds the same lumps through the
+input smoother, which trickles them out a few characters per frame — a steady
+typewriter cadence that trails the raw pane and catches up only at the end.
 
-- The *raw* pane commits each burst the instant it lands.
-- The *smoothed* pane walks the reveal forward one character at a time.
+- Every released value is a *prefix* of the full text, so pending-block
+  highlighting keeps working unchanged.
+- The reveal walks toward each new target instead of snapping to it.
+- On stream end a single \`flush()\` drops the remaining tail in at once.
 
 \`\`\`js
 const smoother = createInputSmoother({
@@ -2218,7 +2224,14 @@ for await (const full of stream) smoother.push(full)
 smoother.flush() // stream end: converge, no lag
 \`\`\`
 
-Both panes settle on identical DOM once the stream ends.`;
+The left pane leaps while the right pane types — then both settle on exactly
+the same DOM.`;
+
+// Reveal rate for the smoothed pane. Deliberately pitched near the stream's
+// average arrival rate (below the 600/s library default) so the reveal reads as
+// a continuous typewriter that trails the bursty raw pane, rather than draining
+// each lump and waiting — that gap is the whole point of the demo.
+const SMOOTH_CPS = 220;
 
 const rawOutput = document.getElementById('raw-output');
 const smoothOutput = document.getElementById('smooth-output');
@@ -2232,10 +2245,18 @@ let activeSmoother = null;
 let rawRenderer = null;
 let smoothRenderer = null;
 
-// A burst of 4–25 characters, clamped to what's left — a stand-in for the
-// chunky, uneven token groups a real transport hands over.
-function nextBurst(remaining) {
-  return Math.min(4 + Math.floor(Math.random() * 22), remaining);
+// Advance to the end of the next burst: a ~55–135 char lump snapped forward to
+// the next word boundary (and past the trailing whitespace), so each raw commit
+// lands as a whole phrase and never leaves the pending tail sitting empty on a
+// bare newline. A stand-in for the chunky, uneven token groups a real transport
+// hands over.
+function advanceBurst(text, pos) {
+  const target = pos + 55 + Math.floor(Math.random() * 80);
+  if (target >= text.length) return text.length;
+  let end = target;
+  while (end < text.length && !/\s/.test(text[end])) end++; // to word boundary
+  while (end < text.length && /\s/.test(text[end])) end++;  // past the space(s)
+  return end;
 }
 
 function stopSmoothDemo() {
@@ -2265,6 +2286,7 @@ function startSmoothDemo() {
       followBottom(smoothOutput);
       smoothStats.innerHTML = `<span class="stat-val">${smoothFrames}</span> frames`;
     },
+    charsPerSecond: SMOOTH_CPS,
     // Off → pass-through, byte-for-byte identical to feeding the raw bursts.
     disabled: !smoothCheck.checked,
   });
@@ -2282,7 +2304,7 @@ function startSmoothDemo() {
       checkSmoothConvergence();
       return;
     }
-    pos += nextBurst(text.length - pos);
+    pos = advanceBurst(text, pos);
     const partial = text.slice(0, pos);
     bursts++;
 
@@ -2294,8 +2316,9 @@ function startSmoothDemo() {
     // Smoothed pane: hand the same growing target to the smoother.
     activeSmoother.push(partial);
 
-    // Jittered inter-burst gap (55–170 ms) so arrival feels like a real stream.
-    smoothBurstTimer = setTimeout(tick, 55 + Math.random() * 115);
+    // Jittered inter-burst gap (300–470 ms) — big, sparse lumps so the raw
+    // pane's leap and the smoothed pane's trailing reveal read clearly apart.
+    smoothBurstTimer = setTimeout(tick, 300 + Math.random() * 170);
   };
   tick();
 }
