@@ -5,6 +5,14 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-09
+
+### Other Changes
+
+- Raw-HTML passthrough as default, escape as opt-out (#600) (#101) (`59b073b`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v0.8.0...v0.9.0
+
 ## [0.8.0] - 2026-07-09
 
 ### Continuous Integration
