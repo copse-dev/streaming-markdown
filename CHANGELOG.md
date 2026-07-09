@@ -5,6 +5,25 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-09
+
+### Continuous Integration
+
+- add advisory TypeScript 7 canary job (#99) (`c900e15`)
+
+### Chores
+
+- Bump actions/upload-pages-artifact from 3 to 5 (#97) (`b564d49`)
+- Bump actions/upload-artifact from 4 to 7 (#95) (`0f6e764`)
+- Bump actions/deploy-pages from 4 to 5 (#96) (`cff1a3a`)
+- Bump @types/node in the npm-minor-patch group (#98) (`6941010`)
+
+### Other Changes
+
+- Add input smoother demo showcasing token arrival smoothing (#100) (`e84a51e`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v0.7.0...v0.8.0
+
 ## [0.7.0] - 2026-07-09
 
 ### Features
