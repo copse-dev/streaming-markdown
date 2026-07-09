@@ -46,10 +46,6 @@ const ALLOWED_STRING_DIVERGENCES: Record<
     reason: 'HTML block: bare attribute (<div class foo) parsed differently',
   },
   158: { kind: 'expected', reason: 'HTML block: stray < inside raw text parsed differently' },
-  173: {
-    kind: 'expected',
-    reason: 'HTML block: <style> raw-text element swallows following text in HTMLParser',
-  },
   616: {
     kind: 'expected',
     reason: 'Raw HTML: malformed tag with quoted attribute parsed differently',
@@ -82,7 +78,7 @@ interface SpecExample {
   section: string
 }
 interface Harness {
-  renderMarkdown: (raw: string) => string
+  renderMarkdown: (raw: string, options?: { htmlPolicy?: 'passthrough' | 'escape' }) => string
   normalizeHtml: (html: string) => string
   loadCommonMarkSpec: () => SpecExample[]
 }
@@ -111,9 +107,15 @@ const harness = (await import(
 const spec = harness.loadCommonMarkSpec()
 
 // JS side: render every example, then normalize expected + rendered with the JS port.
+// Render in the escape policy — the same mode the CommonMark/GFM conformance
+// harnesses are pinned to (#600) — so this differential check keeps measuring the
+// JS normalizer against the reference on the historical raw-HTML behavior. Under
+// the default (passthrough) the HTML-block/Raw-HTML examples emit raw tags whose
+// normalization is exactly the pathological space these normalizers legitimately
+// disagree on; escape keeps the corpus stable and the allowlist meaningful.
 const inputs = spec.map((e) => ({
   example: e.example,
-  rendered: harness.renderMarkdown(e.markdown),
+  rendered: harness.renderMarkdown(e.markdown, { htmlPolicy: 'escape' }),
   expected: e.html,
 }))
 const jsNorm = new Map<number, { expected: string; rendered: string }>()
