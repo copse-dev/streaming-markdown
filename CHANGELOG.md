@@ -5,6 +5,29 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-09
+
+### Features
+
+- opt-in CJK-friendly emphasis and autolink boundaries (#90) (`cf6cdba`)
+- opt-in link/image origin policy (#83) (#92) (`fb4a74b`)
+- optional input smoother behind /smoothing subpath (#84) (#89) (`c274477`)
+- ship optional emoji-shortcode inline pass (#91) (`3cc6f73`)
+
+### Documentation
+
+- host-UI recipe guide for code-block copy buttons (#88) (`5efea0d`)
+
+### Continuous Integration
+
+- use Node 24 for publish instead of upgrading npm in place (#94) (`ad8a6cc`)
+
+### Other Changes
+
+- Make entity decoding pluggable with zero-dependency default (#93) (`1ef8769`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v0.6.0...v0.7.0
+
 ## [0.6.0] - 2026-07-07
 
 ### Features
