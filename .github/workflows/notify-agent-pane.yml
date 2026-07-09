@@ -1,12 +1,19 @@
 name: Notify agent-pane
 
-# Push-model dependency sync: the moment a release is published here, poke
-# copse-dev/agent-pane with a repository_dispatch so its
-# sync-streaming-markdown.yml workflow bumps @copse/streaming-markdown and
-# opens a PR immediately — no waiting for dependabot's weekly schedule and
-# cooldown. Listening on `release: published` (rather than a step inside
-# release.yml) keeps the two concerns decoupled and also covers a release cut
-# by hand in the GitHub UI.
+# Push-model dependency sync: poke copse-dev/agent-pane with a
+# repository_dispatch so its sync-streaming-markdown.yml workflow bumps
+# @copse/streaming-markdown and opens a PR immediately — no waiting for
+# dependabot's weekly schedule and cooldown.
+#
+# This workflow fires on:
+#   * release: published  — covers releases cut BY HAND in the GitHub UI.
+#     Note it does NOT cover releases cut by release.yml: those are published
+#     with the default GITHUB_TOKEN, and GitHub deliberately does not fire the
+#     `release: published` event for actions taken with GITHUB_TOKEN (an
+#     anti-recursion safeguard). The automated release path therefore dispatches
+#     agent-pane directly from a step in release.yml instead.
+#   * workflow_dispatch    — a manual escape hatch to (re)notify agent-pane for
+#     any tag, e.g. to replay a dispatch that failed or to sync an older tag.
 #
 # GITHUB_TOKEN is scoped to this repo and cannot dispatch cross-repo, so this
 # needs a fine-grained PAT stored as the AGENT_PANE_DISPATCH_TOKEN repo secret:
@@ -21,6 +28,12 @@ name: Notify agent-pane
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to notify agent-pane about (e.g. v0.9.0)'
+        required: true
+        type: string
 
 # The job only calls the API on the *other* repo via the PAT; this workflow
 # needs nothing from its own GITHUB_TOKEN.
@@ -32,14 +45,15 @@ jobs:
     # public repo, and release notifications shouldn't depend on fleet uptime.
     runs-on: ubuntu-latest
     # Pre-releases are opt-in on the consumer side — don't auto-bump agent-pane
-    # onto an 0.x.y-rc. agent-pane can still pull one manually via its
-    # workflow_dispatch input.
-    if: ${{ !github.event.release.prerelease }}
+    # onto an 0.x.y-rc. A manual workflow_dispatch always proceeds (github.event
+    # .release is absent there, so the prerelease check is release-only).
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
     steps:
       - name: Send repository_dispatch to agent-pane
         env:
           GH_TOKEN: ${{ secrets.AGENT_PANE_DISPATCH_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          # release event supplies tag_name; manual runs supply inputs.tag.
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
