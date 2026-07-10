@@ -4,6 +4,7 @@
  */
 import {
   isValidReferenceLabel,
+  parseBracketedLabel,
   parseLinkReferenceDefinitionAt,
   parseLinkReferenceDefinitions,
   type LinkReference,
@@ -447,6 +448,23 @@ function endsInOpenParagraphNested(fragment: string, last: BlockToken): boolean 
  * only a plainly-continuing text line is fast-pathed. Never returns true for a
  * line that would change the "ends in open paragraph" verdict.
  */
+/**
+ * A line begins a link reference definition at a block start when it is
+ * `[label]:` — a bracketed, non-blank label with a colon immediately after the
+ * closing `]` (spec 192). Such a line tokenizes as a `link_ref_def` block, not
+ * a paragraph, so the flat-paragraph fast path must exclude it and recompute.
+ * More precise than a bare `/^ {0,3}\[/`: an ordinary `[text] …` or
+ * `[link](url) …` paragraph line has no `]:`, so it is not needlessly excluded.
+ */
+function startsLinkRefDef(s: string): boolean {
+  let i = 0
+  while (i < 3 && s[i] === ' ') i++
+  if (s[i] !== '[' || s[i + 1] === '^') return false // `[^…]` is a footnote def
+  const label = parseBracketedLabel(s, i)
+  if (!label || label.label.trim() === '') return false
+  return s[label.end] === ':'
+}
+
 function keepsFlatParagraphOpen(s: string): boolean {
   if (s.trim() === '') return false
   // A 4-column indent opens an indented code block at a block start (spec 236),
@@ -463,6 +481,7 @@ function keepsFlatParagraphOpen(s: string): boolean {
     fenceMarker(s) !== null ||
     isMathBlockInterruptLine(s) ||
     FOOTNOTE_DEF_LINE_RE.test(s) ||
+    startsLinkRefDef(s) ||
     isTableRow(s)
   )
 }

@@ -369,4 +369,23 @@ describe('blockquote lazy continuation (incremental memo, #111)', () => {
     assert.equal(toks[0]?.kind, 'blockquote')
     assert.equal(src.slice(toks[0]?.start ?? 0, toks[0]?.end ?? 0), src)
   })
+
+  it('a link reference definition at a block start does not lazily swallow the next line', () => {
+    // `> [x]: /u` tokenizes as a `link_ref_def` (not a paragraph), so the memo
+    // fast path must not treat the unmarked `bar` as a lazy continuation — it is
+    // a separate paragraph outside the quote. Regresses the memo returning
+    // `true` for a ref-def line that `endsInOpenParagraph` classifies as `false`.
+    assert.deepEqual(kinds('> [x]: /u\nbar\n'), [
+      'blockquote:"> [x]: /u\\n"',
+      'paragraph:"bar\\n"',
+    ])
+  })
+
+  it('a ref-def that follows an open quoted paragraph still lazily continues', () => {
+    // Here `[foo]: /url` cannot interrupt the already-open paragraph `text`, so
+    // it genuinely is a lazy continuation and stays inside the one blockquote —
+    // the memo is correct in this direction and the fix must preserve it.
+    const src = '> text\n> [foo]: /url\n'
+    assert.deepEqual(kinds(src), [`blockquote:${JSON.stringify(src)}`])
+  })
 })
