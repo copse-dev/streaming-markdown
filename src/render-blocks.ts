@@ -636,7 +636,11 @@ export function renderBlocksToParts(
       underline.status === 'ambiguous' &&
       SETEXT_UNDERLINE_SLICE_RE.test(source.slice(underline.start, underline.end))
     ) {
-      parts.push(renderSetextHeading(source.slice(token.start, underline.end), linkRefs))
+      parts.push({
+        start: token.start,
+        end: underline.end,
+        html: renderSetextHeading(source.slice(token.start, underline.end), linkRefs),
+      })
       i += 2
       continue
     }
