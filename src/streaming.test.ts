@@ -9,6 +9,8 @@ import {
   splitAtLastNewline,
   StreamingMarkdownRenderer,
 } from './streaming.ts'
+import { renderMarkdown } from './renderer.ts'
+import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { splitCore } from '../tests/split-core.ts'
 import { withHostImagePolicy } from '../tests/host-image-test-policy.ts'
 
@@ -45,6 +47,20 @@ describe('renderStreamingMarkdown', () => {
     )
     assert.doesNotMatch(html, /stream-pending[^>]*>- item/)
     assert.doesNotMatch(html, /<li>item<\/li>/)
+  })
+
+  it('never flashes a blank bullet for a comment-only list item', () => {
+    // A `- <!-- ... -->` template placeholder is held in the pending tail while
+    // it streams (nothing shown), and once its block commits it converges to the
+    // static render, which drops the emptied item rather than emit `<li></li>`.
+    const midStream = renderStreamingMarkdown('## Steps\n\n- <!-- describe your testing')
+    assert.doesNotMatch(midStream, /<li><\/li>/)
+    const committed = 'Steps:\n\n- <!-- describe your testing -->\n\n## Next\n'
+    assert.doesNotMatch(renderStreamingMarkdown(committed), /<li><\/li>/)
+    assert.equal(
+      sanitizeRenderedMarkdown(renderStreamingMarkdown(committed)),
+      sanitizeRenderedMarkdown(renderMarkdown(committed)),
+    )
   })
 
   it('renders complete inline bold markup on the pending line', () => {
