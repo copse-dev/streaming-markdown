@@ -33,11 +33,18 @@
 //     the unfrozen item slice. A long open trailing BLOCKQUOTE is not — its
 //     grouping re-renders merged content, so it stays wholly in the tail and
 //     degrades toward the old per-commit cost (rare shape; follow-up if seen).
+//   - FOOTNOTES (#110) took the full-morph path on every commit (any `[^` in
+//     the buffer tripped the guard), making footnote streaming O(n²). They now
+//     have a dedicated incremental path (`commitWithFootnotes`): the body is
+//     rendered as per-block parts and the section as per-<li> items, each with a
+//     DOM handle, and a new definition re-morphs only the reference blocks whose
+//     numbering changed plus the new/changed section items.
 //
 // Every uncertainty falls back to `morphInnerHtml(sanitize(render(complete)))` —
 // today's exact, correct behaviour — so the fast path is a pure optimization: a
 // mishandled case degrades to slower-but-correct output, never to wrong output.
 import {
+  collectFootnoteDefinitions,
   collectLinkReferenceDefinitions,
   type BlockKind,
   type BlockToken,
@@ -48,10 +55,18 @@ import {
   listItemSliceIsMultiParagraph,
   listSliceContinuesGroup,
   renderBlocks,
+  renderBlocksToParts,
+  renderFootnoteSectionItems,
   renderListItemsSlice,
   scanListGroup,
   type ListGroupSignature,
+  type RenderedPart,
 } from './render-blocks.ts'
+import {
+  createFootnoteContext,
+  setActiveFootnoteContext,
+  type FootnoteDefinitionMap,
+} from './footnotes.ts'
 import { getHtmlPolicy } from './html-policy.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
@@ -114,10 +129,9 @@ function settleClassOf(kind: BlockKind): SettleClass {
     case 'indented_code':
       return 'grouping'
     // A footnote definition can absorb later lines across a blank run (a
-    // 4-column-indented continuation), so a trailing one is never settled.
-    // Footnote-bearing documents never reach the frozen fast path anyway —
-    // `update` full-morphs when `[^` is present (see below) because the
-    // trailing footnotes section and earlier-reference upgrades are global.
+    // 4-column-indented continuation), so a trailing one is never settled. It
+    // renders nothing in the body; the footnote-incremental path (#110) owns the
+    // reference upgrades and the trailing section once a definition is committed.
     case 'footnote_def':
       return 'grouping'
     case 'blank':
@@ -376,6 +390,47 @@ export class FrozenTailRenderer {
     this.listHasTask = false
   }
 
+  // ---- Footnote incremental rendering (#110) ----------------------------
+  // A footnote-bearing document used to force a full `morphInnerHtml(render(
+  // complete))` on every commit (any `[^` in the buffer tripped the freeze
+  // guard), making footnote streaming O(n²). That is wasteful: a new footnote
+  // definition only upgrades the specific `[^label]` references it resolves
+  // (inline, never restructuring their block) and grows the trailing footnotes
+  // section. This mode renders the body as per-block parts and the section as
+  // per-`<li>` items, keeping a DOM handle to each, and re-morphs ONLY the parts
+  // whose reference numbering changed plus the new/changed section items.
+  //
+  // Active only once at least one footnote DEFINITION is committed (before that,
+  // references are literal and the ordinary frozen-tail path is byte-identical).
+  // Any structural surprise (new/removed body block, section first appearing,
+  // reorder that can't map, raw-HTML imbalance) falls back to a full rebuild,
+  // and a rebuild that can't re-capture the node mapping gives up to the plain
+  // full-morph path — so output is always correct, only sometimes slower.
+  /** Whether footnote-incremental bookkeeping currently mirrors `completedEl`. */
+  private fnActive = false
+  /** A mapping guard failed irrecoverably; always full-morph until `reset`. */
+  private fnGaveUp = false
+  /** Committed source at the last footnote commit (append-only prefix guard). */
+  private fnSource = ''
+  /** Serialized link-ref map at the last footnote commit. */
+  private fnLinkRefKey = ''
+  /** Rendered body parts with the live DOM element each occupies. */
+  private fnBodyParts: (RenderedPart & { el: HTMLElement })[] = []
+  /** The live `<ol>` inside the footnotes section (null = no section yet). */
+  private fnSectionOl: HTMLElement | null = null
+  /** Last-rendered footnote section `<li>` HTML strings (change-detection). */
+  private fnSectionItems: string[] = []
+
+  private resetFootnoteState(): void {
+    this.fnActive = false
+    this.fnGaveUp = false
+    this.fnSource = ''
+    this.fnLinkRefKey = ''
+    this.fnBodyParts = []
+    this.fnSectionOl = null
+    this.fnSectionItems = []
+  }
+
   reset(): void {
     this.frozenEnd = 0
     this.frozenSource = ''
@@ -384,6 +439,7 @@ export class FrozenTailRenderer {
     this.lastLinkRefKey = ''
     this.committedHasOpenDetails = false
     this.resetListState()
+    this.resetFootnoteState()
   }
 
   /**
@@ -432,17 +488,22 @@ export class FrozenTailRenderer {
     // nudging the boundary back over a still-committed blank. The frozen prefix
     // stays valid there, so we keep it and never retreat `frozenEnd` (clamp the
     // advance below).
-    // Footnotes (#72) are document-global: a definition arriving late rewrites
-    // earlier blocks (a literal `[^x]` upgrades to a numbered reference) and
-    // the whole render gains a trailing footnotes section that re-renders as
-    // definitions stream in. Freezing any prefix would pin those, so a
-    // footnote-bearing document always takes the full-morph path — correct,
-    // just not incremental (an O(n) byte scan per commit, same class as the
-    // `includes('|')` gate; `[^` inside a code fence trips it too, which only
-    // costs performance).
+    // Footnotes (#110) are document-global: a definition arriving late upgrades
+    // the specific literal `[^x]` references it resolves (inline, never
+    // restructuring their block) and grows a trailing footnotes section. Once a
+    // definition is committed, the dedicated incremental path re-morphs only the
+    // changed reference blocks and section items instead of the whole prefix.
+    // Before the first definition, references are literal and the document is
+    // byte-identical to a footnote-free one, so the ordinary fast path is valid.
+    const footnoteDefs = collectFootnoteDefinitions(complete, tokens)
+    if (footnoteDefs.size > 0) {
+      this.commitWithFootnotes(completedEl, complete, tokens, linkRefs, linkRefKey, footnoteDefs)
+      return
+    }
+    if (this.fnActive || this.fnGaveUp) this.resetFootnoteState()
+
     if (
       linkRefKey !== this.lastLinkRefKey ||
-      complete.includes('[^') ||
       !complete.startsWith(this.frozenSource) ||
       tokenStraddles(tokens, this.frozenEnd)
     ) {
@@ -697,6 +758,202 @@ export class FrozenTailRenderer {
     return 'handled'
   }
 
+  /**
+   * Commit a footnote-bearing document (#110). Reuses the incremental body/
+   * section mapping when it still mirrors `completedEl`; otherwise rebuilds it
+   * from a full render (re-capturing node handles), and gives up to the plain
+   * full-morph path only if that re-capture is impossible. A still-forming
+   * `<details>` (exotic combined with footnotes) always full-morphs so its
+   * open-element flag stays correct.
+   */
+  private commitWithFootnotes(
+    completedEl: HTMLElement,
+    complete: string,
+    tokens: BlockToken[],
+    linkRefs: LinkReferenceMap,
+    linkRefKey: string,
+    footnoteDefs: FootnoteDefinitionMap,
+  ): void {
+    if (this.fnGaveUp || complete.includes('<details')) {
+      this.fullMorph(completedEl, complete, tokens, linkRefKey)
+      return
+    }
+    const canReuse =
+      this.fnActive && this.fnLinkRefKey === linkRefKey && complete.startsWith(this.fnSource)
+    if (canReuse && this.fnIncremental(completedEl, complete, tokens, linkRefs)) {
+      this.fnSource = complete
+      this.fnLinkRefKey = linkRefKey
+      return
+    }
+    this.fnRebuild(completedEl, complete, tokens, linkRefs, linkRefKey, footnoteDefs)
+  }
+
+  /** Render body parts + section items under a fresh footnote context. */
+  private renderFootnoteFrame(
+    complete: string,
+    tokens: BlockToken[],
+    linkRefs: LinkReferenceMap,
+    footnoteDefs: FootnoteDefinitionMap,
+  ): { parts: RenderedPart[]; items: string[] } {
+    const ctx = createFootnoteContext(footnoteDefs)
+    setActiveFootnoteContext(ctx)
+    try {
+      // Body first (advances first-use numbering in document order), then the
+      // section (reads ctx.order) — exactly renderMarkdownCore's sequence.
+      const parts = renderBlocksToParts(complete, tokens, { linkRefs, ...RENDER_OPTS })
+      const items = renderFootnoteSectionItems(ctx, linkRefs)
+      return { parts, items }
+    } finally {
+      setActiveFootnoteContext(null)
+    }
+  }
+
+  /**
+   * Full render + morph + re-capture of the per-block / per-item node mapping.
+   * Byte-identical to `renderMarkdownCore` (body parts joined with '\n', then the
+   * section). On success `fnActive` is armed for incremental commits; if the
+   * captured element count doesn't match the rendered parts (raw-HTML stripping
+   * changed the node shape), it gives up to plain full-morph for this stream.
+   */
+  private fnRebuild(
+    completedEl: HTMLElement,
+    complete: string,
+    tokens: BlockToken[],
+    linkRefs: LinkReferenceMap,
+    linkRefKey: string,
+    footnoteDefs: FootnoteDefinitionMap,
+  ): void {
+    const { parts, items } = this.renderFootnoteFrame(complete, tokens, linkRefs, footnoteDefs)
+    const body = parts.map((p) => p.html).join('\n')
+    const section =
+      items.length > 0 ? `<section class="footnotes"><ol>${items.join('')}</ol></section>` : ''
+    const rawHtml = section === '' ? body : body === '' ? section : `${body}\n${section}`
+    this.committedHasOpenDetails = hasOpenDetailsElement(rawHtml)
+    const html = sanitizeRenderedMarkdown(rawHtml)
+    this.renderedChars += html.length
+    morphInnerHtml(completedEl, html)
+
+    // Generic frozen bookkeeping is now stale (fn mode owns the subtree); clear
+    // it so a later return to the generic path rebuilds from scratch.
+    this.frozenEnd = 0
+    this.frozenSource = ''
+    this.frozenHasHtml = false
+    this.frozenNodeCount = 0
+    this.resetListState()
+    this.lastLinkRefKey = linkRefKey
+
+    // Re-capture node handles: element children are the body parts in order,
+    // then the section element (if any). Whitespace seams are text nodes and do
+    // not appear in `.children`.
+    const els = Array.from(completedEl.children) as HTMLElement[]
+    const expected = parts.length + (section === '' ? 0 : 1)
+    const sectionOl = section === '' ? null : (els[els.length - 1]?.querySelector('ol') ?? null)
+    if (els.length !== expected || (section !== '' && !sectionOl)) {
+      // Node shape doesn't match the parts (e.g. passthrough stripped a raw
+      // block): incremental mapping is unsafe — stay correct via full-morph.
+      this.resetFootnoteState()
+      this.fnGaveUp = true
+      return
+    }
+    this.fnBodyParts = parts.map((p, i) => ({ ...p, el: els[i] as HTMLElement }))
+    this.fnSectionItems = items
+    this.fnSectionOl = sectionOl
+    this.fnActive = true
+    this.fnGaveUp = false
+    this.fnSource = complete
+    this.fnLinkRefKey = linkRefKey
+  }
+
+  /**
+   * Incremental footnote commit. Returns false (signalling a rebuild) on any
+   * structural change the surgical path can't express: a different body-part
+   * count or boundary, a raw-HTML imbalance, a tag change, or the section
+   * appearing/disappearing/shrinking. On the fast path it re-morphs only the
+   * body parts whose HTML changed and the changed/appended section items.
+   */
+  private fnIncremental(
+    completedEl: HTMLElement,
+    complete: string,
+    tokens: BlockToken[],
+    linkRefs: LinkReferenceMap,
+  ): boolean {
+    const footnoteDefs = collectFootnoteDefinitions(complete, tokens)
+    const { parts, items } = this.renderFootnoteFrame(complete, tokens, linkRefs, footnoteDefs)
+
+    // Structural guard: body must have the same parts at the same source spans
+    // (footnote definitions render nothing, so committing one leaves the body
+    // shape untouched — only reference numbering inside a part can change).
+    if (parts.length !== this.fnBodyParts.length) return false
+    for (let i = 0; i < parts.length; i++) {
+      const cached = this.fnBodyParts[i]
+      const part = parts[i]
+      if (!cached || !part || cached.start !== part.start || cached.end !== part.end) return false
+    }
+
+    // Body: re-morph in place only the parts whose rendered HTML changed.
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      const cached = this.fnBodyParts[i]
+      if (!part || !cached || part.html === cached.html) continue
+      if (part.html !== '' && hasUnfreezableRawHtml(part.html)) return false
+      if (!this.morphPartElement(completedEl, cached.el, part.html)) return false
+      cached.html = part.html
+      this.renderedChars += part.html.length
+    }
+
+    return this.syncFootnoteSection(completedEl, items)
+  }
+
+  /**
+   * Reconcile one body part's element in place against freshly rendered HTML,
+   * preserving the element's identity (a footnote reference upgrade is an inline
+   * change within the block). Returns false — signalling a rebuild — if the part
+   * no longer sanitizes to a single element of the same tag.
+   */
+  private morphPartElement(completedEl: HTMLElement, el: HTMLElement, partHtml: string): boolean {
+    const host = completedEl.cloneNode(false) as HTMLElement
+    setPresanitizedHtml(host, sanitizeRenderedMarkdown(partHtml))
+    const template = host.firstElementChild
+    if (
+      host.childNodes.length !== 1 ||
+      !(template instanceof HTMLElement) ||
+      template.tagName !== el.tagName
+    ) {
+      return false
+    }
+    syncAttributes(el, template)
+    morphElementChildrenFrom(el, template, 0)
+    return true
+  }
+
+  /**
+   * Reconcile the footnotes section incrementally: morph the `<ol>` children
+   * from the first changed item onward, freezing the identical leading items
+   * (the common append-only case parses just the one new/last item). Returns
+   * false — signalling a rebuild — when the section must appear, disappear, or
+   * its item shape can't be mapped.
+   */
+  private syncFootnoteSection(completedEl: HTMLElement, items: string[]): boolean {
+    const prev = this.fnSectionItems
+    if (items.length === 0) return this.fnSectionOl === null
+    // The section first appears (or a dropped section must reappear) via rebuild.
+    if (!this.fnSectionOl) return false
+
+    let firstChanged = 0
+    const min = Math.min(prev.length, items.length)
+    while (firstChanged < min && prev[firstChanged] === items[firstChanged]) firstChanged++
+    if (firstChanged === prev.length && prev.length === items.length) return true
+
+    const host = completedEl.cloneNode(false) as HTMLElement
+    setSanitizedHtml(host, `<ol>${items.slice(firstChanged).join('')}</ol>`)
+    const templateOl = host.firstElementChild
+    if (!(templateOl instanceof HTMLElement) || templateOl.tagName !== 'OL') return false
+    morphElementChildrenFrom(this.fnSectionOl, templateOl, firstChanged)
+    this.fnSectionItems = items
+    this.renderedChars += items.slice(firstChanged).join('').length
+    return true
+  }
+
   private fullMorph(
     completedEl: HTMLElement,
     complete: string,
@@ -717,5 +974,6 @@ export class FrozenTailRenderer {
     this.frozenNodeCount = 0
     this.lastLinkRefKey = linkRefKey
     this.resetListState()
+    this.resetFootnoteState()
   }
 }

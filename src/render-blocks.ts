@@ -566,17 +566,37 @@ function renderSingleBlock(
   }
 }
 
-/** Render tokenized block-level markdown to HTML (#475 phase 2). */
-export function renderBlocks(
+/**
+ * One rendered top-level block (or grouped block run) with the source range it
+ * covers. `start`/`end` are source offsets of the first/last token in the unit,
+ * so a caller can map a rendered node back to its source slice (#110 footnote
+ * incremental rendering: detect which committed blocks a new footnote definition
+ * actually changed). Blank / link-ref / footnote-def tokens render nothing and
+ * are absorbed into the following unit rather than emitted as their own part.
+ */
+export interface RenderedPart {
+  start: number
+  end: number
+  html: string
+}
+
+/**
+ * Like {@link renderBlocks} but returns each non-empty top-level unit separately
+ * (#110). `renderBlocks` is exactly the parts' `html` joined with '\n', so the
+ * concatenation is byte-identical; the per-unit split lets the streaming
+ * footnote path re-render and re-morph only the blocks whose footnote-reference
+ * numbering changed instead of the whole committed prefix.
+ */
+export function renderBlocksToParts(
   source: string,
   tokens: BlockToken[],
   options: RenderBlocksOptions = {},
-): string {
+): RenderedPart[] {
   const linkRefs = options.linkRefs ?? new Map()
   const tightParagraphs = options.tightParagraphs ?? false
   const htmlFromIndent = options.htmlFromIndent ?? false
   const indentedCode = options.indentedCode ?? true
-  const parts: string[] = []
+  const parts: RenderedPart[] = []
   let i = 0
   while (i < tokens.length) {
     const token = tokens[i]
@@ -589,13 +609,15 @@ export function renderBlocks(
     }
     if (token.kind === 'list_item') {
       const group = collectListGroup(source, tokens, i, linkRefs)
-      if (group.html) parts.push(group.html)
+      const end = tokens[group.next - 1]?.end ?? token.end
+      if (group.html) parts.push({ start: token.start, end, html: group.html })
       i = group.next
       continue
     }
     if (token.kind === 'blockquote') {
       const group = collectBlockquoteGroup(source, tokens, i, linkRefs)
-      if (group.html) parts.push(group.html)
+      const end = tokens[group.next - 1]?.end ?? token.end
+      if (group.html) parts.push({ start: token.start, end, html: group.html })
       i = group.next
       continue
     }
@@ -626,10 +648,22 @@ export function renderBlocks(
       htmlFromIndent,
       indentedCode,
     )
-    if (html) parts.push(html)
+    if (html) parts.push({ start: token.start, end: token.end, html })
     i++
   }
-  return parts.join('\n')
+  return parts
+}
+
+/** Render tokenized block-level markdown to HTML (#475 phase 2). */
+export function renderBlocks(
+  source: string,
+  tokens: BlockToken[],
+  options: RenderBlocksOptions = {},
+): string {
+  const parts = renderBlocksToParts(source, tokens, options)
+  const htmls = new Array<string>(parts.length)
+  for (let i = 0; i < parts.length; i++) htmls[i] = parts[i]?.html ?? ''
+  return htmls.join('\n')
 }
 
 /** Tokenize and render a markdown fragment (used for blockquote recursion). */
@@ -658,7 +692,22 @@ function appendFootnoteBackref(bodyHtml: string, backref: string): string {
  * used there).
  */
 export function renderFootnoteSection(ctx: FootnoteContext, linkRefs: LinkReferenceMap): string {
-  if (ctx.order.length === 0) return ''
+  const items = renderFootnoteSectionItems(ctx, linkRefs)
+  if (items.length === 0) return ''
+  return `<section class="footnotes"><ol>${items.join('')}</ol></section>`
+}
+
+/**
+ * The per-`<li>` HTML of the footnotes section, in first-use order (#110). Split
+ * out so the streaming footnote path can freeze settled items and re-morph only
+ * the growing tail of the `<ol>` instead of re-parsing the whole section each
+ * commit. An item's HTML is a pure function of its definition content and its
+ * first reference id — both fixed once committed — so a settled item is stable.
+ */
+export function renderFootnoteSectionItems(
+  ctx: FootnoteContext,
+  linkRefs: LinkReferenceMap,
+): string[] {
   const items: string[] = []
   // `ctx.order` may grow while items render (a footnote referencing another
   // footnote first used inside the section) — iterate by index, not snapshot.
@@ -674,7 +723,7 @@ export function renderFootnoteSection(ctx: FootnoteContext, linkRefs: LinkRefere
     const backref = `<a href="#${refId}" class="footnote-backref">↩</a>`
     items.push(`<li id="fn-${slug}">${appendFootnoteBackref(body, backref)}</li>`)
   }
-  return `<section class="footnotes"><ol>${items.join('')}</ol></section>`
+  return items
 }
 
 /** Whether a line is a GFM table separator (exported for tests that need it). */
