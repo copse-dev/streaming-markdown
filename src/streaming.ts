@@ -164,19 +164,21 @@ function appendListPendingHtml(
     if (nested) return nested
   }
 
-  // When the committed HTML ends with the trailing footnotes section (#72),
-  // its own `</ol>` would be found by the lastIndexOf below and the pending
-  // item would land inside the section — append a fresh list instead (the DOM
-  // path's trailing-list lookup rejects the <section> the same way).
-  if (!rendered.endsWith('</section>')) {
-    const close = `</${listTag}>`
-    const closeIndex = rendered.lastIndexOf(close)
-    if (closeIndex !== -1) {
-      const openNeedle = `<${listTag}`
-      const beforeClose = rendered.slice(0, closeIndex)
-      if (beforeClose.lastIndexOf(openNeedle) !== -1) {
-        return `${beforeClose}${liHtml}${rendered.slice(closeIndex)}`
-      }
+  // Splice into the trailing list only when it is the TOP-LEVEL trailing list —
+  // i.e. its close tag ends the rendered output. A list nested inside a
+  // blockquote (or other container) ends the string with the container's close
+  // (e.g. `</blockquote>`), so a pending top-level bullet must become a new
+  // sibling list rather than being injected into the quote (#109). This mirrors
+  // the DOM emitter's `findTrailingListHost`, which reuses the trailing list
+  // only when it is the last element child of `stream-complete`. Requiring the
+  // list to end the output also excludes the trailing footnotes section (#72),
+  // which ends with `</section>` rather than `</ul>`/`</ol>`.
+  const close = `</${listTag}>`
+  if (rendered.endsWith(close)) {
+    const closeIndex = rendered.length - close.length
+    const beforeClose = rendered.slice(0, closeIndex)
+    if (beforeClose.lastIndexOf(`<${listTag}`) !== -1) {
+      return `${beforeClose}${liHtml}${close}`
     }
   }
 
