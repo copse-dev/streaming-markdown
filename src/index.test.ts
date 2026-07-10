@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import * as api from './index.ts'
+import * as hostWorkspace from './host-workspace.ts'
 
 // The package entry (index.ts) is a pure re-export barrel — it is the published
 // surface every consumer imports. This smoke test evaluates the barrel (so a
@@ -35,7 +36,6 @@ const EXPECTED_FUNCTIONS = [
   'getCodeHighlighter',
   'highlightFenceCode',
   'setCodeHighlighter',
-  'stripAppCodeDecorations',
   'getFenceHandler',
   'setFenceHandler',
   'mermaidSourceCandidates',
@@ -48,17 +48,12 @@ const EXPECTED_FUNCTIONS = [
   'setMathRenderer',
   'getMathSyntax',
   'setMathSyntax',
-  'appLinkDecorator',
   'getSafeHrefSchemes',
   'renderAnchor',
   'setLinkDecorator',
   'setSafeHrefSchemes',
   'getLinkImagePolicy',
   'setLinkImagePolicy',
-  'stripAppImageAttributes',
-  'stripAppLinkAttributes',
-  'isWorkspaceMarkdownLinkHref',
-  'workspaceLinkTargetFromHref',
   'getInlinePasses',
   'setInlinePasses',
   'getHtmlPolicy',
@@ -104,5 +99,42 @@ describe('public API barrel (index.ts)', () => {
       'BUILTIN_NAMED_ENTITIES',
     ].sort()
     assert.deepEqual(runtimeExports, expected)
+  })
+
+  // Host-specific helpers moved off the main entry (#112): they must NOT leak
+  // back into the barrel, and they must remain reachable via the dedicated
+  // `@copse/streaming-markdown/host/workspace` subpath entry.
+  it('keeps host/workspace helpers off the main barrel', () => {
+    for (const name of [
+      'appLinkDecorator',
+      'stripAppImageAttributes',
+      'stripAppLinkAttributes',
+      'stripAppCodeDecorations',
+      'isWorkspaceMarkdownLinkHref',
+      'workspaceLinkTargetFromHref',
+    ]) {
+      assert.equal(
+        (api as Record<string, unknown>)[name],
+        undefined,
+        `expected "${name}" to be off the main entry`,
+      )
+    }
+  })
+
+  it('exposes host/workspace helpers on the host subpath', () => {
+    for (const name of [
+      'appLinkDecorator',
+      'stripAppImageAttributes',
+      'stripAppLinkAttributes',
+      'stripAppCodeDecorations',
+      'isWorkspaceMarkdownLinkHref',
+      'workspaceLinkTargetFromHref',
+    ]) {
+      assert.equal(
+        typeof (hostWorkspace as Record<string, unknown>)[name],
+        'function',
+        `expected host/workspace export "${name}" to be a function`,
+      )
+    }
   })
 })

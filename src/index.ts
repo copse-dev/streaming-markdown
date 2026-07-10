@@ -93,7 +93,6 @@ export {
   highlightFenceCode,
   KNOWN_LANGUAGES,
   setCodeHighlighter,
-  stripAppCodeDecorations,
 } from './highlight.ts'
 // Fenced-block emission is a pluggable registry keyed by fence language (#53).
 // The built-in mermaid scaffolding is itself a registered FenceHandler; hosts
@@ -143,8 +142,15 @@ export {
   setMathRenderer,
 } from './math.ts'
 export { getMathSyntax, setMathSyntax } from './math-syntax.ts'
+// Link decoration is a pluggable seam (#601). The built-in default is neutral
+// (#112): rendered `<a>` carries only `href`/`title`, with no `target`, `rel`,
+// `class`, or `data-*` routing hooks. Hosts opt into their own attributes via
+// `setLinkDecorator`; the Copse workspace/browser decorator (`appLinkDecorator`)
+// and the workspace path helpers now live behind the host-only entry
+// `@copse/streaming-markdown/host/workspace` so the main surface stays
+// host-agnostic. Migration for existing hosts is a single call:
+// `setLinkDecorator(appLinkDecorator)`.
 export {
-  appLinkDecorator,
   DEFAULT_SAFE_HREF_SCHEMES,
   getSafeHrefSchemes,
   type LinkDecoration,
@@ -152,14 +158,7 @@ export {
   renderAnchor,
   setLinkDecorator,
   setSafeHrefSchemes,
-  stripAppImageAttributes,
-  stripAppLinkAttributes,
 } from './inline-links.ts'
-export {
-  isWorkspaceMarkdownLinkHref,
-  workspaceLinkTargetFromHref,
-  type WorkspaceLinkTarget,
-} from './workspace-link-href.ts'
 // Inline syntax is extensible via registered passes (#53): citations `[@key]`,
 // highlights `==x==`, and friends run inside the inline pipeline with code-span
 // shielding, escape-safe HTML emission (ctx.emit), and streaming-hold support.

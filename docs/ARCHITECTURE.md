@@ -115,8 +115,11 @@ When extending the renderer or its CSS, preserve these rules:
 - **Package boundary.** The core stays app-independent so it can version and ship on
   its own, so host-specific behaviour is **injected, not hard-coded**:
   - `setLinkDecorator` (`inline-links.ts`) — a `LinkDecorator` returns the attributes
-    for a rendered `<a>`, defaulting to the app's workspace/browser routing
-    (`appLinkDecorator`).
+    for a rendered `<a>`. The built-in default is **neutral** (#112): anchors carry
+    only `href`/`title`, with no `target`, `rel`, `class`, or `data-*` routing hooks.
+    The app's workspace/browser routing decorator (`appLinkDecorator`) lives behind the
+    host-only `@copse/streaming-markdown/host/workspace` entry; a host restores the
+    pre-0.10 in-app behaviour with `setLinkDecorator(appLinkDecorator)`.
   - `setRawImageRenderer` (`raw-images.ts`) — a `RawImageRenderer` decides what a raw
     `<img>` becomes (e.g. an app's artifact placeholder). The core escapes every
     `<img>` by default; the renderer's output bypasses escaping via a placeholder and
