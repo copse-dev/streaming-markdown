@@ -524,7 +524,7 @@ counts). Current state:
 | Strikethrough           | 2/2      | Full — double-tilde `~~x~~` → `<del>`.                                                     |
 | Tables                  | 2/8      | Gaps: column alignment (`:-:`/`--:` → `align`), escaped `\|` in cells, column-count normalization, delimiter/header mismatch rejection. |
 | Task list items         | 0/2      | Renderer output diverges on purpose — it adds `class="task-list-item"`/`contains-task-list` and a `disabled` checkbox for app styling ([#614](https://github.com/copse-dev/agent-pane/issues/614)), which the spec's bare `<input>` output does not.  |
-| Autolinks (extension)   | 0/11     | Only bare `http(s)://` is linked (`inline-spans.ts`); no `www.`, no bare email, and trailing-punctuation trimming is a simplified regex, not GFM's balanced-paren/entity rules.                 |
+| Autolinks (extension)   | 0/11     | Only bare `http(s)://` is linked (`inline-spans.ts`); no `www.`, no bare email. Trailing-punctuation trimming follows GFM's balanced-paren rule (a closing `)` that balances an earlier `(` stays in the link, #107) but not its entity rules.                 |
 | Disallowed Raw HTML     | 0/1      | In the harness's pinned `'escape'` mode the renderer escapes *all* attributed/structural raw HTML, which is stricter than GFM's tag filter — so the filtered-passthrough output never matches. |
 
 Strikethrough is the only fully-conforming extension; the others cap out on real
