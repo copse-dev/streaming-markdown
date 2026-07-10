@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { loadBaselinePassingExamples } from '../tests/commonmark/baseline-examples.ts'
 import { loadGfmExtensionBaselineExamples } from '../tests/gfm/baseline-examples.ts'
 import { streamingCutIndices } from '../tests/streaming-cuts.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import {
   renderStreamingMarkdown,
@@ -64,7 +64,7 @@ describe('streaming markdown convergence (CommonMark baseline fuzz)', () => {
       const markdown = ex.markdown
       if (splitForStreaming(markdown).pending !== '') continue
       const fresh = streamingDisplayAfterUpdates(markdown, [markdown.length])
-      const atRest = sanitizeRenderedMarkdown(renderMarkdown(markdown))
+      const atRest = sanitizeRenderedMarkdown(renderMarkdownUnsafe(markdown))
       assert.equal(fresh, atRest, `example #${String(ex.example)} (${ex.section}) at-rest`)
     }
   })

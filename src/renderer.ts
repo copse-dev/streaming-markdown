@@ -7,6 +7,7 @@ import {
 import { createFootnoteContext, setActiveFootnoteContext } from './footnotes.ts'
 import { type HtmlPolicy, setHtmlPolicy } from './html-policy.ts'
 import { renderBlocks, renderFootnoteSection } from './render-blocks.ts'
+import { sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 
 export { escapeHtml } from './escape.ts'
 
@@ -46,11 +47,39 @@ export interface RenderMarkdownOptions {
 }
 
 /**
- * Render complete markdown to HTML via block tokenization (#475).
- * Fenced code is tokenized as blocks so its contents are not HTML-escaped.
- * HTML comments are stripped from prose blocks only (see render-blocks.ts).
+ * Render complete markdown to **sanitized**, ready-to-insert HTML (#104).
+ *
+ * This is the safe, default entry point: its output has already passed through
+ * the sink sanitizer ({@link sanitizeRenderedMarkdown}), so it can be assigned to
+ * an `innerHTML` sink (or handed to {@link setSanitizedHtml}) without a separate
+ * sanitize step. The return value is branded {@link SanitizedHtml}.
+ *
+ * Because sanitizing builds a DOM, this requires a sanitizer backend — the
+ * browser's native Sanitizer API (the zero-dependency default when available) or
+ * a registered backend such as `@copse/streaming-markdown/sanitizers/dompurify`.
+ * With neither available (e.g. pure-Node SSR with no jsdom) it throws rather than
+ * return unsafe HTML — the same fail-closed contract as `renderStreamingMarkdown`.
+ * For a pure `string → HTML` result with no backend (SSR, snapshots, non-DOM
+ * pipelines), use {@link renderMarkdownUnsafe} and sanitize at your own sink.
  */
-export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {}): string {
+export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {}): SanitizedHtml {
+  return sanitizeRenderedMarkdown(renderMarkdownUnsafe(raw, options))
+}
+
+/**
+ * Render complete markdown to an **untrusted** HTML string via block tokenization
+ * (#475). Fenced code is tokenized as blocks so its contents are not HTML-escaped.
+ * HTML comments are stripped from prose blocks only (see render-blocks.ts).
+ *
+ * The returned HTML is assembled by string concatenation and is **not**
+ * sanitized: under the default `htmlPolicy: 'passthrough'` it emits raw HTML
+ * (including `<script>`) verbatim for a downstream sink to arbitrate. Never assign
+ * it to `innerHTML` directly — route it through {@link sanitizeRenderedMarkdown}
+ * (or use the safe {@link renderMarkdown}). This is the zero-dependency,
+ * DOM-free path used internally (the streaming emitters sanitize its output at
+ * their sinks) and by hosts that own their own sanitization boundary.
+ */
+export function renderMarkdownUnsafe(raw: string, options: RenderMarkdownOptions = {}): string {
   if (options.htmlPolicy === undefined) return renderMarkdownCore(raw, options)
   const previous = setHtmlPolicy(options.htmlPolicy)
   try {

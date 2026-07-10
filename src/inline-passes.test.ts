@@ -5,7 +5,7 @@ import { escapeHtml } from './escape.ts'
 import { pendingHoldIndex } from './inline-emphasis.ts'
 import { getInlinePasses, type InlinePass, setInlinePasses } from './inline-passes.ts'
 import { renderPendingLine } from './render-pending-line.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
 
@@ -74,7 +74,7 @@ describe('inline pass registry', () => {
   })
 
   it('is inert when no passes are registered', () => {
-    const html = renderMarkdown('See [@doe2020] and ==this== text.')
+    const html = renderMarkdownUnsafe('See [@doe2020] and ==this== text.')
     assert.match(html, /\[@doe2020\]/)
     assert.match(html, /==this==/)
   })
@@ -83,38 +83,38 @@ describe('inline pass registry', () => {
 describe('before-links passes', () => {
   it('renders citations through ctx.emit, surviving the escape step', () => {
     setInlinePasses([citationPass])
-    const html = renderMarkdown('See [@doe2020] for details.')
+    const html = renderMarkdownUnsafe('See [@doe2020] for details.')
     assert.match(html, /<span class="citation">@doe2020<\/span>/)
     assert.doesNotMatch(html, /\[@doe2020\]/)
   })
 
   it('wins over markdown link-label parsing (Pandoc ordering)', () => {
     setInlinePasses([citationPass])
-    const html = renderMarkdown('[@doe2020] vs [a real link](https://example.com)')
+    const html = renderMarkdownUnsafe('[@doe2020] vs [a real link](https://example.com)')
     assert.match(html, /<span class="citation">@doe2020<\/span>/)
     assert.match(html, /<a[^>]*href="https:\/\/example\.com"[^>]*>a real link<\/a>/)
   })
 
   it('respects backslash escapes and code-span shielding', () => {
     setInlinePasses([citationPass, highlightPass])
-    const escaped = renderMarkdown('literal \\[@doe2020]')
+    const escaped = renderMarkdownUnsafe('literal \\[@doe2020]')
     assert.doesNotMatch(escaped, /citation/)
     assert.match(escaped, /\[@doe2020\]/)
 
-    const code = renderMarkdown('`[@doe2020] ==x==` and [@real2021]')
+    const code = renderMarkdownUnsafe('`[@doe2020] ==x==` and [@real2021]')
     assert.match(code, /<code>\[@doe2020\] ==x==<\/code>/)
     assert.match(code, /<span class="citation">@real2021<\/span>/)
   })
 
   it('emitted <mark> passes the sanitizer sink', () => {
     setInlinePasses([highlightPass])
-    const html = sanitizeRenderedMarkdown(renderMarkdown('a ==bright== idea'))
+    const html = sanitizeRenderedMarkdown(renderMarkdownUnsafe('a ==bright== idea'))
     assert.match(html, /<mark>bright<\/mark>/)
   })
 
   it('applies inside GFM table cells', () => {
     setInlinePasses([citationPass])
-    const html = renderMarkdown('| ref |\n| --- |\n| [@doe2020] |')
+    const html = renderMarkdownUnsafe('| ref |\n| --- |\n| [@doe2020] |')
     assert.match(html, /<td><span class="citation">@doe2020<\/span><\/td>/)
   })
 })
@@ -128,7 +128,7 @@ describe('after-links passes', () => {
         apply: (text, ctx) => text.replace(/\bTODO\b/g, () => ctx.emit('<mark>TODO</mark>')),
       },
     ])
-    const html = renderMarkdown('TODO check [docs](https://example.com)')
+    const html = renderMarkdownUnsafe('TODO check [docs](https://example.com)')
     assert.match(html, /<mark>TODO<\/mark>/)
     assert.match(html, /<a[^>]*href="https:\/\/example\.com"/)
   })
@@ -140,7 +140,7 @@ describe('placeholder-token safety', () => {
     // The pass emits token id 0 for the citation; the literal U+E100/U+E101
     // characters in the input are stripped before any pass runs, so the typed
     // token degrades to a plain "0" instead of resolving to the emitted span.
-    const html = renderMarkdown('[@a] then \uE1000\uE101')
+    const html = renderMarkdownUnsafe('[@a] then \uE1000\uE101')
     const citations = html.match(/<span class="citation">/g) ?? []
     assert.equal(citations.length, 1)
     assert.match(html, /then 0/)
@@ -184,7 +184,7 @@ describe('streaming convergence', () => {
     }
     renderer.update(source)
     const expected = document.createElement('div')
-    expected.innerHTML = sanitizeRenderedMarkdown(renderMarkdown(source))
+    expected.innerHTML = sanitizeRenderedMarkdown(renderMarkdownUnsafe(source))
     assert.equal(host.innerHTML.includes('<span class="citation">@doe2020</span>'), true)
     assert.equal(
       host.querySelector('p')?.innerHTML,

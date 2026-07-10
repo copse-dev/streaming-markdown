@@ -109,7 +109,7 @@ import { sanitizeRenderedMarkdown, setSanitizerBackend } from '@copse/streaming-
 import { dompurifyBackend } from '@copse/streaming-markdown/sanitizers/dompurify'
 
 setSanitizerBackend(dompurifyBackend) // once, before first render
-el.innerHTML = sanitizeRenderedMarkdown(renderMarkdown(markdown))
+el.innerHTML = sanitizeRenderedMarkdown(renderMarkdownUnsafe(markdown))
 \`\`\`
 
 > The DOMPurify backend lives behind its own entry point so bundlers can drop it

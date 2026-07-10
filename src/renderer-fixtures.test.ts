@@ -1,21 +1,21 @@
 import '../tests/setup-dom-jsdom.ts'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 // Parsing-correctness ports of the markdown e2e fixtures. The e2e specs
 // (tests/e2e/markdown-{list-indent,ordered-list-spacing,bold-glob}.e2e.ts) mix
 // two concerns: markdown STRUCTURE (which tag tree the renderer produces) and
 // CSS LAYOUT (pixel gaps/indents/wrapping). Layout needs a real browser and
 // stays in e2e; the structure half — the part that actually regressed and the
-// reason these fixtures exist — is pure `renderMarkdown` output and belongs
+// reason these fixtures exist — is pure `renderMarkdownUnsafe` output and belongs
 // here, where it runs in milliseconds with no Electron. We parse the rendered
 // HTML into a detached element and assert the same tag relationships the e2e
 // `browser.execute` blocks checked (minus the geometry).
 
 function render(md: string): HTMLElement {
   const root = document.createElement('div')
-  root.innerHTML = renderMarkdown(md)
+  root.innerHTML = renderMarkdownUnsafe(md)
   return root
 }
 
@@ -23,7 +23,7 @@ function bySubstring<T extends Element>(els: Iterable<T>, text: string): T | und
   return [...els].find((e) => e.textContent.includes(text))
 }
 
-describe('renderMarkdown fixture structure: multi-section list (markdown-list-indent)', () => {
+describe('renderMarkdownUnsafe fixture structure: multi-section list (markdown-list-indent)', () => {
   // tests/e2e/helpers/seed-config.ts -> seedMarkdownListFixture
   const content = [
     '### ⚠️ Known Failures',
@@ -73,7 +73,7 @@ describe('renderMarkdown fixture structure: multi-section list (markdown-list-in
   })
 })
 
-describe('renderMarkdown fixture structure: git summary ordered list (markdown-ordered-list-spacing)', () => {
+describe('renderMarkdownUnsafe fixture structure: git summary ordered list (markdown-ordered-list-spacing)', () => {
   // tests/e2e/helpers/seed-config.ts -> seedGitSummaryMarkdownFixture
   const content = [
     "Here's a summary of the three changed files:",
@@ -118,7 +118,7 @@ describe('renderMarkdown fixture structure: git summary ordered list (markdown-o
   })
 })
 
-describe('renderMarkdown fixture structure: bold after glob table (markdown-bold-glob)', () => {
+describe('renderMarkdownUnsafe fixture structure: bold after glob table (markdown-bold-glob)', () => {
   // tests/e2e/helpers/seed-config.ts -> seedMarkdownBoldGlobFixture
   const content = [
     '## Tests',

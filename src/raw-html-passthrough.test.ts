@@ -5,12 +5,12 @@
 import '../tests/setup-dom-jsdom.ts'
 import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { renderStreamingMarkdown, StreamingMarkdownRenderer } from './streaming.ts'
 import { sanitizeRenderedMarkdown, setSanitizeExtension } from './sanitize.ts'
 
 /** The default (passthrough) render, through the reference sink — the real path. */
-const sank = (md: string): string => sanitizeRenderedMarkdown(renderMarkdown(md))
+const sank = (md: string): string => sanitizeRenderedMarkdown(renderMarkdownUnsafe(md))
 
 describe('raw-HTML passthrough at rest (#600)', () => {
   it('renders allowlisted tags as real elements, preserving allowlisted attributes', () => {
@@ -45,26 +45,26 @@ describe('raw-HTML passthrough at rest (#600)', () => {
   it('emits the raw tag verbatim from the (unsanitized) renderer string', () => {
     // The renderer defers to the sink: its own string output is intentionally
     // NOT self-safe under passthrough — hosts must sanitize (or opt into escape).
-    assert.equal(renderMarkdown('<div>hi</div>'), '<p><div>hi</div></p>')
+    assert.equal(renderMarkdownUnsafe('<div>hi</div>'), '<p><div>hi</div></p>')
   })
 })
 
 describe("htmlPolicy: 'escape' opt-out reproduces the historical literal-escape output", () => {
   it('literalizes every tag outside the benign inline allowlist', () => {
-    assert.equal(renderMarkdown('<div>hi</div>', { htmlPolicy: 'escape' }), '<p>&lt;div&gt;hi&lt;/div&gt;</p>')
+    assert.equal(renderMarkdownUnsafe('<div>hi</div>', { htmlPolicy: 'escape' }), '<p>&lt;div&gt;hi&lt;/div&gt;</p>')
     assert.equal(
-      renderMarkdown('<script>x</script>', { htmlPolicy: 'escape' }),
+      renderMarkdownUnsafe('<script>x</script>', { htmlPolicy: 'escape' }),
       '<p>&lt;script&gt;x&lt;/script&gt;</p>',
     )
   })
 
   it('still passes the benign attribute-less inline allowlist through', () => {
-    assert.equal(renderMarkdown('a <sub>2</sub> b', { htmlPolicy: 'escape' }), '<p>a <sub>2</sub> b</p>')
+    assert.equal(renderMarkdownUnsafe('a <sub>2</sub> b', { htmlPolicy: 'escape' }), '<p>a <sub>2</sub> b</p>')
   })
 
   it('leaves ordinary escaped text (a lone `<`, `a < b`) identical under both policies', () => {
     for (const md of ['a < b', '5 < 6 && 7 > 3', 'x <3 y']) {
-      assert.equal(renderMarkdown(md), renderMarkdown(md, { htmlPolicy: 'escape' }), md)
+      assert.equal(renderMarkdownUnsafe(md), renderMarkdownUnsafe(md, { htmlPolicy: 'escape' }), md)
     }
   })
 })
@@ -260,7 +260,7 @@ describe('raw-HTML at-rest regression fixture (#600)', () => {
   })
 
   it("escape mode literalizes the same document's structural tags", () => {
-    const escaped = renderMarkdown(RAW_HTML_DOCUMENT, { htmlPolicy: 'escape' })
+    const escaped = renderMarkdownUnsafe(RAW_HTML_DOCUMENT, { htmlPolicy: 'escape' })
     assert.match(escaped, /&lt;div class=&quot;callout&quot;&gt;/)
     assert.match(escaped, /&lt;script&gt;trackPageView\(\)&lt;\/script&gt;/)
   })

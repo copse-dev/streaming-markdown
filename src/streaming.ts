@@ -1,4 +1,4 @@
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { alertBlockquoteClass, pendingBlockquoteAlertType } from './alerts.ts'
 import {
   getIncompleteFenceSource,
@@ -594,7 +594,7 @@ function renderStreamingMarkdownCore(content: string): string {
   let completeTokensCache: BlockToken[] | null = null
   const completeTokens = (): BlockToken[] => (completeTokensCache ??= tokenizeBlocks(complete))
   const completeTokensForPending = pending.includes('|') ? completeTokens() : undefined
-  const renderedRaw = complete ? renderMarkdown(complete, { tokens: completeTokens() }) : ''
+  const renderedRaw = complete ? renderMarkdownUnsafe(complete, { tokens: completeTokens() }) : ''
   const rendered = renderedRaw ? sanitizeRenderedMarkdown(renderedRaw) : ''
   // Inside a still-forming `<details>` the committed children render inside the
   // (collapsed) element; a pending sibling would flash the collapsed body, so

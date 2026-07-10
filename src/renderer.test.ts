@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { installHighlightjs } from './highlight-hljs.ts'
 import { withHostImagePolicy } from '../tests/host-image-test-policy.ts'
 
@@ -8,33 +8,33 @@ import { withHostImagePolicy } from '../tests/host-image-test-policy.ts'
 // backend the core now lazy-loads. See highlight-lazy.test.ts for the plain path.
 installHighlightjs()
 
-describe('renderMarkdown', () => {
+describe('renderMarkdownUnsafe', () => {
   it('renders headings on their own lines', () => {
-    const html = renderMarkdown('## Section\n\nBody text')
+    const html = renderMarkdownUnsafe('## Section\n\nBody text')
     assert.match(html, /<h2>Section<\/h2>/)
     assert.match(html, /<p>Body text<\/p>/)
   })
 
   it('preserves single newlines inside paragraphs (CommonMark soft breaks)', () => {
-    const html = renderMarkdown('line one\nline two')
+    const html = renderMarkdownUnsafe('line one\nline two')
     assert.match(html, /line one[\n]line two/)
     assert.doesNotMatch(html, /line one<br>line two/)
   })
 
   it('does not apply hard line breaks inside raw HTML tags (CommonMark #642)', () => {
-    const html = renderMarkdown('<a href="foo  \nbar">\n')
+    const html = renderMarkdownUnsafe('<a href="foo  \nbar">\n')
     assert.equal(html, '<p><a href="foo  \nbar"></p>')
     assert.doesNotMatch(html, /<br>/)
   })
 
   it('preserves blank-line paragraph breaks', () => {
-    const html = renderMarkdown('first paragraph\n\nsecond paragraph')
+    const html = renderMarkdownUnsafe('first paragraph\n\nsecond paragraph')
     assert.match(html, /<p>first paragraph<\/p>/)
     assert.match(html, /<p>second paragraph<\/p>/)
   })
 
   it('strips HTML comments from prose but keeps them in fenced code', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       '<!-- template hint -->\n\nVisible text\n\n```html\n<!-- keep -->\n```',
     )
     assert.doesNotMatch(html, /template hint/)
@@ -44,7 +44,7 @@ describe('renderMarkdown', () => {
   })
 
   it('renders unordered lists', () => {
-    const html = renderMarkdown('- alpha\n- beta')
+    const html = renderMarkdownUnsafe('- alpha\n- beta')
     assert.match(html, /<ul>/)
     assert.match(html, /<li>alpha<\/li>/)
     assert.match(html, /<li>beta<\/li>/)
@@ -52,7 +52,7 @@ describe('renderMarkdown', () => {
   })
 
   it('groups unordered list items separated by blank lines into one loose list (#314)', () => {
-    const html = renderMarkdown('- alpha\n\n- beta\n\n- gamma')
+    const html = renderMarkdownUnsafe('- alpha\n\n- beta\n\n- gamma')
     assert.match(
       html,
       /<ul><li><p>alpha<\/p><\/li><li><p>beta<\/p><\/li><li><p>gamma<\/p><\/li><\/ul>/,
@@ -61,48 +61,48 @@ describe('renderMarkdown', () => {
   })
 
   it('ends a list when blank is followed by under-indented text (#255, #276)', () => {
-    const html255 = renderMarkdown('- one\n\n two\n')
+    const html255 = renderMarkdownUnsafe('- one\n\n two\n')
     assert.match(html255, /<ul><li>one<\/li><\/ul>\s*<p>two<\/p>/)
-    const html276 = renderMarkdown('-    foo\n\n  bar\n')
+    const html276 = renderMarkdownUnsafe('-    foo\n\n  bar\n')
     assert.match(html276, /<ul><li>foo<\/li><\/ul>\s*<p>bar<\/p>/)
   })
 
   it('continues a list item across a blank with lazy indentation (#256)', () => {
-    const html = renderMarkdown('- one\n\n  two\n')
+    const html = renderMarkdownUnsafe('- one\n\n  two\n')
     assert.match(html, /<ul><li><p>one<\/p>\s*<p>two<\/p><\/li><\/ul>/)
   })
 
   it('splits unordered lists when the marker character changes (#301)', () => {
-    const html = renderMarkdown('- foo\n- bar\n+ baz\n')
+    const html = renderMarkdownUnsafe('- foo\n- bar\n+ baz\n')
     assert.match(html, /<ul><li>foo<\/li><li>bar<\/li><\/ul>\s*<ul><li>baz<\/li><\/ul>/)
   })
 
   it('groups empty unordered list items into one list (#281)', () => {
-    const html = renderMarkdown('- foo\n-\n- bar\n')
+    const html = renderMarkdownUnsafe('- foo\n-\n- bar\n')
     assert.match(html, /<ul><li>foo<\/li><li><\/li><li>bar<\/li><\/ul>/)
   })
 
   it('groups empty ordered list items into one list (#283)', () => {
-    const html = renderMarkdown('1. foo\n2.\n3. bar\n')
+    const html = renderMarkdownUnsafe('1. foo\n2.\n3. bar\n')
     assert.match(html, /<ol><li>foo<\/li><li><\/li><li>bar<\/li><\/ol>/)
   })
 
   it('keeps an empty item mid-list loose across a blank (#315)', () => {
-    const html = renderMarkdown('* a\n*\n\n* c\n')
+    const html = renderMarkdownUnsafe('* a\n*\n\n* c\n')
     assert.match(html, /<ul><li><p>a<\/p><\/li><li><\/li><li><p>c<\/p><\/li><\/ul>/)
   })
 
   it('does not let an empty list marker interrupt a paragraph (#285)', () => {
-    const htmlStar = renderMarkdown('foo\n*\n')
+    const htmlStar = renderMarkdownUnsafe('foo\n*\n')
     assert.match(htmlStar, /<p>foo\s+\*<\/p>/)
     assert.doesNotMatch(htmlStar, /<ul/)
-    const htmlOrdered = renderMarkdown('foo\n1.\n')
+    const htmlOrdered = renderMarkdownUnsafe('foo\n1.\n')
     assert.match(htmlOrdered, /<p>foo\s+1\.<\/p>/)
     assert.doesNotMatch(htmlOrdered, /<ol/)
   })
 
   it('treats 5+ spaces after a list marker as indented code (#273, #274)', () => {
-    const html = renderMarkdown('1.     indented code\n\n   paragraph\n\n       more code\n')
+    const html = renderMarkdownUnsafe('1.     indented code\n\n   paragraph\n\n       more code\n')
     assert.match(
       html,
       /<ol><li><pre><code>indented code\n<\/code><\/pre>\s*<p>paragraph<\/p>\s*<pre><code>more code\n<\/code><\/pre><\/li><\/ol>/,
@@ -110,12 +110,12 @@ describe('renderMarkdown', () => {
   })
 
   it('measures the content column from an empty marker for indented code (#278)', () => {
-    const html = renderMarkdown('-\n      baz\n')
+    const html = renderMarkdownUnsafe('-\n      baz\n')
     assert.match(html, /<ul><li><pre><code>baz\n<\/code><\/pre><\/li><\/ul>/)
   })
 
   it('keeps a list intact across multiple blank lines between items (#306)', () => {
-    const html = renderMarkdown('- foo\n\n- bar\n\n\n- baz\n')
+    const html = renderMarkdownUnsafe('- foo\n\n- bar\n\n\n- baz\n')
     assert.match(
       html,
       /<ul><li><p>foo<\/p><\/li><li><p>bar<\/p><\/li><li><p>baz<\/p><\/li><\/ul>/,
@@ -124,27 +124,27 @@ describe('renderMarkdown', () => {
   })
 
   it('emits ordered list start attributes (#265, #268)', () => {
-    const html265 = renderMarkdown('123456789. ok\n')
+    const html265 = renderMarkdownUnsafe('123456789. ok\n')
     assert.match(html265, /<ol start="123456789"><li>ok<\/li><\/ol>/)
-    const html268 = renderMarkdown('003. ok\n')
+    const html268 = renderMarkdownUnsafe('003. ok\n')
     assert.match(html268, /<ol start="3"><li>ok<\/li><\/ol>/)
   })
 
   it('treats a 10-digit ordered marker as a paragraph (#266)', () => {
-    const html = renderMarkdown('1234567890. not ok\n')
+    const html = renderMarkdownUnsafe('1234567890. not ok\n')
     assert.match(html, /<p>1234567890\. not ok<\/p>/)
     assert.doesNotMatch(html, /<ol/)
   })
 
   it('renders asterisk unordered lists', () => {
-    const html = renderMarkdown('* alpha\n* beta')
+    const html = renderMarkdownUnsafe('* alpha\n* beta')
     assert.match(html, /<ul>/)
     assert.match(html, /<li>alpha<\/li>/)
     assert.match(html, /<li>beta<\/li>/)
   })
 
   it('renders relative markdown links and reference definitions', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       '[Experiment Framework v2](/docs/experiments/v2.md)\n\n[intro][ref]\n\n[ref]: /docs "guide"\n',
     )
     assert.match(html, /href="\/docs\/experiments\/v2\.md"[^>]*data-workspace-link="true"/)
@@ -156,7 +156,7 @@ describe('renderMarkdown', () => {
   })
 
   it('renders markdown links in prose and ordered lists', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       'See [PR #204](https://github.com/org/repo/pull/204) for details.\n\n' +
         '1. [PR #205](https://github.com/org/repo/pull/205) — draft fix\n' +
         '2. [PR #188](https://github.com/org/repo/pull/188) — UI change',
@@ -176,19 +176,19 @@ describe('renderMarkdown', () => {
   })
 
   it('leaves unsafe link schemes as literal markdown', () => {
-    const html = renderMarkdown('[click me](javascript:alert(1))')
+    const html = renderMarkdownUnsafe('[click me](javascript:alert(1))')
     assert.doesNotMatch(html, /<a /)
     assert.match(html, /\[click me\]\(javascript:alert\(1\)\)/)
   })
 
   it('does not render links inside inline code', () => {
-    const html = renderMarkdown('Use `[text](http://x)` literally')
+    const html = renderMarkdownUnsafe('Use `[text](http://x)` literally')
     assert.match(html, /<code>\[text\]\(http:\/\/x\)<\/code>/)
     assert.doesNotMatch(html, /<a /)
   })
 
   it('auto-links bare HTTP URLs outside code spans', () => {
-    const html = renderMarkdown('Open https://example.com/docs, not `https://example.com/raw`.')
+    const html = renderMarkdownUnsafe('Open https://example.com/docs, not `https://example.com/raw`.')
     assert.match(
       html,
       /<a href="https:\/\/example\.com\/docs" target="_blank" rel="noopener noreferrer" data-browser-link="true">https:\/\/example\.com\/docs<\/a>,/,
@@ -197,7 +197,7 @@ describe('renderMarkdown', () => {
   })
 
   it('renders ordered lists with continuation paragraphs grouped into items', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       [
         "Here's a summary of the three changed files:",
         '',
@@ -226,12 +226,12 @@ describe('renderMarkdown', () => {
   })
 
   it('renders consecutive ordered items in one block', () => {
-    const html = renderMarkdown('1. alpha\n2. beta')
+    const html = renderMarkdownUnsafe('1. alpha\n2. beta')
     assert.match(html, /<ol><li>alpha<\/li><li>beta<\/li><\/ol>/)
   })
 
   it('keeps lists and headings outside paragraph wrappers', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       '### Section\n\n**Subheading:**\n- first\n\n**Other:**\n- second\n\n### Next\n- third',
     )
     assert.doesNotMatch(html, /<p>(?:(?!<\/p>)[\s\S])*<ul>/)
@@ -240,7 +240,7 @@ describe('renderMarkdown', () => {
   })
 
   it('renders fenced code blocks', () => {
-    const html = renderMarkdown('```ts\nconst x = 1\n```')
+    const html = renderMarkdownUnsafe('```ts\nconst x = 1\n```')
     assert.match(html, /<pre><code class="hljs lang-typescript">/)
     assert.match(html, /hljs-keyword/)
     assert.match(html, /hljs-number/)
@@ -248,14 +248,14 @@ describe('renderMarkdown', () => {
   })
 
   it('strips leading and trailing blank lines inside fenced code blocks', () => {
-    const html = renderMarkdown('```ts\n\nconst x = 1\n\n```')
+    const html = renderMarkdownUnsafe('```ts\n\nconst x = 1\n\n```')
     assert.match(html, /<pre><code class="hljs lang-typescript">/)
     assert.match(html, /hljs-keyword/)
     assert.match(html, /const/)
   })
 
   it('preserves comparison operators inside fenced code blocks', () => {
-    const html = renderMarkdown('```ts\nif (a < b) return true\n```')
+    const html = renderMarkdownUnsafe('```ts\nif (a < b) return true\n```')
     assert.match(html, /\(a &lt; b\)/)
     assert.match(html, /hljs-keyword/)
     assert.match(html, /hljs-literal/)
@@ -263,7 +263,7 @@ describe('renderMarkdown', () => {
   })
 
   it('renders mermaid fenced blocks as diagram placeholders', () => {
-    const html = renderMarkdown('```mermaid\ngraph TD\n  A --> B\n```')
+    const html = renderMarkdownUnsafe('```mermaid\ngraph TD\n  A --> B\n```')
     assert.match(html, /<div class="mermaid-diagram mermaid-diagram--pending">/)
     assert.match(html, /<pre class="mermaid">graph TD/)
     assert.match(html, /A --> B/)
@@ -271,7 +271,7 @@ describe('renderMarkdown', () => {
   })
 
   it('does not apply markdown formatting inside mermaid fenced blocks', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       '```mermaid\nflowchart TB\n  **bold** --> _italic_\n  Renderer[Renderer (20+ modules)]\n```',
     )
     assert.match(html, /\*\*bold\*\* --> _italic_/)
@@ -281,7 +281,7 @@ describe('renderMarkdown', () => {
   })
 
   it('keeps mermaid blocks intact when the diagram div has modifier classes', () => {
-    const html = renderMarkdown('Intro\n\n```mermaid\ngraph TD\n  A --> B\n```\n\nOutro')
+    const html = renderMarkdownUnsafe('Intro\n\n```mermaid\ngraph TD\n  A --> B\n```\n\nOutro')
     assert.match(html, /<div class="mermaid-diagram mermaid-diagram--pending">/)
     assert.doesNotMatch(html, /<p>(?:(?!<\/p>)[\s\S])*<strong>/)
     assert.match(html, /<p>Intro<\/p>/)
@@ -289,21 +289,21 @@ describe('renderMarkdown', () => {
   })
 
   it('highlights HTML-like fenced blocks without injecting raw tags', () => {
-    const html = renderMarkdown('```html\n<script>alert(1)</script>\n```')
+    const html = renderMarkdownUnsafe('```html\n<script>alert(1)</script>\n```')
     assert.match(html, /hljs-tag/)
     assert.match(html, /script/)
     assert.doesNotMatch(html, /<script>/)
   })
 
   it('renders GFM tables on final render', () => {
-    const html = renderMarkdown('| A | B |\n| - | - |\n| 1 | 2 |')
+    const html = renderMarkdownUnsafe('| A | B |\n| - | - |\n| 1 | 2 |')
     assert.match(html, /<table>/)
     assert.match(html, /<th>A<\/th>/)
     assert.match(html, /<td>2<\/td>/)
   })
 
   it('renders 3-column tables with PR/branch/description layout', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       '| PR | Branch | Description |\n|----|--------|-------------|\n| #11 | `jkt/vendor` | Vendor visual-plan. 18 files, +2,315 lines. |\n| #10 | `jkt/okf` | On-device retrieval. 26 files, +5,604 lines. |',
     )
     assert.match(html, /<table>/)
@@ -317,7 +317,7 @@ describe('renderMarkdown', () => {
   })
 
   it('renders thematic breaks as horizontal rules', () => {
-    const html = renderMarkdown('Above\n\n---\n\nBelow')
+    const html = renderMarkdownUnsafe('Above\n\n---\n\nBelow')
     assert.match(html, /<hr>/)
     assert.match(html, /<p>Above<\/p>/)
     assert.match(html, /<p>Below<\/p>/)
@@ -325,7 +325,7 @@ describe('renderMarkdown', () => {
 
   it('treats spaced marker runs as thematic breaks, not lists or emphasis', () => {
     for (const rule of ['* * *', '- - -', '_ _ _', ' **  * ** * ** * **']) {
-      const html = renderMarkdown(`Above\n\n${rule}\n\nBelow`)
+      const html = renderMarkdownUnsafe(`Above\n\n${rule}\n\nBelow`)
       assert.match(html, /<hr>/, `expected <hr> for ${JSON.stringify(rule)}`)
       assert.doesNotMatch(html, /<em>/, `unexpected <em> for ${JSON.stringify(rule)}`)
       assert.doesNotMatch(html, /<li>/, `unexpected <li> for ${JSON.stringify(rule)}`)
@@ -333,31 +333,31 @@ describe('renderMarkdown', () => {
   })
 
   it('renders multi-backtick code spans with interior backticks', () => {
-    const html = renderMarkdown('`` foo ` bar ``')
+    const html = renderMarkdownUnsafe('`` foo ` bar ``')
     assert.match(html, /<code>foo ` bar<\/code>/)
     assert.doesNotMatch(html, /<code><\/code>/)
   })
 
   it('strips a single surrounding space inside code spans', () => {
-    assert.match(renderMarkdown('` `` `'), /<code>``<\/code>/)
-    assert.match(renderMarkdown('`  ``  `'), /<code> `` <\/code>/)
+    assert.match(renderMarkdownUnsafe('` `` `'), /<code>``<\/code>/)
+    assert.match(renderMarkdownUnsafe('`  ``  `'), /<code> `` <\/code>/)
   })
 
   it('collapses interior line endings in multi-line code spans to spaces', () => {
-    const html = renderMarkdown('``\nfoo\nbar\n``')
+    const html = renderMarkdownUnsafe('``\nfoo\nbar\n``')
     assert.match(html, /<code>foo bar<\/code>/)
     assert.doesNotMatch(html, /<code>[^<]*<br>/)
   })
 
   it('leaves an unmatched backtick run as literal text', () => {
-    const html = renderMarkdown('```foo``')
+    const html = renderMarkdownUnsafe('```foo``')
     assert.doesNotMatch(html, /<code>/)
     assert.match(html, /```foo``/)
   })
 
   it('does not strip interior newlines from multi-line content', () => {
     const input = '## Repo summary\n\n### index.html\nMain app file.\n\n### tests\n14 passed.'
-    const html = renderMarkdown(input)
+    const html = renderMarkdownUnsafe(input)
     assert.match(html, /<h2>Repo summary<\/h2>/)
     assert.match(html, /<h3>index\.html<\/h3>/)
     assert.match(html, /Main app file\./)
@@ -366,7 +366,7 @@ describe('renderMarkdown', () => {
   })
 
   it('renders asterisk italic without breaking snake_case in code spans', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       'there *is* semantic search via `search_codebase` and `grep_search`',
     )
     assert.match(html, /there <em>is<\/em> semantic search/)
@@ -376,7 +376,7 @@ describe('renderMarkdown', () => {
   })
 
   it('renders explore-style summary markdown with headings, hr, and lists', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       [
         'Here is the complete summary:',
         '',
@@ -405,7 +405,7 @@ describe('renderMarkdown', () => {
   })
 
   it('bolds list labels after table cells with glob paths in inline code', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       [
         '## Tests',
         '',
@@ -431,7 +431,7 @@ describe('renderMarkdown', () => {
     // Regression for #469: parseTables emitted the whole table on one line, so
     // the global bold pass paired `**` across cells (via the code span in each
     // description), leaving the first/last `**Label**` cells as literal markers.
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       [
         '| Area | Details |',
         '|---|---|',
@@ -453,13 +453,13 @@ describe('renderMarkdown', () => {
   })
 
   it('renders bold and inline code together in a header cell', () => {
-    const html = renderMarkdown('| **Name** | Note |\n| --- | --- |\n| `id` | ok |')
+    const html = renderMarkdownUnsafe('| **Name** | Note |\n| --- | --- |\n| `id` | ok |')
     assert.match(html, /<th><strong>Name<\/strong><\/th>/)
     assert.match(html, /<td><code>id<\/code><\/td>/)
   })
 
   it('bolds captions that mix inline code and prose', () => {
-    const html = renderMarkdown('**`css-new-tab.png` — NTP rendered end-to-end**')
+    const html = renderMarkdownUnsafe('**`css-new-tab.png` — NTP rendered end-to-end**')
 
     assert.match(html, /<strong><code>css-new-tab\.png<\/code> — NTP rendered end-to-end<\/strong>/)
     assert.doesNotMatch(html, /\*\*/)
@@ -469,7 +469,7 @@ describe('renderMarkdown', () => {
     // Odd `**` count: the label closer must not pair with the stray trailing
     // delimiter across the code span (which would bold the wrong half and leave
     // `**MCP support` literal).
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       '- **MCP support** — Can host servers (configured via `.mcp.json`).**',
     )
     assert.match(html, /<li><strong>MCP support<\/strong> — Can host servers/)
@@ -479,28 +479,28 @@ describe('renderMarkdown', () => {
   })
 
   it('renders a simple blockquote', () => {
-    const html = renderMarkdown('> This is a quoted line')
+    const html = renderMarkdownUnsafe('> This is a quoted line')
     assert.match(html, /<blockquote>/)
     assert.match(html, /<p>This is a quoted line<\/p>/)
     assert.doesNotMatch(html, /&gt;/)
   })
 
   it('renders multi-line blockquotes with a soft line break', () => {
-    const html = renderMarkdown('> First line\n> Second line')
+    const html = renderMarkdownUnsafe('> First line\n> Second line')
     assert.match(html, /<blockquote>/)
     assert.match(html, /First line[\n]Second line/)
     assert.doesNotMatch(html, /&gt;/)
   })
 
   it('renders blank-separated quote groups as separate blockquotes (spec 242)', () => {
-    const html = renderMarkdown('> First paragraph\n\n> Second paragraph')
+    const html = renderMarkdownUnsafe('> First paragraph\n\n> Second paragraph')
     assert.match(html, /<p>First paragraph<\/p>/)
     assert.match(html, /<p>Second paragraph<\/p>/)
     assert.equal((html.match(/<blockquote>/g) ?? []).length, 2)
   })
 
   it('renders inline formatting inside blockquotes', () => {
-    const html = renderMarkdown('> **Important**: read this `carefully`')
+    const html = renderMarkdownUnsafe('> **Important**: read this `carefully`')
     assert.match(html, /<blockquote>/)
     assert.match(html, /<strong>Important<\/strong>/)
     assert.match(html, /<code>carefully<\/code>/)
@@ -508,7 +508,7 @@ describe('renderMarkdown', () => {
   })
 
   it('does not render > inside fenced code as a blockquote', () => {
-    const html = renderMarkdown('```\n> not a blockquote\n```')
+    const html = renderMarkdownUnsafe('```\n> not a blockquote\n```')
     assert.doesNotMatch(html, /<blockquote>/)
     // The line stays inside the code block as escaped text. highlight.js may wrap
     // individual tokens in <span>s, so assert the escaped `>` marker survives
@@ -517,7 +517,7 @@ describe('renderMarkdown', () => {
   })
 
   it('renders blockquote between surrounding prose without bleeding', () => {
-    const html = renderMarkdown('Before\n\n> quoted text\n\nAfter')
+    const html = renderMarkdownUnsafe('Before\n\n> quoted text\n\nAfter')
     assert.match(html, /<p>Before<\/p>/)
     assert.match(html, /<blockquote><p>quoted text<\/p><\/blockquote>/)
     assert.match(html, /<p>After<\/p>/)
@@ -525,7 +525,7 @@ describe('renderMarkdown', () => {
   })
 
   it('keeps a lazy continuation line inside the blockquote (no leaked &gt;)', () => {
-    const html = renderMarkdown('> line one\nlazy continuation')
+    const html = renderMarkdownUnsafe('> line one\nlazy continuation')
     assert.match(html, /<blockquote>/)
     // Lazy lines merge into the paragraph as text (space join, spec 93/238).
     assert.match(html, /line one lazy continuation/)
@@ -533,19 +533,19 @@ describe('renderMarkdown', () => {
   })
 
   it('renders nested blockquotes as nested elements', () => {
-    const html = renderMarkdown('> > quoted')
+    const html = renderMarkdownUnsafe('> > quoted')
     assert.match(html, /<blockquote><blockquote><p>quoted<\/p><\/blockquote><\/blockquote>/)
     assert.doesNotMatch(html, /&gt;/)
   })
 
   it('renders a bare > line as an empty blockquote without leaking &gt; (spec 239)', () => {
-    const html = renderMarkdown('>')
+    const html = renderMarkdownUnsafe('>')
     assert.match(html, /<blockquote><\/blockquote>/)
     assert.doesNotMatch(html, /&gt;/)
   })
 
   it('drops a bare > separator line within a blockquote without leaking &gt;', () => {
-    const html = renderMarkdown('> first\n>\n> second')
+    const html = renderMarkdownUnsafe('> first\n>\n> second')
     assert.match(html, /<blockquote>/)
     assert.match(html, /first/)
     assert.match(html, /second/)
@@ -558,15 +558,15 @@ describe('renderMarkdown', () => {
 // (#600); the cases below assert the `'escape'` opt-out, which reproduces the
 // historical literal-escape output. Passthrough-default + sink behavior is
 // covered in `raw-html-passthrough.test.ts`.
-describe('renderMarkdown sanitization (#115)', () => {
+describe('renderMarkdownUnsafe sanitization (#115)', () => {
   it('escapes raw HTML tags from untrusted text so no live element is emitted', () => {
-    const html = renderMarkdown('<img src=x onerror=alert(1)>', { htmlPolicy: 'escape' })
+    const html = renderMarkdownUnsafe('<img src=x onerror=alert(1)>', { htmlPolicy: 'escape' })
     assert.doesNotMatch(html, /<img/)
     assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/)
   })
 
   it('escapes raw <img> tags by default (image handling is host-injected)', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       '<img alt="C-S-S New Tab Page rendered" src="artifacts/screenshots/css-new-tab.png" />',
       { htmlPolicy: 'escape' },
     )
@@ -576,7 +576,7 @@ describe('renderMarkdown sanitization (#115)', () => {
 
   it('routes raw <img> tags through an injected RawImageRenderer', () => {
     withHostImagePolicy(() => {
-      const html = renderMarkdown(
+      const html = renderMarkdownUnsafe(
         '<img alt="C-S-S New Tab Page rendered" src="artifacts/screenshots/css-new-tab.png" />',
       )
       assert.match(html, /<img class="host-image"/)
@@ -593,13 +593,13 @@ describe('renderMarkdown sanitization (#115)', () => {
     // paragraph and stop rather than recurse on the identical block forever (the
     // guard in wrapParagraphBlock). Reaching this assertion at all proves no loop.
     withHostImagePolicy(() => {
-      const html = renderMarkdown('Inline <img src="artifacts/screenshots/x.png"> trailing text')
+      const html = renderMarkdownUnsafe('Inline <img src="artifacts/screenshots/x.png"> trailing text')
       assert.match(html, /^<p>Inline <img class="host-image"[^>]*> trailing text<\/p>$/)
     })
   })
 
   it('escapes script tags rather than executing them', () => {
-    const html = renderMarkdown('<script>alert(document.cookie)</script>', { htmlPolicy: 'escape' })
+    const html = renderMarkdownUnsafe('<script>alert(document.cookie)</script>', { htmlPolicy: 'escape' })
     assert.doesNotMatch(html, /<script>/)
     assert.match(html, /&lt;script&gt;/)
   })
@@ -607,19 +607,19 @@ describe('renderMarkdown sanitization (#115)', () => {
   it('decodes entities to inert text that can never reconstruct markup', () => {
     // CommonMark decodes &lt;script&gt; to the literal text "<script>", which
     // must be emitted HTML-escaped — never as a live tag.
-    const html = renderMarkdown('AT&T &lt;script&gt; &amp; more')
+    const html = renderMarkdownUnsafe('AT&T &lt;script&gt; &amp; more')
     assert.match(html, /AT&amp;T &lt;script&gt; &amp; more/)
     assert.doesNotMatch(html, /<script>/)
   })
 
   it('encodes quotes so untrusted text cannot break out into an attribute', () => {
-    const html = renderMarkdown(`say "hi" and 'bye'`)
+    const html = renderMarkdownUnsafe(`say "hi" and 'bye'`)
     assert.match(html, /&quot;hi&quot;/)
     assert.match(html, /&#39;bye&#39;/)
   })
 
   it('renders benign raw inline tags but keeps attributed/structural markup escaped', () => {
-    const html = renderMarkdown(
+    const html = renderMarkdownUnsafe(
       ['| H |', '| - |', '| <b>x</b> <b onclick="p()">y</b> <div>z</div> |'].join('\n'),
       { htmlPolicy: 'escape' },
     )
@@ -631,7 +631,7 @@ describe('renderMarkdown sanitization (#115)', () => {
   })
 
   it('keeps injected markup escaped inside inline code spans', () => {
-    const html = renderMarkdown('`<svg onload=alert(1)>`')
+    const html = renderMarkdownUnsafe('`<svg onload=alert(1)>`')
     assert.match(html, /<code>&lt;svg onload=alert\(1\)&gt;<\/code>/)
     assert.doesNotMatch(html, /<svg/)
   })
@@ -639,119 +639,119 @@ describe('renderMarkdown sanitization (#115)', () => {
   it('is order-independent: escaping & before < produces no decodable markup', () => {
     // A naive ordered encoder that runs < before & could double-process; ensure
     // the single-pass encoder leaves exactly one level of encoding.
-    const html = renderMarkdown('5 < 6 && 7 > 3')
+    const html = renderMarkdownUnsafe('5 < 6 && 7 > 3')
     assert.match(html, /5 &lt; 6 &amp;&amp; 7 &gt; 3/)
   })
 })
 
-describe('renderMarkdown CommonMark structure fixes', () => {
+describe('renderMarkdownUnsafe CommonMark structure fixes', () => {
   it('maps setext headings to h1/h2 like their ATX equivalents', () => {
-    assert.match(renderMarkdown('Title\n=====\n'), /<h1>Title<\/h1>/)
-    assert.match(renderMarkdown('Section\n---\n'), /<h2>Section<\/h2>/)
+    assert.match(renderMarkdownUnsafe('Title\n=====\n'), /<h1>Title<\/h1>/)
+    assert.match(renderMarkdownUnsafe('Section\n---\n'), /<h2>Section<\/h2>/)
   })
 
   it('treats an all-hash ATX title as a bare closing sequence', () => {
-    assert.match(renderMarkdown('### ###'), /<h3><\/h3>/)
-    assert.match(renderMarkdown('## foo ##'), /<h2>foo<\/h2>/)
+    assert.match(renderMarkdownUnsafe('### ###'), /<h3><\/h3>/)
+    assert.match(renderMarkdownUnsafe('## foo ##'), /<h2>foo<\/h2>/)
   })
 
   it('renders backslash-before-newline as a hard break', () => {
-    assert.match(renderMarkdown('foo\\\nbar'), /<p>foo<br>bar<\/p>/)
+    assert.match(renderMarkdownUnsafe('foo\\\nbar'), /<p>foo<br>bar<\/p>/)
   })
 
   it('collapses an escaped backslash to one literal backslash with a soft break', () => {
-    assert.match(renderMarkdown('foo\\\\\nbar'), /<p>foo\\\nbar<\/p>/)
+    assert.match(renderMarkdownUnsafe('foo\\\\\nbar'), /<p>foo\\\nbar<\/p>/)
   })
 
   it('strips continuation-line indentation after a hard break', () => {
-    assert.match(renderMarkdown('foo  \n     bar'), /<p>foo<br>bar<\/p>/)
+    assert.match(renderMarkdownUnsafe('foo  \n     bar'), /<p>foo<br>bar<\/p>/)
   })
 
   it('applies hard breaks inside emphasis spans', () => {
-    assert.match(renderMarkdown('*foo  \nbar*'), /<em>foo<br>bar<\/em>/)
-    assert.match(renderMarkdown('*foo\\\nbar*'), /<em>foo<br>bar<\/em>/)
+    assert.match(renderMarkdownUnsafe('*foo  \nbar*'), /<em>foo<br>bar<\/em>/)
+    assert.match(renderMarkdownUnsafe('*foo\\\nbar*'), /<em>foo<br>bar<\/em>/)
   })
 
   it('passes benign raw inline HTML through and keeps it escaped in code spans', () => {
-    const html = renderMarkdown('a <del>gone</del> x<sub>1</sub> <kbd>Ctrl</kbd> line<br>next')
+    const html = renderMarkdownUnsafe('a <del>gone</del> x<sub>1</sub> <kbd>Ctrl</kbd> line<br>next')
     assert.match(html, /<del>gone<\/del>/)
     assert.match(html, /<sub>1<\/sub>/)
     assert.match(html, /<kbd>Ctrl<\/kbd>/)
     assert.match(html, /line<br>next/)
-    assert.match(renderMarkdown('`<del>x</del>`'), /<code>&lt;del&gt;x&lt;\/del&gt;<\/code>/)
+    assert.match(renderMarkdownUnsafe('`<del>x</del>`'), /<code>&lt;del&gt;x&lt;\/del&gt;<\/code>/)
   })
 
   it('does not hard-break inside code spans or at the end of a block', () => {
-    assert.match(renderMarkdown('`foo  \nbar`'), /<code>foo {3}bar<\/code>/)
-    assert.doesNotMatch(renderMarkdown('foo\\'), /<br>/)
-    assert.doesNotMatch(renderMarkdown('foo  \n'), /<br>/)
+    assert.match(renderMarkdownUnsafe('`foo  \nbar`'), /<code>foo {3}bar<\/code>/)
+    assert.doesNotMatch(renderMarkdownUnsafe('foo\\'), /<br>/)
+    assert.doesNotMatch(renderMarkdownUnsafe('foo  \n'), /<br>/)
   })
 })
 
-describe('renderMarkdown list-item block content (#595)', () => {
+describe('renderMarkdownUnsafe list-item block content (#595)', () => {
   it('nests indented sublists inside their parent item', () => {
-    const html = renderMarkdown('- a\n  - b\n- c\n')
+    const html = renderMarkdownUnsafe('- a\n  - b\n- c\n')
     assert.match(html, /<li>a\s*<ul><li>b<\/li><\/ul><\/li>/)
   })
 
   it('renders fenced code and blockquotes inside list items', () => {
-    const html = renderMarkdown('1. foo\n\n   ```\n   bar\n   ```\n\n   > bam\n')
+    const html = renderMarkdownUnsafe('1. foo\n\n   ```\n   bar\n   ```\n\n   > bam\n')
     assert.match(html, /<li><p>foo<\/p>\s*<pre><code[^>]*>bar/)
     assert.match(html, /<blockquote><p>bam<\/p><\/blockquote><\/li>/)
   })
 
   it('renders document-level indented code blocks', () => {
     assert.match(
-      renderMarkdown('    code line\n\npara\n'),
+      renderMarkdownUnsafe('    code line\n\npara\n'),
       /<pre><code>code line\n<\/code><\/pre>\s*<p>para<\/p>/,
     )
   })
 
   it('renders indented lines as a paragraph when indentedCode is disabled (#9)', () => {
-    const html = renderMarkdown('    code\n', { indentedCode: false })
+    const html = renderMarkdownUnsafe('    code\n', { indentedCode: false })
     assert.equal(html, '<p>code</p>')
     assert.doesNotMatch(html, /<pre>/)
   })
 
   it('keeps indented code by default and with indentedCode: true (#9)', () => {
     const expected = '<pre><code>code\n</code></pre>'
-    assert.equal(renderMarkdown('    code\n'), expected)
-    assert.equal(renderMarkdown('    code\n', { indentedCode: true }), expected)
+    assert.equal(renderMarkdownUnsafe('    code\n'), expected)
+    assert.equal(renderMarkdownUnsafe('    code\n', { indentedCode: true }), expected)
   })
 
   it('renders indented code inside a list item (spec #270)', () => {
     assert.match(
-      renderMarkdown('- foo\n\n      bar\n'),
+      renderMarkdownUnsafe('- foo\n\n      bar\n'),
       /<li><p>foo<\/p>\s*<pre><code>bar\n<\/code><\/pre><\/li>/,
     )
   })
 
   it('keeps lazy under-indented markers as paragraph text (spec #312)', () => {
-    const html = renderMarkdown('- a\n - b\n  - c\n   - d\n    - e\n')
+    const html = renderMarkdownUnsafe('- a\n - b\n  - c\n   - d\n    - e\n')
     assert.match(html, /<li>d - e<\/li>/)
     assert.doesNotMatch(html, /<li>d<ul>/)
   })
 
   it('indented code cannot interrupt a paragraph (spec #225)', () => {
-    assert.match(renderMarkdown('aaa\n    bbb\n'), /<p>aaa\n\s*bbb<\/p>/)
+    assert.match(renderMarkdownUnsafe('aaa\n    bbb\n'), /<p>aaa\n\s*bbb<\/p>/)
   })
 })
 
-describe('renderMarkdown tab handling', () => {
+describe('renderMarkdownUnsafe tab handling', () => {
   it('treats a leading tab as four columns of code indent, preserving interior tabs (spec 1/2)', () => {
-    assert.equal(renderMarkdown('\tfoo\tbaz\t\tbim\n'), '<pre><code>foo\tbaz\t\tbim\n</code></pre>')
+    assert.equal(renderMarkdownUnsafe('\tfoo\tbaz\t\tbim\n'), '<pre><code>foo\tbaz\t\tbim\n</code></pre>')
     assert.equal(
-      renderMarkdown('  \tfoo\tbaz\t\tbim\n'),
+      renderMarkdownUnsafe('  \tfoo\tbaz\t\tbim\n'),
       '<pre><code>foo\tbaz\t\tbim\n</code></pre>',
     )
   })
 
   it('continues an indented code block across a tab-indented line (spec 8)', () => {
-    assert.equal(renderMarkdown('    foo\n\tbar\n'), '<pre><code>foo\nbar\n</code></pre>')
+    assert.equal(renderMarkdownUnsafe('    foo\n\tbar\n'), '<pre><code>foo\nbar\n</code></pre>')
   })
 
   it('accepts a tab as the ATX heading separator (spec 10)', () => {
-    assert.equal(renderMarkdown('#\tFoo\n'), '<h1>Foo</h1>')
-    assert.equal(renderMarkdown('#Foo\n'), '<p>#Foo</p>')
+    assert.equal(renderMarkdownUnsafe('#\tFoo\n'), '<h1>Foo</h1>')
+    assert.equal(renderMarkdownUnsafe('#Foo\n'), '<p>#Foo</p>')
   })
 })

@@ -6,7 +6,7 @@
 // asserting:
 //
 //   1. PASS-SET PARITY (the guarantee the conformance test relies on): the set
-//      of spec examples `renderMarkdown` satisfies is identical whether verdicts
+//      of spec examples `renderMarkdownUnsafe` satisfies is identical whether verdicts
 //      are computed with the JS normalizer or the Python reference. This must
 //      match exactly.
 //   2. STRING PARITY: for every spec example, JS- and Python-normalized output
@@ -82,15 +82,17 @@ interface SpecExample {
   section: string
 }
 interface Harness {
-  renderMarkdown: (raw: string, options?: { htmlPolicy?: 'passthrough' | 'escape' }) => string
+  renderMarkdownUnsafe: (raw: string, options?: { htmlPolicy?: 'passthrough' | 'escape' }) => string
   normalizeHtml: (html: string) => string
   loadCommonMarkSpec: () => SpecExample[]
 }
 
 // Bundle the renderer + JS normalizer + spec loader into one importable module
-// via esbuild, then load it via data URL.
+// via esbuild, then load it via data URL. Uses the raw string→HTML path
+// (`renderMarkdownUnsafe`) — this measures the parser, not the sink, and runs in
+// pure Node with no sanitizer backend.
 const entry = [
-  `export { renderMarkdown } from ${JSON.stringify(resolve(ROOT, 'src/renderer.ts'))}`,
+  `export { renderMarkdownUnsafe } from ${JSON.stringify(resolve(ROOT, 'src/renderer.ts'))}`,
   `export { normalizeHtml } from ${JSON.stringify(resolve(ROOT, 'tests/commonmark/normalize.ts'))}`,
   `export { loadCommonMarkSpec } from ${JSON.stringify(resolve(ROOT, 'tests/commonmark/load-spec.ts'))}`,
 ].join('\n')
@@ -119,7 +121,7 @@ const spec = harness.loadCommonMarkSpec()
 // disagree on; escape keeps the corpus stable and the allowlist meaningful.
 const inputs = spec.map((e) => ({
   example: e.example,
-  rendered: harness.renderMarkdown(e.markdown, { htmlPolicy: 'escape' }),
+  rendered: harness.renderMarkdownUnsafe(e.markdown, { htmlPolicy: 'escape' }),
   expected: e.html,
 }))
 const jsNorm = new Map<number, { expected: string; rendered: string }>()

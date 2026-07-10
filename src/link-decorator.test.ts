@@ -6,7 +6,7 @@ import {
   renderAnchor,
   setLinkDecorator,
 } from './inline-links.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 describe('LinkDecorator hook (#601)', () => {
   // Global hook: always restore the app default so other suites are unaffected.
@@ -16,11 +16,11 @@ describe('LinkDecorator hook (#601)', () => {
 
   it('uses the app default for external and workspace links', () => {
     assert.match(
-      renderMarkdown('[x](https://example.com)'),
+      renderMarkdownUnsafe('[x](https://example.com)'),
       /<a href="https:\/\/example\.com" target="_blank" rel="noopener noreferrer" data-browser-link="true">x<\/a>/,
     )
     assert.match(
-      renderMarkdown('[y](src/main.ts)'),
+      renderMarkdownUnsafe('[y](src/main.ts)'),
       /<a href="src\/main\.ts" class="workspace-markdown-link" data-workspace-link="true">y<\/a>/,
     )
   })
@@ -43,11 +43,11 @@ describe('LinkDecorator hook (#601)', () => {
       ' target="_blank" rel="noopener noreferrer" data-browser-link="true"'
     setLinkDecorator(forceExternal)
     assert.match(
-      renderMarkdown('[y](src/main.ts)'),
+      renderMarkdownUnsafe('[y](src/main.ts)'),
       /<a href="src\/main\.ts" target="_blank" rel="noopener noreferrer" data-browser-link="true">y<\/a>/,
     )
     // Bare autolinks route through the same hook.
-    assert.match(renderMarkdown('see https://example.com'), /data-browser-link="true">https/)
+    assert.match(renderMarkdownUnsafe('see https://example.com'), /data-browser-link="true">https/)
   })
 
   it('restores the app default when passed null', () => {

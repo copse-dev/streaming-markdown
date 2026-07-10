@@ -3,7 +3,7 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { createInputSmoother } from './smoothing.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 
 // #84 — OPTIONAL input smoother. These prove: (1) importing it changes nothing
@@ -452,11 +452,11 @@ describe('no leakage — the main entry does not bundle the smoother', () => {
 })
 
 describe('importing the smoother does not change the default emitter path', () => {
-  it('renderMarkdown/sanitize output is identical with the module imported', () => {
+  it('renderMarkdownUnsafe/sanitize output is identical with the module imported', () => {
     // The import at the top of this file is the whole point — assert core output
     // is unaffected by the module being present in the graph.
     const src = '# Hi\n\nsome *text* and `code`.'
-    const html = sanitizeRenderedMarkdown(renderMarkdown(src))
+    const html = sanitizeRenderedMarkdown(renderMarkdownUnsafe(src))
     assert.match(html, /<h1>Hi<\/h1>/)
     assert.match(html, /<em>text<\/em>/)
   })

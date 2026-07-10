@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { revealFormingLink } from './render-pending-line.ts'
 import { renderStreamingMarkdown } from './streaming.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 describe('revealFormingLink (#617)', () => {
   it('shows the label of a bare opening bracket', () => {
@@ -79,7 +79,7 @@ describe('streaming link label end to end (#617)', () => {
 
   it('committed output (after newline) matches the at-rest render', () => {
     const streamed = renderStreamingMarkdown('[Click here](https://example.com)\n\n')
-    const atRest = renderMarkdown('[Click here](https://example.com)')
+    const atRest = renderMarkdownUnsafe('[Click here](https://example.com)')
     // Both should contain the same anchor markup once committed.
     assert.match(streamed, /<a [^>]*href="https:\/\/example\.com"[^>]*>Click here<\/a>/)
     assert.match(atRest, /<a [^>]*href="https:\/\/example\.com"[^>]*>Click here<\/a>/)

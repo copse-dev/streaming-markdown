@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { highlightFenceCode } from './highlight.ts'
 import { installHighlightjs } from './highlight-hljs.ts'
 import { fenceInfoLanguage, parseFenceSlice } from './block-patterns.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 installHighlightjs()
 
@@ -56,14 +56,14 @@ describe('fence info-string language (#598, spec #24)', () => {
   })
 
   it('renders the decoded language class through the full renderer', () => {
-    const html = renderMarkdown('```foo\\+bar\ncode\n```')
+    const html = renderMarkdownUnsafe('```foo\\+bar\ncode\n```')
     assert.match(html, /class="hljs lang-foo\+bar"/)
   })
 })
 
 describe('fenced code renders blank lines through the full renderer (#598)', () => {
   it('keeps an interior blank line in the <pre><code>', () => {
-    const html = renderMarkdown('```\nline1\n\nline3\n```')
+    const html = renderMarkdownUnsafe('```\nline1\n\nline3\n```')
     assert.match(html, /line1\n\nline3/)
   })
 })

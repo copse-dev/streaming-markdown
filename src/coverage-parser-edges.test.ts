@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { stripFourColumnIndent } from './block-patterns.ts'
 import { tokenizeBlocks } from './block-tokenizer.ts'
 import { IncrementalSourceScanner } from './incremental-scan.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 describe('stripFourColumnIndent', () => {
   it('strips up to four leading spaces', () => {
@@ -78,7 +78,7 @@ describe('emphasis with mismatched delimiter-run lengths', () => {
   ]
   for (const md of cases) {
     it(`renders ${JSON.stringify(md)} without throwing`, () => {
-      const html = renderMarkdown(md)
+      const html = renderMarkdownUnsafe(md)
       assert.equal(typeof html, 'string')
       assert.ok(html.length > 0)
     })
@@ -89,13 +89,13 @@ describe('reference links whose labels carry inline markup', () => {
   it('matches a definition and reference label after inline rendering', () => {
     // The label contains a code span, so a direct string lookup misses and the
     // renderer must compare the *rendered* labels (the rendered-label index).
-    const html = renderMarkdown('[a `code` b]: https://example.com\n\nSee [a `code` b].')
+    const html = renderMarkdownUnsafe('[a `code` b]: https://example.com\n\nSee [a `code` b].')
     assert.match(html, /href="https:\/\/example\.com"/)
     assert.match(html, /<code>code<\/code>/)
   })
 
   it('resolves a reference label containing an escaped bracket', () => {
-    const html = renderMarkdown('[a\\]b]: https://example.com\n\nlink: [a\\]b]')
+    const html = renderMarkdownUnsafe('[a\\]b]: https://example.com\n\nlink: [a\\]b]')
     assert.match(html, /href="https:\/\/example\.com"/)
   })
 })

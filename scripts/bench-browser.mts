@@ -82,7 +82,7 @@ async function benchOpenPage(page: PwPage): Promise<Record<string, OpenRow>> {
     document.body.append(el)
     const out: Record<string, OpenRow> = {}
     for (const [name, md] of Object.entries(markdowns)) {
-      const html = SM.renderMarkdown(md) as string
+      const html = SM.renderMarkdownUnsafe(md) as string
       out[name] = {
         bytes: html.length,
         string: bench(() => {
@@ -128,7 +128,7 @@ async function benchEnforcedPage(page: PwPage): Promise<{ enforced: boolean; row
     document.body.append(el)
     const rows: Record<string, number> = {}
     for (const [name, md] of Object.entries(markdowns)) {
-      const html = SM.renderMarkdown(md) as string
+      const html = SM.renderMarkdownUnsafe(md) as string
       rows[name] = bench(() => {
         SM.setSanitizedHtml(el, html)
       })

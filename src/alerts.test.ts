@@ -1,7 +1,7 @@
 import '../tests/setup-dom-jsdom.ts'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { renderStreamingMarkdown, StreamingMarkdownRenderer } from './streaming.ts'
 
@@ -16,7 +16,7 @@ describe('GitHub alerts (#72)', () => {
     ]
     for (const [marker, title] of cases) {
       assert.equal(
-        renderMarkdown(`> [!${marker}]\n> Body text.`),
+        renderMarkdownUnsafe(`> [!${marker}]\n> Body text.`),
         `<blockquote class="markdown-alert markdown-alert-${marker.toLowerCase()}">` +
           `<p class="markdown-alert-title">${title}</p>\n<p>Body text.</p></blockquote>`,
       )
@@ -24,34 +24,34 @@ describe('GitHub alerts (#72)', () => {
   })
 
   it('matches the marker case-insensitively', () => {
-    assert.match(renderMarkdown('> [!note]\n> x'), /markdown-alert-note/)
-    assert.match(renderMarkdown('> [!Tip]\n> x'), /markdown-alert-tip/)
-    assert.match(renderMarkdown('> [!wArNiNg]\n> x'), /markdown-alert-warning/)
+    assert.match(renderMarkdownUnsafe('> [!note]\n> x'), /markdown-alert-note/)
+    assert.match(renderMarkdownUnsafe('> [!Tip]\n> x'), /markdown-alert-tip/)
+    assert.match(renderMarkdownUnsafe('> [!wArNiNg]\n> x'), /markdown-alert-warning/)
   })
 
   it('renders a marker-only quote as an alert with just the title', () => {
     assert.equal(
-      renderMarkdown('> [!CAUTION]'),
+      renderMarkdownUnsafe('> [!CAUTION]'),
       '<blockquote class="markdown-alert markdown-alert-caution">' +
         '<p class="markdown-alert-title">Caution</p></blockquote>',
     )
   })
 
   it('falls through to a plain blockquote for unknown markers (GitHub behavior)', () => {
-    const html = renderMarkdown('> [!FOO]\n> body')
+    const html = renderMarkdownUnsafe('> [!FOO]\n> body')
     assert.doesNotMatch(html, /markdown-alert/)
     assert.match(html, /<blockquote><p>\[!FOO\]\nbody<\/p><\/blockquote>/)
   })
 
   it('requires the marker to be the entire first line', () => {
-    assert.doesNotMatch(renderMarkdown('> [!NOTE] inline extra\n> body'), /markdown-alert/)
-    assert.doesNotMatch(renderMarkdown('> before [!NOTE]\n> body'), /markdown-alert/)
+    assert.doesNotMatch(renderMarkdownUnsafe('> [!NOTE] inline extra\n> body'), /markdown-alert/)
+    assert.doesNotMatch(renderMarkdownUnsafe('> before [!NOTE]\n> body'), /markdown-alert/)
     // The marker mid-quote (not the first line) does not classify either.
-    assert.doesNotMatch(renderMarkdown('> body\n> [!NOTE]'), /markdown-alert/)
+    assert.doesNotMatch(renderMarkdownUnsafe('> body\n> [!NOTE]'), /markdown-alert/)
   })
 
   it('keeps nested block content (lists, code) inside the alert', () => {
-    const html = renderMarkdown('> [!TIP]\n> Steps:\n> - one\n> - two\n> ```\n> code\n> ```')
+    const html = renderMarkdownUnsafe('> [!TIP]\n> Steps:\n> - one\n> - two\n> ```\n> code\n> ```')
     assert.match(html, /^<blockquote class="markdown-alert markdown-alert-tip">/)
     assert.match(html, /<p class="markdown-alert-title">Tip<\/p>/)
     assert.match(html, /<ul><li>one<\/li><li>two<\/li><\/ul>/)
@@ -60,33 +60,33 @@ describe('GitHub alerts (#72)', () => {
   })
 
   it('renders inline markdown in alert content', () => {
-    const html = renderMarkdown('> [!IMPORTANT]\n> Read **this** and `that`.')
+    const html = renderMarkdownUnsafe('> [!IMPORTANT]\n> Read **this** and `that`.')
     assert.match(html, /<strong>this<\/strong>/)
     assert.match(html, /<code>that<\/code>/)
   })
 
   it('treats a lazy continuation after the marker line as alert content', () => {
-    const html = renderMarkdown('> [!NOTE]\nlazy line')
+    const html = renderMarkdownUnsafe('> [!NOTE]\nlazy line')
     assert.match(html, /markdown-alert-note/)
     assert.match(html, /<p>lazy line<\/p>/)
   })
 
   it('classifies alerts independently for adjacent quote groups', () => {
-    const html = renderMarkdown('> [!NOTE]\n> a\n\n> plain\n\n> [!WARNING]\n> b')
+    const html = renderMarkdownUnsafe('> [!NOTE]\n> a\n\n> plain\n\n> [!WARNING]\n> b')
     assert.match(html, /markdown-alert-note/)
     assert.match(html, /markdown-alert-warning/)
     assert.match(html, /<blockquote><p>plain<\/p><\/blockquote>/)
   })
 
   it('recognizes an alert nested inside a list item', () => {
-    const html = renderMarkdown('- item\n  > [!NOTE]\n  > nested')
+    const html = renderMarkdownUnsafe('- item\n  > [!NOTE]\n  > nested')
     assert.match(html, /<li>item\n<blockquote class="markdown-alert markdown-alert-note">/)
   })
 })
 
 describe('alert sanitizer surface (#72)', () => {
   it('alert output survives sanitizeRenderedMarkdown unchanged', () => {
-    const html = renderMarkdown('> [!WARNING]\n> Careful with `rm`.')
+    const html = renderMarkdownUnsafe('> [!WARNING]\n> Careful with `rm`.')
     const sanitized = sanitizeRenderedMarkdown(html)
     assert.match(sanitized, /<blockquote class="markdown-alert markdown-alert-warning">/)
     assert.match(sanitized, /<p class="markdown-alert-title">Warning<\/p>/)
@@ -146,7 +146,7 @@ describe('alerts while streaming (#72)', () => {
     assert.ok(complete)
     assert.equal(
       complete.innerHTML,
-      sanitizeRenderedMarkdown(renderMarkdown(full)).toString(),
+      sanitizeRenderedMarkdown(renderMarkdownUnsafe(full)).toString(),
     )
   })
 

@@ -88,7 +88,7 @@ describe('Trusted Types enforcement e2e (real Chromium)', { skip }, () => {
         streamed: complete?.innerHTML ?? '',
         atRest: (() => {
           const el = document.createElement('div')
-          SM.setSanitizedHtml(el, SM.renderMarkdown(md))
+          SM.setSanitizedHtml(el, SM.renderMarkdownUnsafe(md))
           return el.innerHTML
         })(),
       }
@@ -124,7 +124,7 @@ describe('Trusted Types enforcement e2e (real Chromium)', { skip }, () => {
       })
       const host = document.createElement('div')
       document.body.append(host)
-      SM.setSanitizedHtml(host, SM.renderMarkdown('```mermaid\ngraph TD\nA --> B\n```'))
+      SM.setSanitizedHtml(host, SM.renderMarkdownUnsafe('```mermaid\ngraph TD\nA --> B\n```'))
 
       // Plain-string SVG: the injection sink rejects it; the diagram must fail
       // closed (marked --error, nothing injected) rather than crash.
@@ -137,7 +137,7 @@ describe('Trusted Types enforcement e2e (real Chromium)', { skip }, () => {
       // Host-minted TrustedHTML via transformSvg: renders.
       const host2 = document.createElement('div')
       document.body.append(host2)
-      SM.setSanitizedHtml(host2, SM.renderMarkdown('```mermaid\ngraph TD\nA --> B\n```'))
+      SM.setSanitizedHtml(host2, SM.renderMarkdownUnsafe('```mermaid\ngraph TD\nA --> B\n```'))
       const policy = (
         window as unknown as {
           trustedTypes: {

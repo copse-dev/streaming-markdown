@@ -1,7 +1,7 @@
 import '../tests/setup-dom-jsdom.ts'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { renderStreamingMarkdown } from './streaming.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
@@ -40,7 +40,7 @@ function assertNoVisibleNbsp(html: string, label: string): void {
 describe('HTML entity decoding in prose', () => {
   it('decodes nbsp entities in at-rest markdown metadata lines', () => {
     const html = sanitizeRenderedMarkdown(
-      renderMarkdown(`## RFC-042: Distributed Task Queue Protocol\n\n${metadataLine}\n`),
+      renderMarkdownUnsafe(`## RFC-042: Distributed Task Queue Protocol\n\n${metadataLine}\n`),
     )
     assert.doesNotMatch(html, /&amp;nbsp;/)
     const div = document.createElement('div')
@@ -95,7 +95,7 @@ describe('HTML entity decoding in prose', () => {
   })
 
   it('decodes nbsp in sprint retrospective metadata at rest and while streaming', () => {
-    assertNoVisibleNbsp(sanitizeRenderedMarkdown(renderMarkdown(sprintRetroDoc)), 'sprint-at-rest')
+    assertNoVisibleNbsp(sanitizeRenderedMarkdown(renderMarkdownUnsafe(sprintRetroDoc)), 'sprint-at-rest')
     const partial = sprintRetroDoc.replace(/\n---\n\n## Sprint Summary[\s\S]*/, '')
     assertNoVisibleNbsp(renderStreamingMarkdown(partial), 'sprint-streaming')
   })
@@ -116,37 +116,37 @@ describe('HTML entity decoding in prose', () => {
 
 describe('full entity/character reference decoding (#594)', () => {
   it('decodes named, decimal, and hex references in prose', () => {
-    const html = renderMarkdown('&copy; &AElig; &#35; &#X22; &frac34;')
+    const html = renderMarkdownUnsafe('&copy; &AElig; &#35; &#X22; &frac34;')
     assert.match(html, /© Æ # &quot; ¾/)
   })
 
   it('decoded punctuation is inert, not markup (spec #39)', () => {
-    const html = renderMarkdown('&#42;foo&#42;')
+    const html = renderMarkdownUnsafe('&#42;foo&#42;')
     assert.match(html, /<p>\*foo\*<\/p>/)
     assert.doesNotMatch(html, /<em>/)
   })
 
   it('keeps dangerous decoded characters HTML-escaped', () => {
-    const html = renderMarkdown('&lt;script&gt; &quot;x&quot;')
+    const html = renderMarkdownUnsafe('&lt;script&gt; &quot;x&quot;')
     assert.doesNotMatch(html, /<script>/)
     assert.match(html, /&lt;script&gt;/)
   })
 
   it('replaces invalid numeric references with U+FFFD (spec #26)', () => {
-    assert.match(renderMarkdown('&#0;'), /�/)
+    assert.match(renderMarkdownUnsafe('&#0;'), /�/)
   })
 
   it('does not decode inside code spans (spec #338-ish)', () => {
-    assert.match(renderMarkdown('`&amp;`'), /<code>&amp;amp;<\/code>/)
+    assert.match(renderMarkdownUnsafe('`&amp;`'), /<code>&amp;amp;<\/code>/)
   })
 
   it('leaves unknown and unterminated references literal (spec #28/#30)', () => {
-    const html = renderMarkdown('&nonExistent; &copy no semicolon')
+    const html = renderMarkdownUnsafe('&nonExistent; &copy no semicolon')
     assert.match(html, /&amp;nonExistent; &amp;copy no semicolon/)
   })
 
   it('decodes references in link destinations and titles (spec #32)', () => {
-    const html = renderMarkdown('[foo](/f&ouml;&ouml; "f&ouml;&ouml;")')
+    const html = renderMarkdownUnsafe('[foo](/f&ouml;&ouml; "f&ouml;&ouml;")')
     assert.match(html, /href="\/f%C3%B6%C3%B6"/)
     assert.match(html, /title="föö"/)
   })

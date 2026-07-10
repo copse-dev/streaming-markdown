@@ -5,7 +5,7 @@ import { decodeSafeMarkdownEntities } from './escape.ts'
 import { isTableSeparatorLine } from './render-blocks.ts'
 import { renderProseInline } from './render-prose-inline.ts'
 import { syncAttributes } from './streaming-dom-morph.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 // Targeted coverage for narrow edge branches that the broader suites don't reach.
 
@@ -67,14 +67,14 @@ describe('syncAttributes', () => {
 describe('link reference definition with an angle-bracket escaped destination', () => {
   it('parses a <...> destination containing a backslash-escaped ">"', () => {
     // The bare-destination parser must skip the escaped ">" and close on the real one.
-    const html = renderMarkdown('[a]: <foo\\>bar>\n\n[a]')
+    const html = renderMarkdownUnsafe('[a]: <foo\\>bar>\n\n[a]')
     assert.match(html, /href="foo(%3E|&gt;|>)bar"/)
   })
 })
 
 describe('inline link label with an escaped closing bracket', () => {
   it('treats "\\]" inside a label as a literal, not the label end', () => {
-    const html = renderMarkdown('[a\\]b](https://example.com)')
+    const html = renderMarkdownUnsafe('[a\\]b](https://example.com)')
     assert.match(html, />a\]b<\/a>/)
     assert.match(html, /href="https:\/\/example\.com"/)
   })

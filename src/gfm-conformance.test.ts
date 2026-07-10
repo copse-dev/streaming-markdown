@@ -7,7 +7,7 @@
 // is no CommonMark-only switch), so this harness is the regression floor for them.
 //
 // Mechanics mirror the CommonMark harness exactly: every spec example is run
-// through `renderMarkdown` and compared (after the spec's own HTML normalizer)
+// through `renderMarkdownUnsafe` and compared (after the spec's own HTML normalizer)
 // against the expected output. The set we currently satisfy is pinned in
 // `gfm-conformance-baseline.json`; the test fails if that set changes in either
 // direction:
@@ -18,12 +18,12 @@
 // renderer escapes untrusted HTML (sanitize-at-the-sink) and implements a subset
 // of the autolink/strikethrough grammar, so several sections cap out by design.
 // Streaming output is intentionally NOT conformance-tested (the live tail is
-// escaped plain text); only `renderMarkdown` is measured here.
+// escaped plain text); only `renderMarkdownUnsafe` is measured here.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { stripAppCodeDecorations } from './highlight.ts'
 import { installHighlightjs } from './highlight-hljs.ts'
 import { installFullEntityDecoder } from './entity-decoder-full.ts'
@@ -76,7 +76,7 @@ function conforms(example: SpecExample): boolean {
   // passthrough is the default (#600); see the CommonMark harness for rationale.
   const html = stripAppCodeDecorations(
     stripAppImageAttributes(
-      stripAppLinkAttributes(renderMarkdown(example.markdown, { htmlPolicy: 'escape' })),
+      stripAppLinkAttributes(renderMarkdownUnsafe(example.markdown, { htmlPolicy: 'escape' })),
     ),
   )
   return normalizeHtml(html) === normalizeHtml(example.html)
@@ -108,7 +108,7 @@ describe('GFM conformance (at rest)', () => {
     const baseline: GfmConformanceBaseline = {
       specVersion: SPEC_VERSION,
       source: `github/cmark-gfm spec.txt @ 0.29.0.gfm.13 (fetched to tests/fixtures/gfm/spec.txt)`,
-      note: 'Examples from the official GitHub Flavored Markdown spec that renderMarkdown() satisfies at rest, after the spec normalizer. GFM is a superset of CommonMark, so the base sections mirror the CommonMark baseline; the GFM-only sections are broken out in extensionSummary. This is a regression baseline, not a conformance goal — the renderer escapes untrusted HTML (sanitize-at-the-sink) and implements a subset of the autolink/strikethrough grammar, so HTML blocks, Raw HTML, and parts of the extension sections fail by design.',
+      note: 'Examples from the official GitHub Flavored Markdown spec that renderMarkdownUnsafe() satisfies at rest, after the spec normalizer. GFM is a superset of CommonMark, so the base sections mirror the CommonMark baseline; the GFM-only sections are broken out in extensionSummary. This is a regression baseline, not a conformance goal — the renderer escapes untrusted HTML (sanitize-at-the-sink) and implements a subset of the autolink/strikethrough grammar, so HTML blocks, Raw HTML, and parts of the extension sections fail by design.',
       total: spec.length,
       passing,
       summaryBySection: summarize(passingSet),

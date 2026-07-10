@@ -9,6 +9,7 @@ import * as api from './index.ts'
 
 const EXPECTED_FUNCTIONS = [
   'renderMarkdown',
+  'renderMarkdownUnsafe',
   'renderStreamingMarkdown',
   'splitForStreaming',
   'sanitizeRenderedMarkdown',

@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { normalizeHostImagePath } from './raw-images.ts'
 import { withHostImagePolicy } from '../tests/host-image-test-policy.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 describe('normalizeHostImagePath — screenshot determinism (#churn)', () => {
   it('leaves an already-relative artifacts path unchanged', () => {
@@ -65,8 +65,8 @@ describe('normalizeHostImagePath — screenshot determinism (#churn)', () => {
 describe('host image policy renders volatile srcs to one stable placeholder', () => {
   it('renders the container-absolute and relative forms identically', () => {
     withHostImagePolicy(() => {
-      const abs = renderMarkdown('<img alt="shot" src="/opt/cursor/artifacts/screenshots/x.png" />')
-      const rel = renderMarkdown('<img alt="shot" src="artifacts/screenshots/x.png" />')
+      const abs = renderMarkdownUnsafe('<img alt="shot" src="/opt/cursor/artifacts/screenshots/x.png" />')
+      const rel = renderMarkdownUnsafe('<img alt="shot" src="artifacts/screenshots/x.png" />')
       assert.equal(abs, rel)
       assert.match(abs, /data-host-image-path="artifacts\/screenshots\/x\.png"/)
     })
@@ -74,10 +74,10 @@ describe('host image policy renders volatile srcs to one stable placeholder', ()
 
   it('renders the download-URL form identically and never leaks the session id', () => {
     withHostImagePolicy(() => {
-      const url = renderMarkdown(
+      const url = renderMarkdownUnsafe(
         '<img alt="shot" src="https://host.example/v1/agents/session-abc123/artifacts/download?path=artifacts/screenshots/x.png" />',
       )
-      const rel = renderMarkdown('<img alt="shot" src="artifacts/screenshots/x.png" />')
+      const rel = renderMarkdownUnsafe('<img alt="shot" src="artifacts/screenshots/x.png" />')
       assert.equal(url, rel)
       assert.doesNotMatch(url, /session-abc123/)
     })
