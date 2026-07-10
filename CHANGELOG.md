@@ -5,6 +5,52 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-10
+
+### ⚠ BREAKING CHANGES
+
+- neutral default link output and host-only workspace subpath (#112) (#124) (`cf58cbf`)
+
+### Features
+
+- support GFM extended www, URL, and email autolinks (#125) (`bc77b95`)
+- make renderMarkdown safe by default, add renderMarkdownUnsafe (#104) (#116) (`21104d4`)
+
+### Bug Fixes
+
+- hold trailing ~~ and sweep stale pending &lt;li&gt; in streaming (#119) (`f6fbfb0`)
+- restore setext-at-EOF heading rendering and green up main CI (#129) (`c3a2b76`)
+- reliable mobile iOS load + no horizontal scroll on action bar (#128) (`ecb7b72`)
+- keep GFM table when header cell has bold label or image (#106) (#120) (`dd9f2b2`)
+- stop splicing a pending top-level bullet inside a trailing blockquote (#123) (`0176877`)
+- keep balanced parens in bare-URL autolinks (#107) (#117) (`fb0bb65`)
+- render unterminated setext underline as a heading at rest (#105) (#122) (`f23fe45`)
+
+### Performance
+
+- advance the safe boundary inside lists and blockquotes (#111) (#126) (`8e73c10`)
+- incremental footnote rendering instead of full re-morph (#110) (#127) (`e191b73`)
+
+### Documentation
+
+- refresh stale conformance numbers and feature status (#118) (`476f81c`)
+
+### Tests
+
+- add group ride announcement regression fixture (#130) (`8ea4a60`)
+
+### Continuous Integration
+
+- raise Node heap for the bench job to fix the main-branch OOM (#134) (`1cbf361`)
+- gate Trusted Types e2e, Node 20+22 matrix, bench guard, and bundle size (#121) (`7765a7b`)
+- dispatch agent-pane sync from release.yml + manual notify trigger (#102) (`939b49d`)
+
+### Other Changes
+
+- Drop comment-only list items instead of rendering a blank bullet (#131) (`ef15e21`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v0.9.0...v0.10.0
+
 ## [Unreleased]
 
 ### Breaking Changes
