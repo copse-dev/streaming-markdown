@@ -115,8 +115,11 @@ When extending the renderer or its CSS, preserve these rules:
 - **Package boundary.** The core stays app-independent so it can version and ship on
   its own, so host-specific behaviour is **injected, not hard-coded**:
   - `setLinkDecorator` (`inline-links.ts`) — a `LinkDecorator` returns the attributes
-    for a rendered `<a>`, defaulting to the app's workspace/browser routing
-    (`appLinkDecorator`).
+    for a rendered `<a>`. The built-in default is **neutral** (#112): anchors carry
+    only `href`/`title`, with no `target`, `rel`, `class`, or `data-*` routing hooks.
+    The app's workspace/browser routing decorator (`appLinkDecorator`) lives behind the
+    host-only `@copse/streaming-markdown/host/workspace` entry; a host restores the
+    pre-0.10 in-app behaviour with `setLinkDecorator(appLinkDecorator)`.
   - `setRawImageRenderer` (`raw-images.ts`) — a `RawImageRenderer` decides what a raw
     `<img>` becomes (e.g. an app's artifact placeholder). The core escapes every
     `<img>` by default; the renderer's output bypasses escaping via a placeholder and
@@ -522,15 +525,16 @@ counts). Current state:
 | GFM extension section   | Baseline | Notes                                                                                     |
 | ----------------------- | -------- | ----------------------------------------------------------------------------------------- |
 | Strikethrough           | 2/2      | Full — double-tilde `~~x~~` → `<del>`.                                                     |
-| Tables                  | 2/8      | Gaps: column alignment (`:-:`/`--:` → `align`), escaped `\|` in cells, column-count normalization, delimiter/header mismatch rejection. |
+| Tables                  | 8/8      | Full — column alignment (`:-:`/`--:` → `align`, `parseTableAlignments`), escaped `\|` in cells (`splitTableRow`), column-count normalization and delimiter/header mismatch rejection (`tableColumnsMatch`) are all implemented. |
 | Task list items         | 0/2      | Renderer output diverges on purpose — it adds `class="task-list-item"`/`contains-task-list` and a `disabled` checkbox for app styling ([#614](https://github.com/copse-dev/agent-pane/issues/614)), which the spec's bare `<input>` output does not.  |
-| Autolinks (extension)   | 0/11     | Only bare `http(s)://` is linked (`inline-spans.ts`); no `www.`, no bare email, and trailing-punctuation trimming is a simplified regex, not GFM's balanced-paren/entity rules.                 |
+| Autolinks (extension)   | 0/11     | Only bare `http(s)://` is linked (`inline-spans.ts`); no `www.`, no bare email. Trailing-punctuation trimming follows GFM's balanced-paren rule (a closing `)` that balances an earlier `(` stays in the link, #107) but not its entity rules.                 |
 | Disallowed Raw HTML     | 0/1      | In the harness's pinned `'escape'` mode the renderer escapes *all* attributed/structural raw HTML, which is stricter than GFM's tag filter — so the filtered-passthrough output never matches. |
 
-Strikethrough is the only fully-conforming extension; the others cap out on real
-grammar gaps (tables, extended autolinks) or deliberate divergence (task-list
-classes, raw-HTML escaping). Closing the table-alignment and `www.`/email autolink
-gaps are the highest-value follow-ups.
+Tables and Strikethrough are the fully-conforming extensions; the rest cap out on a
+real grammar gap (extended autolinks) or deliberate divergence (task-list classes,
+raw-HTML escaping). Closing the `www.`/bare-email extended-autolink gap (0/11) is
+the highest-value remaining follow-up — task-list `class`/`disabled` output and the
+disallowed-raw-HTML tag filter are intentional divergences, not gaps to close.
 
 ### Streaming convergence fuzz (`streaming-convergence.test.ts`, via `npm test`)
 

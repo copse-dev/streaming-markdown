@@ -5,6 +5,34 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- **Neutral default link output (#112).** The built-in default `LinkDecorator`
+  is now host-agnostic: rendered `<a>` anchors carry only `href`/`title` and no
+  longer include `target="_blank"`, `rel="noopener noreferrer"`,
+  `data-browser-link`, `data-workspace-link`, or `class="workspace-markdown-link"`.
+  A general-purpose `renderMarkdown`/streaming render no longer injects a specific
+  host's routing semantics.
+
+  **Migration.** Hosts that want the previous in-app behaviour opt in with a
+  single call:
+
+  ```ts
+  import { setLinkDecorator } from '@copse/streaming-markdown'
+  import { appLinkDecorator } from '@copse/streaming-markdown/host/workspace'
+
+  setLinkDecorator(appLinkDecorator)
+  ```
+
+- **Host/workspace helpers moved off the main entry (#112).** `appLinkDecorator`,
+  `stripAppLinkAttributes`, `stripAppImageAttributes`, `stripAppCodeDecorations`,
+  `isWorkspaceMarkdownLinkHref`, `workspaceLinkTargetFromHref`, and the
+  `WorkspaceLinkTarget` type are no longer re-exported from
+  `@copse/streaming-markdown`. Import them from the dedicated host subpath
+  `@copse/streaming-markdown/host/workspace` instead.
+
 ## [0.9.0] - 2026-07-09
 
 ### Other Changes

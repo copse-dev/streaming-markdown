@@ -111,19 +111,28 @@ export function renderStrikethrough(text: string): string {
 
 /**
  * Streaming: index from which a half-open `~~` should hold. Holds an unmatched
- * opener (`~~foo` mid-stream) and a lone trailing `~` that could grow into a
+ * opener (`~~foo` mid-stream) and a trailing tilde run that could grow into a
  * `~~` opener, so no literal marker flashes before the span closes.
  */
 export function strikethroughHoldStart(s: string, mask: boolean[]): number {
-  const { open } = pairTildeRuns(readTildeRuns(s, mask))
+  const { matches, open } = pairTildeRuns(readTildeRuns(s, mask))
   let cut = s.length
   const firstOpen = open[0]
   if (firstOpen) cut = Math.min(cut, firstOpen.start)
 
+  // A trailing tilde run at end-of-input holds like a trailing `**`/`__` run
+  // (see `trailingDelimiterStart`): a lone `~` could grow into a `~~` opener,
+  // and an inert trailing `~~` (`a ~~`, not left/right-flanking yet) becomes an
+  // opener the moment a non-space follows — rendering it literally now would
+  // flash a `~~` the next character retracts. A trailing run consumed as a
+  // closing `~~` (`~~x~~`) already emitted its `</del>`, so it must not hold.
   if (s.length > 0 && s[s.length - 1] === '~' && !mask[s.length - 1]) {
     let t = s.length
     while (t > 0 && s[t - 1] === '~' && !mask[t - 1]) t--
-    if (s.length - t === 1) cut = Math.min(cut, t)
+    const runLen = s.length - t
+    if (runLen === 1 || (runLen === 2 && !matches.some((m) => m.close === t))) {
+      cut = Math.min(cut, t)
+    }
   }
   return cut
 }

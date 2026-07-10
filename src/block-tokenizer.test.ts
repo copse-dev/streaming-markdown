@@ -5,6 +5,7 @@ import {
   getIncompleteFenceSource,
   isAmbiguousBlockLine,
   isEmptyListItemLine,
+  isGfmTableRowLine,
   isListItemLine,
   listItemContentColumn,
   pendingLineBelongsInTable,
@@ -203,6 +204,35 @@ describe('isAmbiguousBlockLine', () => {
   })
 })
 
+describe('prose-metadata header with a matching delimiter row (#106)', () => {
+  it('treats a `**Label:**` header as a table row when a matching delimiter follows', () => {
+    const header = '| **Name:** Widget | Qty |'
+    // Without a following delimiter row the prose-metadata heuristic still wins.
+    assert.equal(isGfmTableRowLine(header), false)
+    // A matching delimiter row is unambiguous table syntax and overrides it.
+    assert.equal(isGfmTableRowLine(header, '| --- | --- |'), true)
+    // A delimiter row with a different column count does not (spec 203).
+    assert.equal(isGfmTableRowLine(header, '| --- |'), false)
+  })
+
+  it('treats an inline-image header as a table row when a matching delimiter follows', () => {
+    const header = '| ![logo](x.png) Name | Qty |'
+    assert.equal(isGfmTableRowLine(header, '| --- | --- |'), true)
+  })
+
+  it('tokenizes a bold-label header + delimiter as a single table block', () => {
+    const md = '| **Name:** Widget | Qty |\n| --- | --- |\n| a | 1 |\n'
+    const kinds = tokenizeBlocks(md).map((b) => b.kind)
+    assert.deepEqual(kinds, ['table'])
+  })
+
+  it('still keeps a bold-label pipe line as prose with no delimiter row', () => {
+    const md = '| **Name:** Widget | Qty |\nplain follow-up line\n'
+    const kinds = tokenizeBlocks(md).map((b) => b.kind)
+    assert.ok(!kinds.includes('table'), `expected no table block, got ${kinds.join(', ')}`)
+  })
+})
+
 describe('table streaming helpers', () => {
   it('detects an open table tail', () => {
     const complete = '| A | B |\n| - | - |\n| one |\n'
@@ -283,5 +313,79 @@ describe('splitForStreaming (tokenizer #475)', () => {
         pending: '| tests/e2e/ | WebdriverIO specs |',
       },
     )
+  })
+})
+
+describe('blockquote lazy continuation (incremental memo, #111)', () => {
+  // The blockquote scanner memoises `endsInOpenParagraph` over the growing
+  // stripped content so a long lazy run is O(1)/line instead of O(n)/line. The
+  // memo must never diverge from a fresh determination: these cases pin the
+  // block extents that a wrong fast-path (e.g. treating indented code or a
+  // `>`-blank-closed paragraph as an open paragraph) would break.
+  function kinds(src: string): string[] {
+    return tokenizeBlocks(src).map((t) => `${t.kind}:${JSON.stringify(src.slice(t.start, t.end))}`)
+  }
+
+  it('folds a long unmarked lazy run into one blockquote paragraph', () => {
+    const src = '> start\nlazy one\nlazy two\nlazy three\n'
+    assert.deepEqual(kinds(src), [`blockquote:${JSON.stringify(src)}`])
+  })
+
+  it('resumes lazy continuation after a re-marked line', () => {
+    const src = '> start\nlazy\n> marked again\nmore lazy\n'
+    assert.deepEqual(kinds(src), [`blockquote:${JSON.stringify(src)}`])
+  })
+
+  it('does not lazily continue indented code inside a quote (spec 236)', () => {
+    // `>     foo` is indented code inside the quote; the unmarked `    bar` is a
+    // separate indented code block, not a lazy continuation.
+    assert.deepEqual(kinds('>     foo\n    bar\n'), [
+      'blockquote:">     foo\\n"',
+      'indented_code:"    bar\\n"',
+    ])
+  })
+
+  it('does not lazily continue after a `>`-blank closes the paragraph (spec 237)', () => {
+    // The empty `>` line closes the paragraph; the following unmarked `bar` can
+    // no longer lazily continue it.
+    assert.deepEqual(kinds('> foo\n>\nbar\n'), ['blockquote:"> foo\\n>\\n"', 'paragraph:"bar\\n"'])
+  })
+
+  it('lazily continues a paragraph nested in a blockquote', () => {
+    const src = '> > inner\nlazy inner continuation\n'
+    assert.deepEqual(kinds(src), [`blockquote:${JSON.stringify(src)}`])
+  })
+
+  it('breaks the quote at an unmarked ATX heading, not a lazy continuation', () => {
+    assert.deepEqual(kinds('> para\n# heading\n'), ['blockquote:"> para\\n"', 'atx_heading:"# heading\\n"'])
+  })
+
+  it('a setext underline under quoted text is not an open-paragraph continuation', () => {
+    // `> text` then unmarked `===` turns the quoted paragraph into a setext
+    // heading; the underline is consumed by the quote, not left dangling.
+    const src = '> text\n===\n'
+    const toks = tokenizeBlocks(src)
+    assert.equal(toks.length, 1)
+    assert.equal(toks[0]?.kind, 'blockquote')
+    assert.equal(src.slice(toks[0]?.start ?? 0, toks[0]?.end ?? 0), src)
+  })
+
+  it('a link reference definition at a block start does not lazily swallow the next line', () => {
+    // `> [x]: /u` tokenizes as a `link_ref_def` (not a paragraph), so the memo
+    // fast path must not treat the unmarked `bar` as a lazy continuation — it is
+    // a separate paragraph outside the quote. Regresses the memo returning
+    // `true` for a ref-def line that `endsInOpenParagraph` classifies as `false`.
+    assert.deepEqual(kinds('> [x]: /u\nbar\n'), [
+      'blockquote:"> [x]: /u\\n"',
+      'paragraph:"bar\\n"',
+    ])
+  })
+
+  it('a ref-def that follows an open quoted paragraph still lazily continues', () => {
+    // Here `[foo]: /url` cannot interrupt the already-open paragraph `text`, so
+    // it genuinely is a lazy continuation and stays inside the one blockquote —
+    // the memo is correct in this direction and the fix must preserve it.
+    const src = '> text\n> [foo]: /url\n'
+    assert.deepEqual(kinds(src), [`blockquote:${JSON.stringify(src)}`])
   })
 })
