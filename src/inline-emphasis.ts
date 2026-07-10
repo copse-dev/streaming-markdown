@@ -176,40 +176,35 @@ function handleCloseRemainder(
     const remOpenRunLen = remOpen.len
     const remUsed = Math.min(remOpen.len, remainder)
     const remPrefix = remOpenRunLen - remUsed
-    if (emphasisMatchAllowed(remOpen, remainder, remCanOpen, remOpen.canClose)) {
-      matches.push({
-        openIndex: remOpen.index + remPrefix,
-        closeIndex: remIndex,
-        openLen: remUsed,
-        closeLen: remUsed,
-        openRunLen: remOpenRunLen,
+    // `remOpen` was chosen by findMatchingOpener under this exact
+    // emphasisMatchAllowed(open, remainder, remCanOpen, open.canClose) predicate,
+    // so the match is always allowed here — no re-check needed.
+    matches.push({
+      openIndex: remOpen.index + remPrefix,
+      closeIndex: remIndex,
+      openLen: remUsed,
+      closeLen: remUsed,
+      openRunLen: remOpenRunLen,
+      char: ch,
+    })
+    stack.length = remMatched
+    if (remPrefix > 0) {
+      stack.push({
+        index: remOpen.index,
         char: ch,
+        len: remPrefix,
+        canClose: remOpen.canClose,
       })
-      stack.length = remMatched
-      if (remPrefix > 0) {
-        stack.push({
-          index: remOpen.index,
-          char: ch,
-          len: remPrefix,
-          canClose: remOpen.canClose,
-        })
-      }
-      const remRemainder = remainder - remUsed
-      if (remRemainder > 0 && remCanOpen) {
-        stack.push({
-          index: remIndex + remUsed,
-          char: ch,
-          len: remRemainder,
-          canClose: remRf,
-        })
-      }
-      /* c8 ignore start -- unreachable: `remOpen` is chosen by findMatchingOpener
-         using emphasisMatchAllowed with the same (remainder, remCanOpen) arguments,
-         so the identical guard just above always holds and this else-if is dead. */
-    } else if (remCanOpen) {
-      stack.push({ index: remIndex, char: ch, len: remainder, canClose: remRf })
     }
-    /* c8 ignore stop */
+    const remRemainder = remainder - remUsed
+    if (remRemainder > 0 && remCanOpen) {
+      stack.push({
+        index: remIndex + remUsed,
+        char: ch,
+        len: remRemainder,
+        canClose: remRf,
+      })
+    }
   } else if (remCanOpen) {
     stack.push({ index: remIndex, char: ch, len: remainder, canClose: remRf })
   }
@@ -360,15 +355,6 @@ function assembleMatch(s: string, m: DelimiterMatch, allMatches: DelimiterMatch[
   return wrapEmphasis(out.replace(/\n/g, ' '), m.openLen, m.closeLen)
 }
 
-function delimitersToSkip(s: string, matches: DelimiterMatch[]): boolean[] {
-  const skip = new Array<boolean>(s.length).fill(false)
-  for (const m of matches) {
-    for (let i = m.openIndex; i < m.openIndex + m.openLen; i++) skip[i] = true
-    for (let i = m.closeIndex; i < matchEnd(m); i++) skip[i] = true
-  }
-  return skip
-}
-
 /**
  * Extend `mask` over every complete link/image span. A link's label is its own
  * inline scope (the label renderer runs emphasis inside it separately), and its
@@ -403,8 +389,11 @@ function renderEmphasisSegment(s: string, mask: boolean[], linkRefs: LinkReferen
   const matches = scanDelimiterMatches(s, maskLinkSpans(s, mask, linkRefs), linkRefs)
   if (matches.length === 0) return s
 
+  // Every match is a root or nested inside one (findRootMatches), so every
+  // delimiter run lives within some root span. Roots are emitted and advanced
+  // past wholesale below, so the plain-text gaps between them never contain a
+  // matched delimiter — no per-character skip bookkeeping is required.
   const roots = findRootMatches(matches)
-  const skip = delimitersToSkip(s, matches)
 
   let out = ''
   let i = 0
@@ -417,23 +406,7 @@ function renderEmphasisSegment(s: string, mask: boolean[], linkRefs: LinkReferen
       rootIdx++
       continue
     }
-    if (skip[i]) {
-      /* c8 ignore start -- unreachable: root matches are consumed wholesale via
-         assembleMatch/matchEnd and matches are properly nested, so skip[] is never
-         true at a scanned index. */
-      i++
-      continue
-    }
-    /* c8 ignore stop */
-    let next = s.length
-    if (root) next = Math.min(next, root.openIndex)
-    for (let j = i + 1; j < next; j++) {
-      if (skip[j]) {
-        /* c8 ignore next 3 -- unreachable: same nested-match invariant as above. */
-        next = j
-        break
-      }
-    }
+    const next = root ? root.openIndex : s.length
     out += s.slice(i, next)
     i = next
   }
