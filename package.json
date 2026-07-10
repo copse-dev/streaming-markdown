@@ -73,6 +73,11 @@
       "import": "./dist/smoothing.js",
       "default": "./dist/smoothing.js"
     },
+    "./host/workspace": {
+      "types": "./dist/host-workspace.d.ts",
+      "import": "./dist/host-workspace.js",
+      "default": "./dist/host-workspace.js"
+    },
     "./styles/core.css": "./styles/core.css",
     "./styles/default.css": "./styles/default.css",
     "./styles/cjk.css": "./styles/cjk.css"

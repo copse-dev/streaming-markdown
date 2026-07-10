@@ -6,22 +6,22 @@ describe('renderInlineSpans (unified inline pipeline)', () => {
   it('renders emphasis around markdown links after the delimiter stack', () => {
     assert.equal(
       renderInlineSpans('*foo [bar](https://example.com)*'),
-      '<em>foo <a href="https://example.com" target="_blank" rel="noopener noreferrer" data-browser-link="true">bar</a></em>',
+      '<em>foo <a href="https://example.com">bar</a></em>',
     )
     assert.equal(
       renderInlineSpans('**foo [bar](https://example.com)**'),
-      '<strong>foo <a href="https://example.com" target="_blank" rel="noopener noreferrer" data-browser-link="true">bar</a></strong>',
+      '<strong>foo <a href="https://example.com">bar</a></strong>',
     )
   })
 
   it('renders emphasis inside link labels', () => {
     assert.equal(
       renderInlineSpans('[**bar**](https://example.com)'),
-      '<a href="https://example.com" target="_blank" rel="noopener noreferrer" data-browser-link="true"><strong>bar</strong></a>',
+      '<a href="https://example.com"><strong>bar</strong></a>',
     )
     assert.equal(
       renderInlineSpans('*foo [*bar*](https://example.com)*'),
-      '<em>foo <a href="https://example.com" target="_blank" rel="noopener noreferrer" data-browser-link="true"><em>bar</em></a></em>',
+      '<em>foo <a href="https://example.com"><em>bar</em></a></em>',
     )
   })
 
@@ -42,11 +42,11 @@ describe('renderInlineSpans (unified inline pipeline)', () => {
   it('bolds markdown links when ** immediately precedes [ (linkBeatsEmphasis)', () => {
     assert.equal(
       renderInlineSpans('**[#264](https://example.com/issues/264) — Track 1, C2**'),
-      '<strong><a href="https://example.com/issues/264" target="_blank" rel="noopener noreferrer" data-browser-link="true">#264</a> — Track 1, C2</strong>',
+      '<strong><a href="https://example.com/issues/264">#264</a> — Track 1, C2</strong>',
     )
     assert.equal(
       renderInlineSpans('**[foo](https://example.com)**'),
-      '<strong><a href="https://example.com" target="_blank" rel="noopener noreferrer" data-browser-link="true">foo</a></strong>',
+      '<strong><a href="https://example.com">foo</a></strong>',
     )
   })
 
@@ -55,15 +55,12 @@ describe('renderInlineSpans (unified inline pipeline)', () => {
       renderInlineSpans(
         '**[`docs/plans/acp-client-support.md`](docs/plans/acp-client-support.md) Phase 2**',
       ),
-      '<strong><a href="docs/plans/acp-client-support.md" class="workspace-markdown-link" data-workspace-link="true"><code>docs/plans/acp-client-support.md</code></a> Phase 2</strong>',
+      '<strong><a href="docs/plans/acp-client-support.md"><code>docs/plans/acp-client-support.md</code></a> Phase 2</strong>',
     )
   })
 
   it('links a label that is only a code span', () => {
-    assert.equal(
-      renderInlineSpans('[`test`](/blah)'),
-      '<a href="/blah" class="workspace-markdown-link" data-workspace-link="true"><code>test</code></a>',
-    )
+    assert.equal(renderInlineSpans('[`test`](/blah)'), '<a href="/blah"><code>test</code></a>')
   })
 
   it('pairs emphasis across an inline code span (spec 478/479)', () => {

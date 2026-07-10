@@ -100,7 +100,21 @@ function clearBlockPendingDom(completedEl: HTMLElement, parts: BlockPendingClean
   if (parts.includes('continuation')) clearListContinuationDom(completedEl)
   if (parts.includes('paragraph-continuation')) clearParagraphContinuationDom(completedEl)
   if (parts.includes('list-items')) {
-    tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)?.remove()
+    const pendingLi = tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)
+    const wrapper = pendingLi?.parentElement
+    pendingLi?.remove()
+    // The wrapper <ul>/<ol> may have been created solely to host this pending
+    // item; once the item is swept, a now-empty wrapper is stale content that
+    // diverges from the fresh render (an empty document, not `<ul></ul>`), so
+    // drop it too. A wrapper that still holds committed items stays. Mirrors the
+    // inactive-branch cleanup in syncListPendingDom.
+    if (
+      wrapper &&
+      (wrapper.tagName === 'UL' || wrapper.tagName === 'OL') &&
+      wrapper.childNodes.length === 0
+    ) {
+      wrapper.remove()
+    }
   }
   if (parts.includes('direct-blocks')) {
     tailDirectPendingBlock(completedEl, false)?.remove()
@@ -164,19 +178,21 @@ function appendListPendingHtml(
     if (nested) return nested
   }
 
-  // When the committed HTML ends with the trailing footnotes section (#72),
-  // its own `</ol>` would be found by the lastIndexOf below and the pending
-  // item would land inside the section — append a fresh list instead (the DOM
-  // path's trailing-list lookup rejects the <section> the same way).
-  if (!rendered.endsWith('</section>')) {
-    const close = `</${listTag}>`
-    const closeIndex = rendered.lastIndexOf(close)
-    if (closeIndex !== -1) {
-      const openNeedle = `<${listTag}`
-      const beforeClose = rendered.slice(0, closeIndex)
-      if (beforeClose.lastIndexOf(openNeedle) !== -1) {
-        return `${beforeClose}${liHtml}${rendered.slice(closeIndex)}`
-      }
+  // Splice into the trailing list only when it is the TOP-LEVEL trailing list —
+  // i.e. its close tag ends the rendered output. A list nested inside a
+  // blockquote (or other container) ends the string with the container's close
+  // (e.g. `</blockquote>`), so a pending top-level bullet must become a new
+  // sibling list rather than being injected into the quote (#109). This mirrors
+  // the DOM emitter's `findTrailingListHost`, which reuses the trailing list
+  // only when it is the last element child of `stream-complete`. Requiring the
+  // list to end the output also excludes the trailing footnotes section (#72),
+  // which ends with `</section>` rather than `</ul>`/`</ol>`.
+  const close = `</${listTag}>`
+  if (rendered.endsWith(close)) {
+    const closeIndex = rendered.length - close.length
+    const beforeClose = rendered.slice(0, closeIndex)
+    if (beforeClose.lastIndexOf(`<${listTag}`) !== -1) {
+      return `${beforeClose}${liHtml}${close}`
     }
   }
 
@@ -768,7 +784,16 @@ export class StreamingMarkdownRenderer {
       syncBlockPendingDom(completedEl, split, pendingInner, true)
       syncInlinePendingDom(pendingEl, '', false)
     } else {
-      clearBlockPendingDom(completedEl, ['continuation', 'paragraph-continuation', 'direct-blocks'])
+      // Include `list-items`: when a pending list tail becomes fully held on a
+      // later frame (`- ~~` → `- ~~[`, the tildes now held), the pending `<li>`
+      // (and its wrapper `<ul>`) from the prior frame must be swept, or it
+      // persists as stale content that diverges from a fresh render (#108).
+      clearBlockPendingDom(completedEl, [
+        'continuation',
+        'paragraph-continuation',
+        'list-items',
+        'direct-blocks',
+      ])
       syncInlinePendingDom(pendingEl, pendingInner, pendingVisible)
     }
   }

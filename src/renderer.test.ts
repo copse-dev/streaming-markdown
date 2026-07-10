@@ -147,11 +147,8 @@ describe('renderMarkdownUnsafe', () => {
     const html = renderMarkdownUnsafe(
       '[Experiment Framework v2](/docs/experiments/v2.md)\n\n[intro][ref]\n\n[ref]: /docs "guide"\n',
     )
-    assert.match(html, /href="\/docs\/experiments\/v2\.md"[^>]*data-workspace-link="true"/)
-    assert.match(
-      html,
-      /<a href="\/docs"[^>]*data-workspace-link="true"[^>]*title="guide"[^>]*>intro<\/a>/,
-    )
+    assert.match(html, /<a href="\/docs\/experiments\/v2\.md">Experiment Framework v2<\/a>/)
+    assert.match(html, /<a href="\/docs" title="guide">intro<\/a>/)
     assert.doesNotMatch(html, /\[ref\]:/)
   })
 
@@ -163,7 +160,7 @@ describe('renderMarkdownUnsafe', () => {
     )
     assert.match(
       html,
-      /<a href="https:\/\/github\.com\/org\/repo\/pull\/204" target="_blank" rel="noopener noreferrer" data-browser-link="true">PR #204<\/a>/,
+      /<a href="https:\/\/github\.com\/org\/repo\/pull\/204">PR #204<\/a>/,
     )
     assert.match(
       html,
@@ -191,7 +188,7 @@ describe('renderMarkdownUnsafe', () => {
     const html = renderMarkdownUnsafe('Open https://example.com/docs, not `https://example.com/raw`.')
     assert.match(
       html,
-      /<a href="https:\/\/example\.com\/docs" target="_blank" rel="noopener noreferrer" data-browser-link="true">https:\/\/example\.com\/docs<\/a>,/,
+      /<a href="https:\/\/example\.com\/docs">https:\/\/example\.com\/docs<\/a>,/,
     )
     assert.match(html, /<code>https:\/\/example\.com\/raw<\/code>/)
   })
@@ -648,6 +645,23 @@ describe('renderMarkdownUnsafe CommonMark structure fixes', () => {
   it('maps setext headings to h1/h2 like their ATX equivalents', () => {
     assert.match(renderMarkdownUnsafe('Title\n=====\n'), /<h1>Title<\/h1>/)
     assert.match(renderMarkdownUnsafe('Section\n---\n'), /<h2>Section<\/h2>/)
+  })
+
+  it('resolves a setext heading whose underline lacks a trailing newline (#105)', () => {
+    // The unterminated underline emits a `thematic_break:ambiguous` streaming
+    // compromise; at rest it must render as the heading, never `<p>` + `<hr>`.
+    assert.equal(renderMarkdownUnsafe('Heading\n======='), '<h1>Heading</h1>')
+    assert.equal(renderMarkdownUnsafe('a\n---'), '<h2>a</h2>')
+    // With or without the trailing newline yields the same heading.
+    assert.equal(renderMarkdownUnsafe('Heading\n=======\n'), '<h1>Heading</h1>')
+    assert.equal(renderMarkdownUnsafe('a\n---\n'), '<h2>a</h2>')
+  })
+
+  it('keeps a `=` underline from ever inventing a thematic break (#105)', () => {
+    assert.doesNotMatch(renderMarkdownUnsafe('Heading\n======='), /<hr>/)
+    // A genuine `***` / `---` thematic break at EOF still renders as `<hr>`.
+    assert.equal(renderMarkdownUnsafe('***'), '<hr>')
+    assert.equal(renderMarkdownUnsafe('a\n***'), '<p>a</p>\n<hr>')
   })
 
   it('treats an all-hash ATX title as a bare closing sequence', () => {

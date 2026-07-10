@@ -212,6 +212,18 @@ describe('renderStreamingMarkdown (holds unresolved bold)', () => {
     assert.doesNotMatch(html, /stream-pending[^>]*>-/)
   })
 
+  it('streams a pending top-level bullet as a sibling list after a trailing blockquote', () => {
+    // #109: the pending `- b` is a NEW top-level bullet, not a continuation of
+    // the list nested inside the trailing quote — it must land in a sibling
+    // <ul> after the </blockquote>, never spliced inside it.
+    const html = renderStreamingMarkdown('> - a\n\n- b')
+    assert.match(
+      html,
+      /<blockquote><ul><li>a<\/li><\/ul><\/blockquote><ul><li class="stream-pending stream-pending-list-item[^"]*">b<\/li><\/ul>$/,
+    )
+    assert.doesNotMatch(html, /<li>a<\/li><li class="stream-pending/)
+  })
+
   it('renders lazy list continuations inside the open item without a fake bullet', () => {
     const html = renderStreamingMarkdown('- parent\n    - child item')
     assert.match(

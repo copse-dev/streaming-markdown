@@ -69,6 +69,59 @@ describe('streaming markdown convergence (CommonMark baseline fuzz)', () => {
     }
   })
 
+  // #109: a pending top-level bullet after a trailing blockquote whose last
+  // block is itself a list must stream as a sibling list, matching both the DOM
+  // emitter and the fresh render — not be spliced inside the quote's list. The
+  // pending bullet renders as a committed-position block inside `stream-complete`
+  // for both emitters, so compare that subtree directly (the shared helper's
+  // `.stream-pending` lookup targets the trailing inline span, not this block).
+  it('streams a pending top-level bullet after a trailing blockquote as a sibling in both emitters', () => {
+    const midStream = '> - a\n\n- b'
+    const host = document.createElement('div')
+    new StreamingMarkdownRenderer(host).update(midStream)
+    const domComplete = host.querySelector('.stream-complete')?.innerHTML ?? ''
+    const stringMid = renderStreamingMarkdown(midStream)
+    assert.equal(stringMid, domComplete, 'string emitter matches DOM stream-complete mid-stream')
+    assert.match(stringMid, /<\/blockquote><ul><li[^>]*>b<\/li><\/ul>$/)
+    assert.doesNotMatch(stringMid, /<li>a<\/li><li[^>]*>b<\/li>/)
+  })
+
+  it('sweeps a stale pending <li> and its wrapper when a held frame empties the list tail (#108)', () => {
+    // Frame `- ~~a~~` renders a real pending list item (`<li><del>a</del></li>`);
+    // frame `- ~~a~~~~` drops the length-4 tilde run, leaving the opening `~~` an
+    // unmatched opener so the whole tail holds and `pendingInner` empties. The
+    // prior frame's pending <li> AND the <ul> created solely to host it must
+    // both be swept, converging to a fresh (empty) render — not `<ul></ul>`.
+    // (The earlier `- ~~` → `- ~~[` scenario was vacuous: the trailing-`~~` hold
+    // means `- ~~` never creates an <li>, so both assertions passed even with
+    // the sweep reverted.)
+    const host = document.createElement('div')
+    const renderer = new StreamingMarkdownRenderer(host)
+    renderer.update('- ~~a~~')
+    assert.equal(host.querySelectorAll('li').length, 1, 'frame 1 should render a pending <li>')
+    renderer.update('- ~~a~~~~')
+    assert.equal(host.querySelectorAll('li').length, 0, 'stale pending <li> persisted')
+    assert.equal(host.querySelectorAll('ul').length, 0, 'stranded empty <ul> wrapper persisted')
+    assert.equal(extractStreamingDisplay(host), streamingDisplayAfterUpdates('- ~~a~~~~', [9]))
+  })
+
+  it('never flashes a literal trailing ~~ that a later character retracts (#108)', () => {
+    // A trailing `~~` at end-of-input is held, so no frame shows literal `~~`.
+    for (const md of ['- ~~', 'a ~~', '- ~~[', 'a ~~b']) {
+      const dom = streamingDisplayAfterUpdates(md, [md.length])
+      assert.ok(!dom.includes('~~'), `DOM frame flashed literal ~~ for ${JSON.stringify(md)}`)
+      assert.ok(
+        !renderStreamingMarkdown(md).includes('~~'),
+        `string frame flashed literal ~~ for ${JSON.stringify(md)}`,
+      )
+    }
+  })
+
+  it('converges the held-list-tail history in the string emitter (#108)', () => {
+    assert.equal(renderStreamingMarkdown('- ~~[').includes('<li'), false)
+    assert.equal(renderStreamingMarkdown('- ~~['), streamingDisplayAfterUpdates('- ~~[', [5]))
+  })
+
   it('renderStreamingMarkdown matches the incremental renderer when fully committed', () => {
     for (const ex of baselineExamples) {
       const markdown = ex.markdown

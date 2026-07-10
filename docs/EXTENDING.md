@@ -382,7 +382,12 @@ and the JS entry needs no CSS; use either, both, or neither.
 
 A `LinkDecorator` returns the attribute string appended after `href` on every
 rendered `<a>` — the seam for host-specific routing (open-in-new-tab, in-app
-navigation, `rel` policy) without hard-coding it into the parser:
+navigation, `rel` policy) without hard-coding it into the parser.
+
+The built-in default is **neutral** (#112): rendered anchors carry only
+`href`/`title` and no `target`, `rel`, `class`, or `data-*` attributes, so the
+"just render this" path stays host-agnostic. Install your own decorator to add
+routing:
 
 ```ts
 import { setLinkDecorator } from '@copse/streaming-markdown'
@@ -390,6 +395,17 @@ import { setLinkDecorator } from '@copse/streaming-markdown'
 setLinkDecorator(({ href, isWorkspace, title }) =>
   isWorkspace ? ` data-nav="${href}"` : ` target="_blank" rel="noopener noreferrer"`,
 )
+```
+
+The Copse workspace/browser decorator ships behind a host-only subpath. Hosts that
+want the pre-0.10 in-app behaviour (`data-workspace-link` / `data-browser-link`,
+`target="_blank"`) restore it with a single call:
+
+```ts
+import { setLinkDecorator } from '@copse/streaming-markdown'
+import { appLinkDecorator } from '@copse/streaming-markdown/host/workspace'
+
+setLinkDecorator(appLinkDecorator)
 ```
 
 Attribute *names* a decorator emits must be in the escape and sink allowlists, or

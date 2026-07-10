@@ -8,8 +8,7 @@ import { renderMarkdownUnsafe } from './renderer.ts'
 // CommonMark flanking so a leaked flag can't bleed into other suites.
 afterEach(() => setCjkFriendly(false))
 
-const anchor = (href: string, label: string) =>
-  `<a href="${href}" target="_blank" rel="noopener noreferrer" data-browser-link="true">${label}</a>`
+const anchor = (href: string, label: string) => `<a href="${href}">${label}</a>`
 
 describe('isCjkPunctuation classifier', () => {
   it('matches full-width / ideographic punctuation', () => {

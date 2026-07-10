@@ -48,11 +48,14 @@ These are not the same kind of tool, so a flat "A vs B" is the wrong axis:
   from scratch each token; copse proves it holds without the reparse.
 - Two emitters (string HTML + incremental DOM) with a benchmark harness that
   catches super-linear regressions.
+- **Pluggable math with streaming holds (#70/#75/#78).** `$…$` / `$$…$$` /
+  `\(…\)` / `\[…\]` prose math and ```` ```math ```` fences are recognized and
+  KaTeX-rendered via an injectable renderer (`setMathRenderer`); KaTeX is never
+  bundled, and prose-math syntax is opt-in (it turns on when a renderer is
+  registered), so output stays byte-identical for hosts that never register one.
 
 **Where streamdown/remend is ahead**
 
-- **KaTeX / math** — copse has none; remend explicitly heals `$$…`. A real
-  feature gap (see the follow-up table below — documented as a known gap for now).
 - Shiki highlighting (finer-grained than highlight.js) and a polished
   Tailwind/shadcn drop-in *if you are already a React app*.
 - remend-the-primitive is smaller than copse-core (zero deps vs. `dompurify` +
@@ -65,11 +68,12 @@ The headline figures in the issue predate the current baseline. From
 `tests/fixtures/commonmark/conformance-baseline.json` (`summaryBySection`) at the
 time of writing:
 
-- **510 / 652** official spec examples pass at rest (~78%).
+- **583 / 652** official spec examples pass at rest (~89%) — this is
+  `passing.length` / `total` in the baseline JSON, not a figure typed here.
 - Two sections fail **by design** because the renderer escapes untrusted HTML
   rather than passing it through (sanitize-at-the-sink): **HTML blocks 2/44** and
   **Raw HTML 8/20**. Excluding those **64 HTML examples**, the in-scope ceiling is
-  **588 examples**, of which **510 pass (~87%)**.
+  **588 examples**, of which **573 pass (~97%)**.
 
 So the honest phrasing is "structural CommonMark minus raw-HTML passthrough, by
 security choice." Treat these figures as approximate and read `summaryBySection`
@@ -86,8 +90,7 @@ syntax" logic), and copse's hold-and-reveal approach to that step is
 architecturally stronger than remend's guess-and-append because it never commits a
 wrong intermediate.
 
-Honest caveats: copse costs a hand-rolled tokenizer to maintain, and it lacks math
-today.
+Honest caveat: copse costs a hand-rolled tokenizer to maintain.
 
 ## Conformity policy: adopt inputs, not assertions
 
@@ -131,8 +134,11 @@ This is implemented in [`src/remend-corpus.test.ts`](../../src/remend-corpus.tes
   (sanitize-at-the-sink). This is why HTML blocks (2/44) and Raw HTML (8/20) cap
   out; a benign attribute-less inline allowlist (`b i u s del ins sub sup kbd mark
   br`) is the only passthrough. See ARCHITECTURE "Raw-HTML policy".
-- **No math today.** `$$…$$` / KaTeX is unsupported and is a documented known gap,
-  not a regression.
+- **Math is supported, renderer-injected (#70/#75/#78).** `$…$` / `$$…$$` /
+  `\(…\)` / `\[…\]` prose math and ```` ```math ```` fences are recognized and
+  KaTeX-rendered through `setMathRenderer`; KaTeX is never bundled and prose-math
+  syntax is opt-in (on once a renderer is registered), so output is byte-identical
+  for hosts that never register one. See ARCHITECTURE "Pluggable math renderer".
 
 ## Follow-up checklist (gap discovery from the remend corpus)
 
@@ -143,7 +149,7 @@ here as a deliberate known gap.
 | Item | Status |
 | --- | --- |
 | Port the remend streaming input corpus into a convergence/no-flash test (inputs only, copse invariants as assertions). | **Done** — `src/remend-corpus.test.ts` asserts invariants (a) no marker flash, (b) committed == static, (c) prefix convergence. |
-| KaTeX / `$$…$$` math — decide known-gap vs. implement. | **Known gap** — documented above; not implemented in this PR. |
+| KaTeX / `$$…$$` math — decide known-gap vs. implement. | **Shipped** (#70/#75/#78) — prose math (`$…$`/`$$…$$`/`\(…\)`/`\[…\]`) and ```` ```math ```` fences, KaTeX-rendered via injectable `setMathRenderer`; opt-in prose syntax keeps output byte-identical when unregistered. |
 | Single tilde (`20~25`) stays literal while streaming. | **Covered** — no `<del>`/`<s>` in any frame; a half-open trailing `~` is held, the full input reveals `~` literally. |
 | Comparison operators (`20 < 30`) — no spurious tag/entity mid-stream. | **Covered** — `<` stays escaped; no `a`/`em`/`strong`/`del` element in any frame. |
 | Images — forming `![alt](partial` / `[alt](partial` reveal gracefully. | **Covered** — no `<img>`/`<a>`, no partial `src`/destination in any frame; label revealed. |
