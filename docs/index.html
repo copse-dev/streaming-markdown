@@ -31,9 +31,16 @@
   }
   </script>
   <!-- KaTeX ships its rendered math as a span/MathML tree that needs its
-       stylesheet + fonts to lay out. Loaded eagerly (small, cached) so hydrated
-       equations are styled the instant the backend flips them to --rendered. -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+       stylesheet + fonts to lay out. Loaded ASYNCHRONOUSLY via the media=print →
+       onload swap: a render-blocking third-party stylesheet in <head> gates
+       execution of the demo's module <script> at the end of <body>, so on a cold
+       mobile connection a slow/stalled jsdelivr request left the streaming demos
+       blank until a (now-cached) reload ran the script instantly. Math hydration
+       is lazy anyway (KaTeX isn't fetched until an equation renders), so this CSS
+       is never on the critical path — it flips to `all` the moment it arrives. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+        media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"></noscript>
   <style>
     :root {
       --bg: #0d1117;
@@ -320,6 +327,10 @@
       gap: 0.5rem;
       margin-bottom: 1.25rem;
       align-items: center;
+      /* Wrap on narrow screens — without this the button + highlighter toggle +
+         Fast checkbox + fidelity badge overflow the viewport and the whole page
+         scrolls sideways on mobile. */
+      flex-wrap: wrap;
     }
 
     .btn-primary {
