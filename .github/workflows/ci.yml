@@ -35,12 +35,20 @@ jobs:
            github.event.pull_request.head.repo.full_name != github.repository)
           && 'ubuntu-latest'
           || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
+    # Exercise both the declared engines floor (Node 20) and the primary
+    # dev/publish version (Node 22). `engines.node` is `>=20`, so a Node-20
+    # break (a syntax/API that only lands in 21+) must redden CI here rather
+    # than reach a consumer on the floor.
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - run: npm ci
@@ -66,7 +74,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-report
+          name: coverage-report-node${{ matrix.node }}
           path: coverage/lcov-report
           if-no-files-found: ignore
 
@@ -79,6 +87,102 @@ jobs:
       # python3 (preinstalled on the runner; also present in the ci-runners image).
       - name: Normalizer parity
         run: npm run check:normalizer-parity
+
+  # Trusted Types e2e (#113). Runs the shipped bundle in a real, headless
+  # Chromium under an ENFORCED `require-trusted-types-for 'script'` CSP —
+  # something jsdom cannot simulate — so the "sanitize at the sink /
+  # Trusted-Types-safe" headline claim has a gate. `tests/trusted-types.e2e.test.ts`
+  # SKIPS (never fails) when no Chromium is found, so we install the
+  # playwright-core-matched browser here to guarantee the five assertions
+  # actually execute; a red assertion then fails the job.
+  e2e:
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name != github.repository)
+          && 'ubuntu-latest'
+          || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Install the Chromium build that matches the locked playwright-core.
+      # Idempotent and cached; on the self-hosted image (browser preinstalled)
+      # this is a fast no-op. `findChromium()` then resolves it via
+      # playwright-core's registry.
+      - name: Install Chromium (playwright-core)
+        run: npx --no-install playwright-core install chromium
+
+      - name: Trusted Types e2e (headless Chromium)
+        run: npm run test:e2e
+
+  # Streaming performance guard (#113). The coverage job's absolute throughput
+  # floors self-skip under c8 instrumentation, so streaming perf had no CI
+  # guard. This runs the bench at full speed on its fixed fixture set; the
+  # script carries a RELATIVE regression guard (mean DOM-path growth per input
+  # doubling must stay < 3× — an O(n²) committed-re-render regression pushes it
+  # back toward 4× and throws, failing the job). The full table is also
+  # published as an artifact so the numbers are visible per run.
+  bench:
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name != github.repository)
+          && 'ubuntu-latest'
+          || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Bench (fixed fixtures, relative-regression guard)
+        run: npm run bench | tee bench-output.txt
+
+      - name: Upload bench output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-output
+          path: bench-output.txt
+          if-no-files-found: ignore
+
+  # Bundle-size gate (#113). The core value prop is a small main entry
+  # (~28–30 KB gzipped+minified) with the heavy backends behind lazy subpaths.
+  # `scripts/check-bundle-size.mts` bundles the main entry and each key subpath
+  # from dist/ as a consumer would (peers external) and fails if any gzipped
+  # size exceeds the committed budget in scripts/bundle-size-budget.json — so a
+  # dependency leaking back into the core bundle reddens the PR. Budgets are
+  # bumped deliberately with `npm run size:update`.
+  size:
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name != github.repository)
+          && 'ubuntu-latest'
+          || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Bundle-size gate
+        run: npm run size
 
   # Canary: typecheck + build against the next TypeScript major (7.x, the
   # Go-native compiler) before the `typescript` devDependency crosses the

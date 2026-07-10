@@ -23,10 +23,27 @@ Measured with esbuild (`--bundle --minify --format=esm`) on `dist/`:
 | Bundle                                    | Size    | Contains highlight.js? |
 | ----------------------------------------- | ------- | ---------------------- |
 | Main entry (`index.js`), before           | ~164 KB | yes (unconditionally)  |
-| Main entry (`index.js`), after            | ~92 KB  | **no**                 |
+| Main entry (`index.js`), after            | ~88 KB  | **no**                 |
 | `highlighters/highlightjs` chunk (lazy)   | ~71 KB  | yes (fetched on demand) |
 
 So ~71 KB — the grammars — now loads only when a host asks for highlighting.
+
+### The tracked number: a CI bundle-size gate (#113)
+
+The figures above are minified-only, whole-payload sizes. The number a consumer
+actually pays over the wire is **gzipped**, and — because the peer dependencies
+(dompurify, highlight.js, katex, mermaid, shiki, entities) are the host's to
+bundle — it excludes them. Measured that way (`--bundle --minify --format=esm
+--platform=browser`, peers external, gzipped), the **main entry is ~29.7 KB
+gzipped**, and the emoji data subpath is the next largest at ~16.2 KB.
+
+This is no longer a hand-run figure. `scripts/check-bundle-size.mts`
+(`npm run size`) measures the main entry and every key subpath against the
+committed budgets in `scripts/bundle-size-budget.json`, and the CI `size` job
+fails the build if any entry exceeds its budget. So a static import that dragged
+a grammar payload — or the emoji table — back into the core bundle would redden
+the PR instead of silently shipping. When an increase is intentional, bump the
+budget deliberately with `npm run size:update` and commit the JSON.
 
 ## The shape: a pluggable backend, mirroring the sanitizer split
 
