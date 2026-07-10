@@ -55,11 +55,15 @@ describe('bare-URL autolink — GFM balanced-paren trailing trim (#107)', () => 
     )
   })
 
-  it('retains a trailing underscore (valid URL character)', () => {
-    const url = 'https://example.com/foo_bar_'
+  it('trims a trailing underscore as GFM path punctuation (#115 unified trim)', () => {
+    // The unified trimAutolinkTail (#115) follows the GFM autolink spec, which
+    // lists `_` among the trailing punctuation stripped from an extended
+    // autolink (as cmark-gfm / GitHub do). This supersedes the earlier
+    // bare-URL-only rule that kept a trailing `_`.
+    const linked = 'https://example.com/foo_bar'
     assert.equal(
-      renderMarkdownUnsafe(`${url}`),
-      `<p>${anchor(url, url)}</p>`,
+      renderMarkdownUnsafe('https://example.com/foo_bar_'),
+      `<p>${anchor(linked, linked)}_</p>`,
     )
   })
 
