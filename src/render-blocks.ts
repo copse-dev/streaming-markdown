@@ -30,7 +30,7 @@ import { fenceCodeClass, highlightFenceCode } from './highlight.ts'
 import { dedentBlock, isIndentedHtmlBlock } from './indented-html.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 import { mathBlockHtml, parseMathBlockSlice } from './math-block.ts'
-import { renderProseBlock } from './render-prose-inline.ts'
+import { renderProseBlock, stripHtmlComments } from './render-prose-inline.ts'
 
 export interface RenderBlocksOptions {
   linkRefs?: LinkReferenceMap
@@ -106,6 +106,15 @@ function taskCheckboxHtml(checked: boolean): string {
 interface RenderedListItem {
   html: string
   task: TaskListMarker | null
+  /**
+   * The item's content was non-empty but consisted only of HTML comments, so it
+   * rendered to nothing. Emitting an `<li></li>` here would show a stray blank
+   * bullet (e.g. a `- <!-- placeholder -->` line left in a PR template), so the
+   * item is dropped — matching how {@link renderParagraph} suppresses a
+   * comment-only paragraph. A genuinely-empty CommonMark bullet (`-` with no
+   * content) is *not* suppressed.
+   */
+  suppressed: boolean
 }
 
 /** Item content with the marker/indent columns removed (lazy lines merged). */
@@ -151,7 +160,7 @@ function renderListItemContent(
   linkRefs: LinkReferenceMap,
 ): RenderedListItem {
   let inner = dedentListItemContent(slice)
-  if (inner.trim() === '') return { html: '', task: null }
+  if (inner.trim() === '') return { html: '', task: null, suppressed: false }
   // A checkbox marker only counts on the item's first content line; strip it
   // before recursive tokenization so the box never lands inside prose.
   const task = parseTaskListMarker(inner)
@@ -162,11 +171,15 @@ function renderListItemContent(
     linkRefs,
     tightParagraphs: !listLoose,
   })
-  return { html, task }
+  // A non-task item whose only content was HTML comments renders to nothing;
+  // drop it rather than emit a blank bullet. A task item keeps its checkbox.
+  const suppressed = html === '' && task === null && stripHtmlComments(inner).trim() === ''
+  return { html, task, suppressed }
 }
 
 /** Wrap rendered item content in an `<li>`, prepending a checkbox for task items. */
 function renderListItem(item: RenderedListItem): string {
+  if (item.suppressed) return ''
   if (item.task) {
     const box = taskCheckboxHtml(item.task.checked)
     const gap = item.html === '' ? '' : ' '

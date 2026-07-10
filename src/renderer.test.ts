@@ -751,6 +751,46 @@ describe('renderMarkdownUnsafe list-item block content (#595)', () => {
   })
 })
 
+describe('renderMarkdownUnsafe comment-only list items', () => {
+  // PR templates often seed a section with a placeholder list item that is
+  // nothing but an HTML comment, e.g. `- <!-- describe your testing -->`.
+  // Comments are stripped from prose, so such an item rendered to a stray blank
+  // bullet (`<li></li>`); it is now dropped, the way a comment-only paragraph is.
+  it('drops a list item whose only content is an HTML comment', () => {
+    const html = renderMarkdownUnsafe(
+      '## Testing Steps\n\n- <!-- Describe how to verify this change, or write N/A -->\n\n## Checklist',
+    )
+    assert.doesNotMatch(html, /<li><\/li>/)
+    assert.doesNotMatch(html, /Describe how to verify/)
+    assert.match(html, /<h2>Testing Steps<\/h2>/)
+    assert.match(html, /<h2>Checklist<\/h2>/)
+  })
+
+  it('keeps sibling items when one item is comment-only', () => {
+    assert.equal(
+      renderMarkdownUnsafe('- alpha\n- <!-- placeholder -->\n- gamma'),
+      '<ul><li>alpha</li><li>gamma</li></ul>',
+    )
+  })
+
+  it('still renders a genuinely empty CommonMark bullet', () => {
+    assert.equal(renderMarkdownUnsafe('- \n- item'), '<ul><li></li><li>item</li></ul>')
+  })
+
+  it('keeps a task-list checkbox even when its label is only a comment', () => {
+    assert.equal(
+      renderMarkdownUnsafe('- [ ] <!-- filled in later -->\n- [x] done'),
+      '<ul class="contains-task-list">' +
+        '<li class="task-list-item"><input type="checkbox" disabled></li>' +
+        '<li class="task-list-item"><input type="checkbox" disabled checked> done</li></ul>',
+    )
+  })
+
+  it('keeps an item that mixes a comment with visible text', () => {
+    assert.equal(renderMarkdownUnsafe('- <!-- note --> real text'), '<ul><li> real text</li></ul>')
+  })
+})
+
 describe('renderMarkdownUnsafe tab handling', () => {
   it('treats a leading tab as four columns of code indent, preserving interior tabs (spec 1/2)', () => {
     assert.equal(renderMarkdownUnsafe('\tfoo\tbaz\t\tbim\n'), '<pre><code>foo\tbaz\t\tbim\n</code></pre>')

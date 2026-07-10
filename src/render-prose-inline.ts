@@ -5,7 +5,7 @@ import { scanCodeSpans } from './inline-code-spans.ts'
 import { renderInlineSpans } from './inline-spans.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 
-function stripHtmlComments(text: string): string {
+export function stripHtmlComments(text: string): string {
   return text.replace(/<!--[\s\S]*?-->/g, '')
 }
 
