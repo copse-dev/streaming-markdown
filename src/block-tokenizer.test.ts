@@ -5,6 +5,7 @@ import {
   getIncompleteFenceSource,
   isAmbiguousBlockLine,
   isEmptyListItemLine,
+  isGfmTableRowLine,
   isListItemLine,
   listItemContentColumn,
   pendingLineBelongsInTable,
@@ -200,6 +201,35 @@ describe('isAmbiguousBlockLine', () => {
     ].join('\n')
     const kinds = tokenizeBlocks(md).map((b) => b.kind)
     assert.ok(!kinds.includes('table'))
+  })
+})
+
+describe('prose-metadata header with a matching delimiter row (#106)', () => {
+  it('treats a `**Label:**` header as a table row when a matching delimiter follows', () => {
+    const header = '| **Name:** Widget | Qty |'
+    // Without a following delimiter row the prose-metadata heuristic still wins.
+    assert.equal(isGfmTableRowLine(header), false)
+    // A matching delimiter row is unambiguous table syntax and overrides it.
+    assert.equal(isGfmTableRowLine(header, '| --- | --- |'), true)
+    // A delimiter row with a different column count does not (spec 203).
+    assert.equal(isGfmTableRowLine(header, '| --- |'), false)
+  })
+
+  it('treats an inline-image header as a table row when a matching delimiter follows', () => {
+    const header = '| ![logo](x.png) Name | Qty |'
+    assert.equal(isGfmTableRowLine(header, '| --- | --- |'), true)
+  })
+
+  it('tokenizes a bold-label header + delimiter as a single table block', () => {
+    const md = '| **Name:** Widget | Qty |\n| --- | --- |\n| a | 1 |\n'
+    const kinds = tokenizeBlocks(md).map((b) => b.kind)
+    assert.deepEqual(kinds, ['table'])
+  })
+
+  it('still keeps a bold-label pipe line as prose with no delimiter row', () => {
+    const md = '| **Name:** Widget | Qty |\nplain follow-up line\n'
+    const kinds = tokenizeBlocks(md).map((b) => b.kind)
+    assert.ok(!kinds.includes('table'), `expected no table block, got ${kinds.join(', ')}`)
   })
 })
 

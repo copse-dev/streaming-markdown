@@ -46,4 +46,18 @@ describe('job description metadata pipes', () => {
     assert.match(html, /<th>Category<\/th>/)
     assert.match(html, /<td><strong>Health<\/strong><\/td>/)
   })
+
+  it('renders a table when a `**Label:**` header row is followed by a delimiter (#106)', () => {
+    const html = renderMarkdownUnsafe('| **Name:** Widget | Qty |\n| --- | --- |\n| a | 1 |\n')
+    assert.match(html, /<table>/)
+    assert.match(html, /<th><strong>Name:<\/strong> Widget<\/th>/)
+    assert.match(html, /<th>Qty<\/th>/)
+    assert.match(html, /<td>a<\/td>/)
+  })
+
+  it('renders a table when an inline-image header row is followed by a delimiter (#106)', () => {
+    const html = renderMarkdownUnsafe('| ![logo](x.png) Name | Qty |\n| --- | --- |\n| a | 1 |\n')
+    assert.match(html, /<table>/)
+    assert.match(html, /<th><img[^>]*alt="logo"[^>]*> Name<\/th>/)
+  })
 })
