@@ -133,7 +133,40 @@ function renderedBareLink(label: string, href: string): string {
 }
 
 const BARE_HTTP_URL_RE = /(^|[\s(])((?:https?:\/\/)[^\s<]+)/gi
-const TRAILING_URL_PUNCTUATION_RE = /[),.;:!?_]+$/
+// Trailing punctuation stripped from a bare URL, matching GFM's autolink
+// extension. `_` is intentionally excluded — underscores are valid URL
+// characters (e.g. `foo_bar_`) — and `)` is handled by trimBareUrlTrailing so a
+// paren that balances an earlier `(` stays inside the link (#107).
+const TRAILING_URL_PUNCTUATION_RE = /[.,;:!?]/
+
+/**
+ * Split a bare URL into its linked portion and any trailing prose punctuation,
+ * following GFM's balanced-paren rule: a trailing `)` is only trimmed when the
+ * URL holds more `)` than `(`, so Wikipedia-style links like
+ * `.../Markdown_(disambiguation)` keep their closing paren while a URL wrapped
+ * in a parenthetical `(see https://example.com)` still sheds it.
+ */
+function trimBareUrlTrailing(rawUrl: string): { url: string; trailing: string } {
+  let end = rawUrl.length
+  while (end > 0) {
+    const ch = rawUrl[end - 1] ?? ''
+    if (ch === ')') {
+      let opening = 0
+      let closing = 0
+      for (let i = 0; i < end; i++) {
+        if (rawUrl[i] === '(') opening++
+        else if (rawUrl[i] === ')') closing++
+      }
+      if (closing <= opening) break
+      end--
+    } else if (TRAILING_URL_PUNCTUATION_RE.test(ch)) {
+      end--
+    } else {
+      break
+    }
+  }
+  return { url: rawUrl.slice(0, end), trailing: rawUrl.slice(end) }
+}
 
 /**
  * Opt-in override (default `null`) that flags CJK / full-width punctuation as a
@@ -170,8 +203,7 @@ function renderBareHttpLinks(text: string): string {
         // A CJK full-width punctuation mark ends the URL and stays as prose.
         const { url: beforeCjk, tail: cjkTail } = splitBareUrlAtCjkBoundary(rawUrl)
         if (beforeCjk === '') return `${prefix}${rawUrl}`
-        const asciiTrailing = beforeCjk.match(TRAILING_URL_PUNCTUATION_RE)?.[0] ?? ''
-        const url = asciiTrailing ? beforeCjk.slice(0, -asciiTrailing.length) : beforeCjk
+        const { url, trailing: asciiTrailing } = trimBareUrlTrailing(beforeCjk)
         const href = safeLinkHref(url)
         if (!href) return `${prefix}${rawUrl}`
         return `${prefix}${renderedBareLink(url, href)}${asciiTrailing}${cjkTail}`
