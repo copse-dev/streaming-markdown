@@ -75,6 +75,23 @@ describe('strikethrough streaming hold', () => {
     assert.equal(holdStart('text ~'), 'text '.length)
   })
 
+  it('holds a trailing ~~ run so it never flashes before growing into an opener (#108)', () => {
+    // `a ~~` is inert now, but the next non-space turns the run into an opener;
+    // rendering the literal `~~` here would flash a marker that then retracts.
+    assert.equal(holdStart('a ~~'), 'a '.length)
+    assert.equal(pendingHoldIndex('a ~~'), 'a '.length)
+    assert.equal(pendingHoldIndex('a ~~b'), 'a '.length)
+  })
+
+  it('mirrors the trailing ** hold for trailing ~~ (#108)', () => {
+    assert.equal(pendingHoldIndex('a **'), pendingHoldIndex('a ~~'))
+  })
+
+  it('does not hold a trailing ~~ that closes a completed span', () => {
+    assert.equal(holdStart('~~done~~'), '~~done~~'.length)
+    assert.equal(pendingHoldIndex('all ~~done~~'), 'all ~~done~~'.length)
+  })
+
   it('does not hold a lone tilde in the middle of settled text', () => {
     assert.equal(pendingHoldIndex('range 20~25 ok'), 'range 20~25 ok'.length)
   })

@@ -770,7 +770,16 @@ export class StreamingMarkdownRenderer {
       syncBlockPendingDom(completedEl, split, pendingInner, true)
       syncInlinePendingDom(pendingEl, '', false)
     } else {
-      clearBlockPendingDom(completedEl, ['continuation', 'paragraph-continuation', 'direct-blocks'])
+      // Include `list-items`: when a pending list tail becomes fully held on a
+      // later frame (`- ~~` → `- ~~[`, the tildes now held), the pending `<li>`
+      // (and its wrapper `<ul>`) from the prior frame must be swept, or it
+      // persists as stale content that diverges from a fresh render (#108).
+      clearBlockPendingDom(completedEl, [
+        'continuation',
+        'paragraph-continuation',
+        'list-items',
+        'direct-blocks',
+      ])
       syncInlinePendingDom(pendingEl, pendingInner, pendingVisible)
     }
   }

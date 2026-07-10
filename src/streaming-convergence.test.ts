@@ -86,6 +86,35 @@ describe('streaming markdown convergence (CommonMark baseline fuzz)', () => {
     assert.doesNotMatch(stringMid, /<li>a<\/li><li[^>]*>b<\/li>/)
   })
 
+  it('sweeps a stale pending <li> when a later held frame empties the list tail (#108)', () => {
+    // Frame `- ~~` renders a pending list item; frame `- ~~[` makes the `~~` an
+    // unmatched opener, so the whole tail holds. The pending <li>/<ul> from the
+    // prior frame must be swept, matching a fresh (empty) render.
+    const host = document.createElement('div')
+    const renderer = new StreamingMarkdownRenderer(host)
+    renderer.update('- ~~')
+    renderer.update('- ~~[')
+    assert.equal(host.querySelectorAll('li').length, 0, 'stale pending <li> persisted')
+    assert.equal(extractStreamingDisplay(host), streamingDisplayAfterUpdates('- ~~[', [5]))
+  })
+
+  it('never flashes a literal trailing ~~ that a later character retracts (#108)', () => {
+    // A trailing `~~` at end-of-input is held, so no frame shows literal `~~`.
+    for (const md of ['- ~~', 'a ~~', '- ~~[', 'a ~~b']) {
+      const dom = streamingDisplayAfterUpdates(md, [md.length])
+      assert.ok(!dom.includes('~~'), `DOM frame flashed literal ~~ for ${JSON.stringify(md)}`)
+      assert.ok(
+        !renderStreamingMarkdown(md).includes('~~'),
+        `string frame flashed literal ~~ for ${JSON.stringify(md)}`,
+      )
+    }
+  })
+
+  it('converges the held-list-tail history in the string emitter (#108)', () => {
+    assert.equal(renderStreamingMarkdown('- ~~[').includes('<li'), false)
+    assert.equal(renderStreamingMarkdown('- ~~['), streamingDisplayAfterUpdates('- ~~[', [5]))
+  })
+
   it('renderStreamingMarkdown matches the incremental renderer when fully committed', () => {
     for (const ex of baselineExamples) {
       const markdown = ex.markdown
