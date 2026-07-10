@@ -211,6 +211,12 @@ jobs:
         # default Linux shell (`bash -e`, no pipefail) would take `tee`'s exit
         # code (0) and stay green, defeating the guard.
         shell: bash
+        # The bench streams several large fixtures through jsdom back to back
+        # (footnote #110, incremental-scan #111, lazy-quote sections); the peak
+        # heap exceeds Node's default cap on the runner and aborts with an OOM
+        # (exit 134). Raise the old-space limit so the full run completes.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm run bench | tee bench-output.txt
 
       - name: Upload bench output
