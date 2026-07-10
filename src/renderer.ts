@@ -5,7 +5,7 @@ import {
   type BlockToken,
 } from './block-tokenizer.ts'
 import { createFootnoteContext, setActiveFootnoteContext } from './footnotes.ts'
-import { type HtmlPolicy, setHtmlPolicy } from './html-policy.ts'
+import { type RenderPolicyOptions, withRenderPolicies } from './render-policies.ts'
 import { renderBlocks, renderFootnoteSection } from './render-blocks.ts'
 import { sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 
@@ -21,7 +21,7 @@ export { escapeHtml } from './escape.ts'
  */
 export const TOP_LEVEL_RENDER_OPTS = { htmlFromIndent: true, indentedCode: true } as const
 
-export interface RenderMarkdownOptions {
+export interface RenderMarkdownOptions extends RenderPolicyOptions {
   /**
    * Recognize 4-column (space or tab) indented lines as CommonMark indented code
    * blocks. Defaults to `true` — indented code is supported and conforms (#9).
@@ -35,15 +35,6 @@ export interface RenderMarkdownOptions {
    * Must correspond exactly to `raw`; ignored (re-tokenized) if omitted.
    */
   tokens?: BlockToken[]
-  /**
-   * Raw-HTML handling (#600). `'passthrough'` (the default) emits well-formed
-   * raw HTML tags verbatim and defers to the sink sanitizer as the sole arbiter
-   * (allowlisted tags render as elements; everything else is stripped/
-   * unwrapped). `'escape'` opts back into literalizing every tag outside the
-   * benign inline allowlist — today's behavior, reproduced byte-for-byte, for a
-   * consumer that cannot add a sink. Omit to inherit the process-wide default.
-   */
-  htmlPolicy?: HtmlPolicy
 }
 
 /**
@@ -63,7 +54,11 @@ export interface RenderMarkdownOptions {
  * pipelines), use {@link renderMarkdownUnsafe} and sanitize at your own sink.
  */
 export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {}): SanitizedHtml {
-  return sanitizeRenderedMarkdown(renderMarkdownUnsafe(raw, options))
+  // The scope covers the sink too (sanitizeExtension / linkImagePolicy /
+  // trustedTypesPolicy are read during sanitize), so wrap the whole thing.
+  return withRenderPolicies(options, () =>
+    sanitizeRenderedMarkdown(renderMarkdownCore(raw, options)),
+  )
 }
 
 /**
@@ -80,13 +75,7 @@ export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {})
  * their sinks) and by hosts that own their own sanitization boundary.
  */
 export function renderMarkdownUnsafe(raw: string, options: RenderMarkdownOptions = {}): string {
-  if (options.htmlPolicy === undefined) return renderMarkdownCore(raw, options)
-  const previous = setHtmlPolicy(options.htmlPolicy)
-  try {
-    return renderMarkdownCore(raw, options)
-  } finally {
-    setHtmlPolicy(previous)
-  }
+  return withRenderPolicies(options, () => renderMarkdownCore(raw, options))
 }
 
 function renderMarkdownCore(raw: string, options: RenderMarkdownOptions): string {

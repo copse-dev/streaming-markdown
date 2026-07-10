@@ -8,6 +8,12 @@
  * See README.md for the design invariants and the streaming architecture.
  */
 export { renderMarkdown, renderMarkdownUnsafe, type RenderMarkdownOptions } from './renderer.ts'
+// Per-render policy overrides (#137, ADR 0003): pass any of `htmlPolicy`,
+// `safeHrefSchemes`, `sanitizeExtension`, `linkImagePolicy`, `trustedTypesPolicy`
+// to `renderMarkdown` / the streaming entry points to scope that policy to one
+// render (or one `StreamingMarkdownRenderer` instance) instead of the process
+// default. The `set*` functions still move the global default.
+export { type RenderPolicyOptions } from './render-policies.ts'
 // Raw-HTML policy (#600). `'passthrough'` (default) emits well-formed raw HTML
 // for the sink sanitizer to arbitrate; `'escape'` literalizes it. Per-render
 // via `renderMarkdown`/streaming `htmlPolicy`, or process-wide via

@@ -89,6 +89,19 @@ export function setTrustedTypesPolicy(policy: TrustedTypesPolicy | null): void {
   if (defaultPolicy === null) defaultPolicy = undefined
 }
 
+/**
+ * @internal Snapshot the host Trusted Types policy slot for a scoped per-render
+ * override (see `withRenderPolicies`). Restore with {@link restoreTrustedTypesPolicy}.
+ */
+export function snapshotTrustedTypesPolicy(): TrustedTypesPolicy | null {
+  return hostPolicy
+}
+
+/** @internal Restore a snapshot from {@link snapshotTrustedTypesPolicy}. */
+export function restoreTrustedTypesPolicy(snapshot: TrustedTypesPolicy | null): void {
+  hostPolicy = snapshot
+}
+
 function resolvePolicy(): TrustedTypesPolicy | null {
   if (hostPolicy) return hostPolicy
   const trustedTypes = (globalThis as { trustedTypes?: TrustedTypesFactory }).trustedTypes

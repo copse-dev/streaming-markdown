@@ -1,6 +1,12 @@
 # 0003 — Configuration scope: global backends, per-render policies
 
-Status: proposed · Relates to [#137](https://github.com/copse-dev/streaming-markdown/issues/137)
+Status: accepted · Relates to [#137](https://github.com/copse-dev/streaming-markdown/issues/137)
+
+> **Update.** Option C is adopted, and **phase 1 (the security tier) is
+> implemented**: `sanitizeExtension`, `linkImagePolicy`, `safeHrefSchemes`, and
+> `trustedTypesPolicy` are now per-render options on `renderMarkdown` and the
+> streaming entry points, applied via `withRenderPolicies` (`render-policies.ts`).
+> The behavioral tier and the `reset*` ergonomics remain as additive follow-ups.
 
 Design note for the v1 configuration model. The renderer today exposes ~22
 process-wide `set*` singletons. Two consumers in one process (two chat panes
@@ -116,11 +122,15 @@ pipeline-wide rewrite. B's only extra guarantee — safety under a render that
 `await`s mid-pass — is not a property the renderer has or needs.
 
 **The invariant this rests on** (state it, test it): the string-render + sink
-pass must stay **synchronous and non-reentrant**. It is today. Async hydration
-(`hydratePendingMath`, `hydratePendingDiagrams`) runs *after* the scoped block and
-reads only the global *backend* tier, so it is unaffected. A future async inline
-pass would break the guarantee — so the scoped wrapper should assert depth-1
-non-reentrancy in dev.
+pass must stay **synchronous** — no `await` between setting an override and
+restoring it. It is today. *Nested* synchronous renders are fine and expected (a
+fence handler or inline pass recursively calling `renderMarkdown`): each level
+saves and restores its own previous value, so the stack composes — a nested scope
+restores to the enclosing scope's value, not the global default (covered by
+`render-policies.test.ts`). What would break the guarantee is an async render that
+suspends mid-pass; async hydration (`hydratePendingMath`,
+`hydratePendingDiagrams`) is safe because it runs *after* the scoped block and
+reads only the global *backend* tier.
 
 This also resolves the mid-stream config-flip hazard (#145): an instance that
 pins its policies is immune to a global `set*` flipped after construction; an
@@ -173,11 +183,14 @@ Suggested phasing:
 backend tier (global) for v1; promote to per-render only if a concrete
 multi-tenant need appears, since that stays additive.
 
-## Open question for the decision
+## Decision
 
-C is the recommendation. The decision to confirm is whether v1 ships **phase 1
-(the security tier) at minimum** — the position of this note — versus deferring
-all of it as a documented post-1.0 additive follow-up (acceptable only because C
-is non-breaking), versus committing to the fuller instance/context model of
-option B despite its cost. Everything downstream (which options to add, the
-`withRenderPolicies` helper, the reset surface) follows from that call.
+C is adopted, shipping **phase 1 (the security tier) for v1** —
+`sanitizeExtension`, `linkImagePolicy`, `safeHrefSchemes`, and
+`trustedTypesPolicy` as per-render options, closing the multi-tenant security
+footgun before hosts build on the global-only model. The behavioral tier
+(`mathSyntax`, `linkDecorator`, `rawImageRenderer`, `emailAutolinks`, CJK) and the
+`reset*` ergonomics stay as additive follow-ups, safe to land any time because C
+is non-breaking. Option B (the fuller instance/context model) is not pursued: its
+pipeline-wide threading of the hot inline paths is disproportionate to the
+reentrancy guarantee a synchronous renderer needs.
