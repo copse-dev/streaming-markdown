@@ -23,10 +23,35 @@ Measured with esbuild (`--bundle --minify --format=esm`) on `dist/`:
 | Bundle                                    | Size    | Contains highlight.js? |
 | ----------------------------------------- | ------- | ---------------------- |
 | Main entry (`index.js`), before           | ~164 KB | yes (unconditionally)  |
-| Main entry (`index.js`), after            | ~92 KB  | **no**                 |
+| Main entry (`index.js`), after            | ~88 KB  | **no**                 |
 | `highlighters/highlightjs` chunk (lazy)   | ~71 KB  | yes (fetched on demand) |
 
 So ~71 KB — the grammars — now loads only when a host asks for highlighting.
+
+### The tracked number: a CI bundle-size gate (#113)
+
+The figures above are minified-only, whole-payload sizes. The number a consumer
+actually pays over the wire is **gzipped**, and — because the peer dependencies
+(dompurify, highlight.js, katex, mermaid, shiki, entities) are the host's to
+bundle — it excludes them. Measured that way (`--bundle --minify --format=esm
+--platform=browser`, peers external, gzipped), the **main entry is ~31.5 KB
+gzipped**, and the emoji data subpath is the next largest at ~16.2 KB.
+
+This is no longer a hand-run figure. `scripts/check-bundle-size.mts`
+(`npm run size`) measures the main entry and every key subpath against the
+committed budgets in `scripts/bundle-size-budget.json`, and the CI `size` job
+fails the build if any entry exceeds its budget. The emoji table — bundled, not
+external — is caught by that byte budget: dragging it into the core entry blows
+the `.` budget outright.
+
+A peer dependency is trickier: because the host bundles it, esbuild keeps a
+leaked `import 'shiki'` as an ~30-byte external statement, well inside the ~5%
+headroom, while the consumer's real chunk silently grows ~70 KB. So the gate
+also reads esbuild's metafile and fails if the main entry statically imports
+*any* peer — a leaked grammar or math payload reddens the PR on the import
+itself, not on the bytes. (A lazy `import()` of a peer on its own subpath is the
+intended pattern and is left alone.) When an increase is intentional, bump the
+budget deliberately with `npm run size:update` and commit the JSON.
 
 ## The shape: a pluggable backend, mirroring the sanitizer split
 

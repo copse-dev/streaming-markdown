@@ -1,0 +1,57 @@
+{
+  "note": "Gzipped+minified byte budgets for the package's own contribution to a consumer bundle. Measured by scripts/check-bundle-size.mts: each entry is bundled from dist/ with esbuild (--bundle --minify --format=esm --platform=browser), the optional peer dependencies are marked external (they are the host's responsibility), and the output is gzipped. CI (.github/workflows/ci.yml `size` job) fails if any measured value exceeds its budget. Bump a budget deliberately — with `npm run size:update` — only when an intentional change grows an entry; an accidental regression on the core value prop should redden the PR instead. Budgets carry ~5% headroom over the measured size so trivial refactors don't force a bump.",
+  "externals": [
+    "dompurify",
+    "entities",
+    "highlight.js",
+    "katex",
+    "mermaid",
+    "shiki"
+  ],
+  "entries": {
+    ".": {
+      "file": "dist/index.js",
+      "gzipBudget": 33030
+    },
+    "./inline/emoji": {
+      "file": "dist/emoji-shortcodes.js",
+      "gzipBudget": 17010
+    },
+    "./entities/full": {
+      "file": "dist/entity-decoder-full.js",
+      "gzipBudget": 1710
+    },
+    "./highlighters/shiki": {
+      "file": "dist/highlight-shiki.js",
+      "gzipBudget": 1290
+    },
+    "./smoothing": {
+      "file": "dist/smoothing.js",
+      "gzipBudget": 680
+    },
+    "./sanitizers/browser": {
+      "file": "dist/sanitize-browser.js",
+      "gzipBudget": 590
+    },
+    "./diagrams/mermaid": {
+      "file": "dist/mermaid-mermaidjs.js",
+      "gzipBudget": 500
+    },
+    "./math/katex": {
+      "file": "dist/math-katex.js",
+      "gzipBudget": 490
+    },
+    "./highlighters/highlightjs": {
+      "file": "dist/highlight-hljs.js",
+      "gzipBudget": 420
+    },
+    "./sanitizers/dompurify": {
+      "file": "dist/sanitize-dompurify.js",
+      "gzipBudget": 390
+    },
+    "./cjk": {
+      "file": "dist/cjk.js",
+      "gzipBudget": 240
+    }
+  }
+}

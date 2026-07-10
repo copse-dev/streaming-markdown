@@ -112,6 +112,8 @@
     "check:normalizer-parity": "tsx scripts/fetch-reference-normalizer.mts && tsx scripts/check-normalizer-parity.mts",
     "bench": "tsx scripts/bench-streaming.mts",
     "bench:browser": "tsx scripts/bench-browser.mts",
+    "size": "node --import tsx scripts/check-bundle-size.mts",
+    "size:update": "node --import tsx scripts/check-bundle-size.mts --update",
     "changelog": "tsx scripts/gen-changelog.mts",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"

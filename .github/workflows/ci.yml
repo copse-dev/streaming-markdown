@@ -35,6 +35,13 @@ jobs:
            github.event.pull_request.head.repo.full_name != github.repository)
           && 'ubuntu-latest'
           || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
+    # Runs on Node 22, the primary dev/publish version. The dev toolchain
+    # itself requires 21+ (`devEngines.runtime >= 21`, which npm enforces at
+    # install time; the `npm test` glob also relies on the runner expansion
+    # added in Node 21), so the full workflow cannot run on the Node 20
+    # consumer floor. The declared `engines.node >= 20` floor is validated the
+    # right way by the `smoke` job below: build here, then import the built
+    # `dist/` entry under Node 20.
     steps:
       - uses: actions/checkout@v7
 
@@ -79,6 +86,169 @@ jobs:
       # python3 (preinstalled on the runner; also present in the ci-runners image).
       - name: Normalizer parity
         run: npm run check:normalizer-parity
+
+  # Consumer-floor smoke test (#113). `engines.node` is `>=20`, but the dev
+  # toolchain needs 21+, so the `build` job can't run on 20. This job builds
+  # with the dev toolchain on Node 22, then switches the runner to Node 20 and
+  # imports the built `dist/` entry — exercising the declared floor without the
+  # dev-only workflow. A syntax/API in the SHIPPED output that only lands in 21+
+  # reddens here rather than reaching a consumer on the floor.
+  smoke:
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name != github.repository)
+          && 'ubuntu-latest'
+          || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up dev toolchain (Node 22) and build
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Switch the active runtime to the consumer floor. node_modules from the
+      # Node 22 install persists (the peers are pure JS), and the built entry
+      # imports its optional peers lazily, so no reinstall is needed on Node 20.
+      - name: Switch to consumer floor (Node 20)
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Import built dist entry on Node 20
+        run: |
+          node --version
+          node -e "import('./dist/index.js').then((m) => { \
+            if (typeof m.renderMarkdownUnsafe !== 'function') { \
+              console.error('renderMarkdownUnsafe missing from built entry'); process.exit(1) \
+            } \
+            const html = m.renderMarkdownUnsafe('# hi\n\n**bold**'); \
+            if (!html.includes('<h1>') || !html.includes('<strong>')) { \
+              console.error('unexpected render output on Node 20:', html); process.exit(1) \
+            } \
+            console.log('dist entry imports and renders on', process.version) \
+          }).catch((e) => { console.error(e); process.exit(1) })"
+
+  # Trusted Types e2e (#113). Runs the shipped bundle in a real, headless
+  # Chromium under an ENFORCED `require-trusted-types-for 'script'` CSP —
+  # something jsdom cannot simulate — so the "sanitize at the sink /
+  # Trusted-Types-safe" headline claim has a gate. `tests/trusted-types.e2e.test.ts`
+  # SKIPS (never fails) when no Chromium is found, so we install the
+  # playwright-core-matched browser here to guarantee the five assertions
+  # actually execute; a red assertion then fails the job.
+  e2e:
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name != github.repository)
+          && 'ubuntu-latest'
+          || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Cache the playwright-core Chromium download (~170MB) across runs so it
+      # isn't re-fetched every time. Keyed on the locked playwright-core version
+      # so a version bump busts the cache and pulls the matched build.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # Install the Chromium build that matches the locked playwright-core.
+      # Idempotent and cached; on the self-hosted image (browser preinstalled)
+      # this is a fast no-op. `findChromium()` then resolves it via
+      # playwright-core's registry.
+      - name: Install Chromium (playwright-core)
+        run: npx --no-install playwright-core install chromium
+
+      # `E2E_REQUIRE_BROWSER=1` turns the suite's browser-absent SKIP into a
+      # hard failure, so the "five assertions actually ran" guarantee is
+      # explicit here rather than only implied by the install step succeeding.
+      - name: Trusted Types e2e (headless Chromium)
+        run: npm run test:e2e
+        env:
+          E2E_REQUIRE_BROWSER: '1'
+
+  # Streaming performance guard (#113). The coverage job's absolute throughput
+  # floors self-skip under c8 instrumentation, so streaming perf had no CI
+  # guard. This runs the bench at full speed on its fixed fixture set; the
+  # script carries a RELATIVE regression guard (mean DOM-path growth per input
+  # doubling must stay < 3× — an O(n²) committed-re-render regression pushes it
+  # back toward 4× and throws, failing the job). The full table is also
+  # published as an artifact so the numbers are visible per run.
+  bench:
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name != github.repository)
+          && 'ubuntu-latest'
+          || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Bench (fixed fixtures, relative-regression guard)
+        # `shell: bash` runs `bash -eo pipefail`, so a non-zero exit from the
+        # bench guard propagates through the `tee` pipe and fails the job. The
+        # default Linux shell (`bash -e`, no pipefail) would take `tee`'s exit
+        # code (0) and stay green, defeating the guard.
+        shell: bash
+        run: npm run bench | tee bench-output.txt
+
+      - name: Upload bench output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-output
+          path: bench-output.txt
+          if-no-files-found: ignore
+
+  # Bundle-size gate (#113). The core value prop is a small main entry
+  # (~28–30 KB gzipped+minified) with the heavy backends behind lazy subpaths.
+  # `scripts/check-bundle-size.mts` bundles the main entry and each key subpath
+  # from dist/ as a consumer would (peers external) and fails if any gzipped
+  # size exceeds the committed budget in scripts/bundle-size-budget.json — so a
+  # dependency leaking back into the core bundle reddens the PR. Budgets are
+  # bumped deliberately with `npm run size:update`.
+  size:
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name != github.repository)
+          && 'ubuntu-latest'
+          || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Bundle-size gate
+        run: npm run size
 
   # Canary: typecheck + build against the next TypeScript major (7.x, the
   # Go-native compiler) before the `typescript` devDependency crosses the
