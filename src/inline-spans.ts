@@ -87,7 +87,7 @@ function renderNestedInlineSpans(t: string, linkRefs: LinkReferenceMap): string 
   // anchors instead of literal `[label](dest)` inside <strong>.
   t = renderStrongAroundCode(t)
   t = renderStrongWithInlineHtml(t)
-  t = renderBareHttpLinks(t)
+  t = renderExtendedAutolinks(t)
   t = applyInlinePasses(t, 'after-links')
   return t
 }
@@ -132,42 +132,6 @@ function renderedBareLink(label: string, href: string): string {
   return renderAnchor(label, href)
 }
 
-const BARE_HTTP_URL_RE = /(^|[\s(])((?:https?:\/\/)[^\s<]+)/gi
-// Trailing punctuation stripped from a bare URL, matching GFM's autolink
-// extension. `_` is intentionally excluded — underscores are valid URL
-// characters (e.g. `foo_bar_`) — and `)` is handled by trimBareUrlTrailing so a
-// paren that balances an earlier `(` stays inside the link (#107).
-const TRAILING_URL_PUNCTUATION_RE = /[.,;:!?]/
-
-/**
- * Split a bare URL into its linked portion and any trailing prose punctuation,
- * following GFM's balanced-paren rule: a trailing `)` is only trimmed when the
- * URL holds more `)` than `(`, so Wikipedia-style links like
- * `.../Markdown_(disambiguation)` keep their closing paren while a URL wrapped
- * in a parenthetical `(see https://example.com)` still sheds it.
- */
-function trimBareUrlTrailing(rawUrl: string): { url: string; trailing: string } {
-  let end = rawUrl.length
-  while (end > 0) {
-    const ch = rawUrl[end - 1] ?? ''
-    if (ch === ')') {
-      let opening = 0
-      let closing = 0
-      for (let i = 0; i < end; i++) {
-        if (rawUrl[i] === '(') opening++
-        else if (rawUrl[i] === ')') closing++
-      }
-      if (closing <= opening) break
-      end--
-    } else if (TRAILING_URL_PUNCTUATION_RE.test(ch)) {
-      end--
-    } else {
-      break
-    }
-  }
-  return { url: rawUrl.slice(0, end), trailing: rawUrl.slice(end) }
-}
-
 /**
  * Opt-in override (default `null`) that flags CJK / full-width punctuation as a
  * bare-autolink boundary — the seam the CJK entry
@@ -194,20 +158,219 @@ function splitBareUrlAtCjkBoundary(rawUrl: string): { url: string; tail: string 
   return { url: rawUrl, tail: '' }
 }
 
-function renderBareHttpLinks(text: string): string {
+/**
+ * Run `fn` over the non-shielded slices of `text`, exactly like the inline-pass
+ * splitter: rendered `<code>`/`<a>`/`<img>` interiors (odd indices) pass through
+ * untouched so a generated autolink never re-scans the URL/email inside it.
+ */
+function mapOutsideInlineHtml(text: string, fn: (segment: string) => string): string {
   return text
     .split(INLINE_HTML_SHIELD_RE)
-    .map((segment, index) => {
-      if (index % 2 === 1) return segment
-      return segment.replace(BARE_HTTP_URL_RE, (_match, prefix: string, rawUrl: string) => {
-        // A CJK full-width punctuation mark ends the URL and stays as prose.
-        const { url: beforeCjk, tail: cjkTail } = splitBareUrlAtCjkBoundary(rawUrl)
-        if (beforeCjk === '') return `${prefix}${rawUrl}`
-        const { url, trailing: asciiTrailing } = trimBareUrlTrailing(beforeCjk)
-        const href = safeLinkHref(url)
-        if (!href) return `${prefix}${rawUrl}`
-        return `${prefix}${renderedBareLink(url, href)}${asciiTrailing}${cjkTail}`
-      })
-    })
+    .map((segment, index) => (index % 2 === 1 ? segment : fn(segment)))
     .join('')
+}
+
+/**
+ * GFM extended autolinks (extension) — recognised in plain text alongside the
+ * bare `http(s)://` pass this replaces:
+ *   - `www.` hosts       → `http://` prefixed href.
+ *   - `http`/`https`/`ftp` URLs.
+ *   - bare `user@host`   → `mailto:` href.
+ *
+ * The `www.`/URL forms may only start at the beginning of a segment, after
+ * whitespace, or after one of `*`, `_`, `~`, `(` (the GFM left-flank set); email
+ * addresses are recognised anywhere their local part rewinds to a valid start.
+ * Trailing punctuation, unbalanced `)`, and entity-like `&…;` are trimmed with
+ * {@link trimAutolinkTail} (a self-contained implementation of the extension's
+ * path-validation rules), and the CJK boundary hook still splits a run-together
+ * full-width tail out of the href. Generated hrefs go through {@link safeLinkHref}
+ * so the scheme allowlist is enforced on them too.
+ */
+function renderExtendedAutolinks(text: string): string {
+  // URL/`www.` first, then email over the result: an email inside a freshly
+  // generated `<a>` (e.g. userinfo in a linked URL) is shielded on the re-split.
+  return mapOutsideInlineHtml(mapOutsideInlineHtml(text, linkifyWwwAndUrlAutolinks), linkifyEmailAutolinks)
+}
+
+/** GFM left-flank characters an extended `www.`/URL autolink may follow. */
+function isExtendedAutolinkBoundary(prev: string | undefined): boolean {
+  return prev === undefined || /\s/.test(prev) || prev === '*' || prev === '_' || prev === '~' || prev === '('
+}
+
+const URL_SCHEME_RE = /^(?:https?|ftp):\/\//i
+const WWW_DOMAIN_RE = /^www(?:\.[A-Za-z0-9_-]+)+/i
+
+/** No underscore in the last two segments of a `www.` domain (GFM valid-domain rule). */
+function wwwDomainIsValid(domain: string): boolean {
+  const segments = domain.split('.')
+  return !segments.slice(-2).some((segment) => segment.includes('_'))
+}
+
+/** Trailing punctuation trimmed off an extended autolink (`< immediately ends`). */
+const AUTOLINK_TRAILING_PUNCTUATION = new Set(['?', '!', '.', ',', ':', '*', '_', '~', "'", '"'])
+
+/**
+ * GFM "extended autolink path validation": trim trailing punctuation, drop
+ * unmatched trailing `)` (scanning the whole link for paren balance), and strip
+ * a trailing entity-like `&word;`. Iterates because trimming one class can
+ * expose another (`…business))` → `…business)` → stop). Self-contained so this
+ * PR is correct on its own; a later merge may dedupe with the bare-URL paren fix.
+ */
+function trimAutolinkTail(link: string): string {
+  let end = link.length
+  while (end > 0) {
+    const c = link[end - 1] ?? ''
+    if (AUTOLINK_TRAILING_PUNCTUATION.has(c)) {
+      end--
+      continue
+    }
+    if (c === ')') {
+      let open = 0
+      let close = 0
+      for (let i = 0; i < end; i++) {
+        if (link[i] === '(') open++
+        else if (link[i] === ')') close++
+      }
+      if (close <= open) break
+      end--
+      continue
+    }
+    if (c === ';') {
+      let scan = end - 2
+      while (scan > 0 && /[A-Za-z]/.test(link[scan] ?? '')) scan--
+      if (scan < end - 2 && link[scan] === '&') {
+        end = scan
+        continue
+      }
+      break
+    }
+    break
+  }
+  return link.slice(0, end)
+}
+
+/**
+ * Consume the extended-autolink run at `start` (all non-space, non-`<`
+ * characters), split off any CJK full-width tail, trim the path per
+ * {@link trimAutolinkTail}, and build the `<a>`. `schemePrefix` is prepended to
+ * the href for `www.` hosts (`http://`) and empty for already-schemed URLs.
+ */
+function buildExtendedAutolink(
+  segment: string,
+  start: number,
+  schemePrefix: string,
+): { html: string; end: number } | null {
+  let run = start
+  while (run < segment.length && !/\s/.test(segment[run] ?? '') && segment[run] !== '<') run++
+  const raw = segment.slice(start, run)
+  const { url: beforeCjk, tail: cjkTail } = splitBareUrlAtCjkBoundary(raw)
+  const url = trimAutolinkTail(beforeCjk)
+  if (url === '') return null
+  const trailing = beforeCjk.slice(url.length)
+  const href = safeLinkHref(schemePrefix + url)
+  if (!href) return null
+  return { html: `${renderedBareLink(url, href)}${trailing}${cjkTail}`, end: run }
+}
+
+function linkifyWwwAndUrlAutolinks(segment: string): string {
+  let out = ''
+  let i = 0
+  while (i < segment.length) {
+    if (isExtendedAutolinkBoundary(i === 0 ? undefined : segment[i - 1])) {
+      const rest = segment.slice(i)
+      const urlScheme = URL_SCHEME_RE.exec(rest)
+      if (urlScheme) {
+        const after = segment[i + urlScheme[0].length]
+        // Require at least one domain character after the scheme, like the bare pass.
+        if (after !== undefined && !/\s/.test(after) && after !== '<') {
+          const built = buildExtendedAutolink(segment, i, '')
+          if (built) {
+            out += built.html
+            i = built.end
+            continue
+          }
+        }
+      } else {
+        const www = WWW_DOMAIN_RE.exec(rest)
+        if (www && wwwDomainIsValid(www[0])) {
+          const built = buildExtendedAutolink(segment, i, 'http://')
+          if (built) {
+            out += built.html
+            i = built.end
+            continue
+          }
+        }
+      }
+    }
+    out += segment[i] ?? ''
+    i++
+  }
+  return out
+}
+
+/** Local-part / domain characters an email autolink may contain, per GFM. */
+const EMAIL_LOCAL_CHAR_RE = /[A-Za-z0-9.+_-]/
+
+/**
+ * GFM extended email autolink at the `@` in `segment` at index `at`: rewind the
+ * local part, scan the domain, and validate per the extension's rules (exactly
+ * one `@`, at least one interior `.`, no trailing `-`/`_`, a trailing `.` left
+ * as prose). Returns the `<a>` span and its bounds, or null when it is not a
+ * valid address.
+ */
+function matchEmailAutolink(
+  segment: string,
+  at: number,
+): { html: string; start: number; end: number } | null {
+  let start = at
+  while (start > 0 && EMAIL_LOCAL_CHAR_RE.test(segment[start - 1] ?? '')) start--
+  if (start === at) return null // no local part
+
+  let atCount = 0
+  let dotCount = 0
+  let end = at
+  while (end < segment.length) {
+    const c = segment[end] ?? ''
+    if (/[A-Za-z0-9]/.test(c)) {
+      end++
+    } else if (c === '@') {
+      atCount++
+      end++
+    } else if (c === '.' && end < segment.length - 1 && /[A-Za-z0-9]/.test(segment[end + 1] ?? '')) {
+      dotCount++
+      end++
+    } else if (c === '-' || c === '_') {
+      end++
+    } else {
+      break
+    }
+  }
+  const last = segment[end - 1] ?? ''
+  if (end - at < 2 || atCount !== 1 || dotCount === 0 || (!/[A-Za-z]/.test(last) && last !== '.')) {
+    return null
+  }
+  const email = segment.slice(start, end)
+  const href = safeLinkHref(`mailto:${email}`)
+  if (!href) return null
+  return { html: renderedBareLink(email, href), start, end }
+}
+
+function linkifyEmailAutolinks(segment: string): string {
+  if (!segment.includes('@')) return segment
+  let out = ''
+  let emitted = 0
+  let i = 0
+  while (i < segment.length) {
+    if (segment[i] === '@') {
+      const match = matchEmailAutolink(segment, i)
+      if (match) {
+        out += segment.slice(emitted, match.start) + match.html
+        i = match.end
+        emitted = match.end
+        continue
+      }
+    }
+    i++
+  }
+  return out + segment.slice(emitted)
 }

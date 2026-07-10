@@ -1,7 +1,7 @@
 {
   "specVersion": "0.29",
   "source": "github/cmark-gfm spec.txt @ 0.29.0.gfm.13 (fetched to tests/fixtures/gfm/spec.txt)",
-  "note": "Examples from the official GitHub Flavored Markdown spec that renderMarkdown() satisfies at rest, after the spec normalizer. GFM is a superset of CommonMark, so the base sections mirror the CommonMark baseline; the GFM-only sections are broken out in extensionSummary. This is a regression baseline, not a conformance goal — the renderer escapes untrusted HTML (sanitize-at-the-sink) and implements a subset of the autolink/strikethrough grammar, so HTML blocks, Raw HTML, and parts of the extension sections fail by design.",
+  "note": "Examples from the official GitHub Flavored Markdown spec that renderMarkdownUnsafe() satisfies at rest, after the spec normalizer. GFM is a superset of CommonMark, so the base sections mirror the CommonMark baseline; the GFM-only sections are broken out in extensionSummary. This is a regression baseline, not a conformance goal — the renderer escapes untrusted HTML (sanitize-at-the-sink) and implements a subset of the autolink/strikethrough grammar, so HTML blocks, Raw HTML, and parts of the extension sections fail by design.",
   "total": 672,
   "passing": [
     1,
@@ -557,7 +557,17 @@
     615,
     617,
     618,
-    620,
+    621,
+    622,
+    623,
+    624,
+    625,
+    626,
+    627,
+    628,
+    629,
+    630,
+    631,
     637,
     638,
     639,
@@ -684,11 +694,11 @@
       "total": 22
     },
     "Autolinks": {
-      "pass": 17,
+      "pass": 16,
       "total": 19
     },
     "Autolinks (extension)": {
-      "pass": 0,
+      "pass": 11,
       "total": 11
     },
     "Raw HTML": {
@@ -726,7 +736,7 @@
       "total": 2
     },
     "Autolinks (extension)": {
-      "pass": 0,
+      "pass": 11,
       "total": 11
     },
     "Disallowed Raw HTML (extension)": {
