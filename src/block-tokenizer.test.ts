@@ -315,3 +315,58 @@ describe('splitForStreaming (tokenizer #475)', () => {
     )
   })
 })
+
+describe('blockquote lazy continuation (incremental memo, #111)', () => {
+  // The blockquote scanner memoises `endsInOpenParagraph` over the growing
+  // stripped content so a long lazy run is O(1)/line instead of O(n)/line. The
+  // memo must never diverge from a fresh determination: these cases pin the
+  // block extents that a wrong fast-path (e.g. treating indented code or a
+  // `>`-blank-closed paragraph as an open paragraph) would break.
+  function kinds(src: string): string[] {
+    return tokenizeBlocks(src).map((t) => `${t.kind}:${JSON.stringify(src.slice(t.start, t.end))}`)
+  }
+
+  it('folds a long unmarked lazy run into one blockquote paragraph', () => {
+    const src = '> start\nlazy one\nlazy two\nlazy three\n'
+    assert.deepEqual(kinds(src), [`blockquote:${JSON.stringify(src)}`])
+  })
+
+  it('resumes lazy continuation after a re-marked line', () => {
+    const src = '> start\nlazy\n> marked again\nmore lazy\n'
+    assert.deepEqual(kinds(src), [`blockquote:${JSON.stringify(src)}`])
+  })
+
+  it('does not lazily continue indented code inside a quote (spec 236)', () => {
+    // `>     foo` is indented code inside the quote; the unmarked `    bar` is a
+    // separate indented code block, not a lazy continuation.
+    assert.deepEqual(kinds('>     foo\n    bar\n'), [
+      'blockquote:">     foo\\n"',
+      'indented_code:"    bar\\n"',
+    ])
+  })
+
+  it('does not lazily continue after a `>`-blank closes the paragraph (spec 237)', () => {
+    // The empty `>` line closes the paragraph; the following unmarked `bar` can
+    // no longer lazily continue it.
+    assert.deepEqual(kinds('> foo\n>\nbar\n'), ['blockquote:"> foo\\n>\\n"', 'paragraph:"bar\\n"'])
+  })
+
+  it('lazily continues a paragraph nested in a blockquote', () => {
+    const src = '> > inner\nlazy inner continuation\n'
+    assert.deepEqual(kinds(src), [`blockquote:${JSON.stringify(src)}`])
+  })
+
+  it('breaks the quote at an unmarked ATX heading, not a lazy continuation', () => {
+    assert.deepEqual(kinds('> para\n# heading\n'), ['blockquote:"> para\\n"', 'atx_heading:"# heading\\n"'])
+  })
+
+  it('a setext underline under quoted text is not an open-paragraph continuation', () => {
+    // `> text` then unmarked `===` turns the quoted paragraph into a setext
+    // heading; the underline is consumed by the quote, not left dangling.
+    const src = '> text\n===\n'
+    const toks = tokenizeBlocks(src)
+    assert.equal(toks.length, 1)
+    assert.equal(toks[0]?.kind, 'blockquote')
+    assert.equal(src.slice(toks[0]?.start ?? 0, toks[0]?.end ?? 0), src)
+  })
+})
