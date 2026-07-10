@@ -522,15 +522,16 @@ counts). Current state:
 | GFM extension section   | Baseline | Notes                                                                                     |
 | ----------------------- | -------- | ----------------------------------------------------------------------------------------- |
 | Strikethrough           | 2/2      | Full — double-tilde `~~x~~` → `<del>`.                                                     |
-| Tables                  | 2/8      | Gaps: column alignment (`:-:`/`--:` → `align`), escaped `\|` in cells, column-count normalization, delimiter/header mismatch rejection. |
+| Tables                  | 8/8      | Full — column alignment (`:-:`/`--:` → `align`, `parseTableAlignments`), escaped `\|` in cells (`splitTableRow`), column-count normalization and delimiter/header mismatch rejection (`tableColumnsMatch`) are all implemented. |
 | Task list items         | 0/2      | Renderer output diverges on purpose — it adds `class="task-list-item"`/`contains-task-list` and a `disabled` checkbox for app styling ([#614](https://github.com/copse-dev/agent-pane/issues/614)), which the spec's bare `<input>` output does not.  |
 | Autolinks (extension)   | 0/11     | Only bare `http(s)://` is linked (`inline-spans.ts`); no `www.`, no bare email, and trailing-punctuation trimming is a simplified regex, not GFM's balanced-paren/entity rules.                 |
 | Disallowed Raw HTML     | 0/1      | In the harness's pinned `'escape'` mode the renderer escapes *all* attributed/structural raw HTML, which is stricter than GFM's tag filter — so the filtered-passthrough output never matches. |
 
-Strikethrough is the only fully-conforming extension; the others cap out on real
-grammar gaps (tables, extended autolinks) or deliberate divergence (task-list
-classes, raw-HTML escaping). Closing the table-alignment and `www.`/email autolink
-gaps are the highest-value follow-ups.
+Tables and Strikethrough are the fully-conforming extensions; the rest cap out on a
+real grammar gap (extended autolinks) or deliberate divergence (task-list classes,
+raw-HTML escaping). Closing the `www.`/bare-email extended-autolink gap (0/11) is
+the highest-value remaining follow-up — task-list `class`/`disabled` output and the
+disallowed-raw-HTML tag filter are intentional divergences, not gaps to close.
 
 ### Streaming convergence fuzz (`streaming-convergence.test.ts`, via `npm test`)
 
