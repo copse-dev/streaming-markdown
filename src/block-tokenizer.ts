@@ -4,6 +4,7 @@
  */
 import {
   isValidReferenceLabel,
+  parseBracketedLabel,
   parseLinkReferenceDefinitionAt,
   parseLinkReferenceDefinitions,
   type LinkReference,
@@ -398,6 +399,23 @@ function endsInOpenParagraph(fragment: string): boolean {
   const last = tokenizeBlocks(fragment).at(-1)
   if (!last) return false
   if (last.kind === 'paragraph') return true
+  return endsInOpenParagraphNested(fragment, last)
+}
+
+/**
+ * `endsInOpenParagraph` plus a flag for whether the last block is a *flat* (non-
+ * nested) paragraph — the state a blockquote lazy-continuation scan can extend in
+ * O(1) per line without re-tokenizing (#111). Tokenizes `fragment` once.
+ */
+function strippedQuoteTailState(fragment: string): { endsOpen: boolean; flatParagraph: boolean } {
+  const last = tokenizeBlocks(fragment).at(-1)
+  if (!last) return { endsOpen: false, flatParagraph: false }
+  if (last.kind === 'paragraph') return { endsOpen: true, flatParagraph: true }
+  return { endsOpen: endsInOpenParagraphNested(fragment, last), flatParagraph: false }
+}
+
+/** Nested tail of {@link endsInOpenParagraph} for a non-paragraph last block. */
+function endsInOpenParagraphNested(fragment: string, last: BlockToken): boolean {
   // The token slices keep their final newline; `split`/`join` round-trips it.
   if (last.kind === 'blockquote') {
     const inner = fragment
@@ -420,6 +438,52 @@ function endsInOpenParagraph(fragment: string): boolean {
     return endsInOpenParagraph(inner)
   }
   return false
+}
+
+/**
+ * Whether the stripped inner line `s`, appended to a blockquote whose content
+ * already ends in a *flat* open paragraph, provably keeps it a flat open
+ * paragraph (#111). Conservative: any line that could start/close a block or turn
+ * the paragraph into a setext heading returns false, forcing a full recompute —
+ * only a plainly-continuing text line is fast-pathed. Never returns true for a
+ * line that would change the "ends in open paragraph" verdict.
+ */
+/**
+ * A line begins a link reference definition at a block start when it is
+ * `[label]:` — a bracketed, non-blank label with a colon immediately after the
+ * closing `]` (spec 192). Such a line tokenizes as a `link_ref_def` block, not
+ * a paragraph, so the flat-paragraph fast path must exclude it and recompute.
+ * More precise than a bare `/^ {0,3}\[/`: an ordinary `[text] …` or
+ * `[link](url) …` paragraph line has no `]:`, so it is not needlessly excluded.
+ */
+function startsLinkRefDef(s: string): boolean {
+  let i = 0
+  while (i < 3 && s[i] === ' ') i++
+  if (s[i] !== '[' || s[i + 1] === '^') return false // `[^…]` is a footnote def
+  const label = parseBracketedLabel(s, i)
+  if (!label || label.label.trim() === '') return false
+  return s[label.end] === ':'
+}
+
+function keepsFlatParagraphOpen(s: string): boolean {
+  if (s.trim() === '') return false
+  // A 4-column indent opens an indented code block at a block start (spec 236),
+  // not a paragraph. As a paragraph *continuation* it would be lazy text, but
+  // this predicate also classifies the quote's opening line, so exclude it and
+  // fall back to a full recompute — correctness over the indented-line fast path.
+  if (leadingIndentWidth(s) >= 4) return false
+  return !(
+    SETEXT_UNDERLINE_RE.test(s) ||
+    ATX_HEADING_RE.test(s) ||
+    THEMATIC_BREAK_RE.test(s) ||
+    LIST_ITEM_RE.test(s) ||
+    BLOCKQUOTE_RE.test(s) ||
+    fenceMarker(s) !== null ||
+    isMathBlockInterruptLine(s) ||
+    FOOTNOTE_DEF_LINE_RE.test(s) ||
+    startsLinkRefDef(s) ||
+    isTableRow(s)
+  )
 }
 
 function breaksUnorderedListItem(lines: ScannedLine[], itemStart: number, j: number): boolean {
@@ -665,6 +729,21 @@ export function tokenizeBlocks(source: string): BlockToken[] {
 
     if (BLOCKQUOTE_RE.test(line.text)) {
       const bqStart = line.start
+      // Incremental laziness state (#111): `endsInOpenParagraph` over the growing
+      // stripped quote content is memoised so a long run of lazy paragraph lines
+      // costs O(1) per line instead of a full re-tokenize per candidate (which
+      // made a lazily-continued quote O(n²) to tokenize, O(n³) to stream). The
+      // memo only ever holds a value equal to a fresh `endsInOpenParagraph`, so
+      // the block boundary is byte-identical to the previous implementation.
+      const strippedInner: string[] = [stripBlockquoteMarker(line.text)]
+      let endsOpenCache: boolean | null = null // memo of endsInOpenParagraph(strippedInner); null = stale
+      let flatParagraphTail = keepsFlatParagraphOpen(strippedInner[0] ?? '')
+      if (flatParagraphTail) endsOpenCache = true
+      const noteInner = (s: string): void => {
+        endsOpenCache = flatParagraphTail && keepsFlatParagraphOpen(s) ? true : null
+        flatParagraphTail = endsOpenCache === true
+        strippedInner.push(s)
+      }
       let j = i + 1
       while (j < lines.length) {
         const next = lines[j]
@@ -686,13 +765,14 @@ export function tokenizeBlocks(source: string): BlockToken[] {
           // quote's content ends in an open paragraph — never an indented
           // code block, an open fence, or a closed-by-`>`-blank paragraph
           // (spec 236/237/249). Nested quotes recurse (spec 250/251).
-          const stripped =
-            lines
-              .slice(i, j)
-              .map((l) => stripBlockquoteMarker(l.text))
-              .join('\n') + '\n'
-          if (!endsInOpenParagraph(stripped)) break
+          if (endsOpenCache === null) {
+            const st = strippedQuoteTailState(strippedInner.join('\n') + '\n')
+            endsOpenCache = st.endsOpen
+            flatParagraphTail = st.flatParagraph
+          }
+          if (!endsOpenCache) break
         }
+        noteInner(stripBlockquoteMarker(next.text))
         j++
       }
       const last = lines[j - 1] ?? line

@@ -109,4 +109,74 @@ describe('IncrementalSourceScanner equivalence', () => {
       `re-tokenized chars grew ${ratio.toFixed(2)}× when input doubled (expected ~2×; ~4× = resume regression)`,
     )
   })
+
+  it('matches fresh scans at every prefix of long list- and blockquote-shaped streams (#111)', () => {
+    // The LLM answer shape: loose ordered/unordered lists and quotes. The
+    // extendable-container boundary relaxation must stay byte-identical to a
+    // fresh scan through loose lists, lazy continuations and interior blanks.
+    const docs: Record<string, string> = {
+      'ordered-loose':
+        Array.from({ length: 12 }, (_, i) => `${String(i + 1)}. **Point ${String(i + 1)}** with \`code_${String(i)}\` and text.`).join('\n\n') + '\n',
+      'unordered-loose':
+        Array.from({ length: 12 }, (_, i) => `- **Point ${String(i + 1)}** with \`code_${String(i)}\` and text.`).join('\n\n') + '\n',
+      'ordered-prose-fold':
+        '1. First point.\n\nProse folded into item one for the LLM numbered-list shape.\n\n2. Second point.\n\n3. Third point.\n',
+      'blockquote-lazy':
+        '> quote start\n' + Array.from({ length: 12 }, (_, i) => `lazy continuation line ${String(i)}`).join('\n') + '\n> back to marked\n\naftermath paragraph\n',
+      'blockquote-paras':
+        Array.from({ length: 8 }, (_, i) => `> Quote paragraph ${String(i)} with \`code_${String(i)}\`.`).join('\n\n') + '\n',
+      'loose-list-continuation':
+        '- item one\n\n  continuation of item one across a blank\n\n- item two\n\n- item three\n',
+    }
+    for (const [name, doc] of Object.entries(docs)) {
+      const scanner = new IncrementalSourceScanner()
+      for (let cut = 1; cut <= doc.length; cut++) {
+        assertScannerMatchesFresh(scanner, doc.slice(0, cut), `${name} cut=${String(cut)}`)
+      }
+    }
+  })
+
+  it('re-tokenizes list- and blockquote-shaped streams O(n), comparable to prose (#111)', () => {
+    // Before #111 a loose list or quote re-tokenized from its container top on
+    // every update — ~40-140× the prose baseline. The boundary now advances
+    // per item/quote, so the total stays a small multiple of the prose case.
+    function scannedFor(build: (n: number) => string, n: number): number {
+      const doc = build(n)
+      const scanner = new IncrementalSourceScanner()
+      for (let cut = 1; cut <= doc.length; cut++) scanner.tokenize(doc.slice(0, cut))
+      return scanner.scannedChars
+    }
+    const prose = (n: number): string =>
+      Array.from({ length: n }, (_, i) => `Paragraph ${String(i)} with \`code_${String(i)}\` and a bit of text here.`).join('\n\n') + '\n'
+    const ordered = (n: number): string =>
+      Array.from({ length: n }, (_, i) => `${String(i + 1)}. Point ${String(i)} with \`code_${String(i)}\` and a bit of text here.`).join('\n\n') + '\n'
+    const unordered = (n: number): string =>
+      Array.from({ length: n }, (_, i) => `- Point ${String(i)} with \`code_${String(i)}\` and a bit of text here.`).join('\n\n') + '\n'
+    const quotes = (n: number): string =>
+      Array.from({ length: n }, (_, i) => `> Quote ${String(i)} with \`code_${String(i)}\` and a bit of text here.`).join('\n\n') + '\n'
+
+    const proseChars = scannedFor(prose, 40)
+    for (const [name, build] of [
+      ['ordered', ordered],
+      ['unordered', unordered],
+      ['quotes', quotes],
+    ] as const) {
+      const chars = scannedFor(build, 40)
+      const ratio = chars / proseChars
+      // Comfortably below the pre-fix ~40-140×; a container-top rescan regression
+      // would blow past this immediately.
+      assert.ok(
+        ratio < 8,
+        `${name} re-tokenized ${ratio.toFixed(1)}× the prose baseline (expected a small multiple; container-top rescan regressed)`,
+      )
+      // O(n): doubling the document roughly doubles the total, not quadruples it.
+      const small = scannedFor(build, 20)
+      const large = scannedFor(build, 40)
+      const growth = large / small
+      assert.ok(
+        growth < 3,
+        `${name} scanned chars grew ${growth.toFixed(2)}× when doubled (expected ~2×; super-linear = boundary regression)`,
+      )
+    }
+  })
 })

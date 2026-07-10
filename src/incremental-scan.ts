@@ -10,15 +10,24 @@
 // stream is append-only in the common case, so everything before a *safe
 // boundary* can never re-tokenize differently:
 //
-//   A safe boundary sits at the end of a COMPLETE `blank` token whose nearest
-//   preceding non-blank token is not a `list_item`, `indented_code`, or
-//   `blockquote` — the three kinds whose single token can extend backward
-//   across blank lines (an indented continuation joins the previous list item;
-//   indented code merges across blanks; blockquote tokens continue across
-//   blank runs). Every other kind is sealed by a blank at the tokenizer level:
-//   lazy paragraph continuation, setext underlines, and table rows cannot
-//   cross a blank line, and an open fence swallows blank lines into its own
-//   token so no blank *token* can exist inside one.
+//   A safe boundary sits at the end of a COMPLETE `blank` token. When the
+//   nearest preceding non-blank token is not a `list_item`, `indented_code`,
+//   `blockquote`, or `footnote_def` — the kinds whose single token can extend
+//   backward across blank lines (an indented continuation joins the previous
+//   list item; indented code merges across blanks; blockquote/footnote tokens
+//   continue across blank runs) — the blank is sealed by the tokenizer and safe
+//   immediately: lazy paragraph continuation, setext underlines, and table rows
+//   cannot cross a blank line, and an open fence swallows blank lines into its
+//   own token so no blank *token* can exist inside one.
+//
+//   After one of those extendable kinds the blank is only safe once a later
+//   COMPLETE (newline-terminated) non-blank token appears (#111). While the
+//   extendable container is still the open tail, an append can retroactively
+//   pull the blank into it (a loose-list interior blank, a lazy continuation,
+//   an indented-code gap), so freezing there would diverge from a fresh scan.
+//   A terminated block downstream freezes every earlier break decision, proving
+//   the blank a real separator — so long lists/quotes stop re-tokenizing from
+//   their container top on every update while interior blanks stay correct.
 //
 // Tokenizing the suffix from a safe boundary therefore yields byte-identical
 // tokens to tokenizing the whole string and slicing — verified exhaustively by
@@ -51,11 +60,48 @@ function canExtendAcrossBlank(kind: BlockToken['kind']): boolean {
 }
 
 /**
+ * Whether `source[start, end)` (a complete token) ends on a blank line — i.e. the
+ * text just before its final newline is empty or all whitespace. Ordered/loose
+ * list items (and footnote defs) swallow their trailing blank line into their own
+ * token instead of leaving a separate `blank` token (the LLM-shaped numbered-list
+ * divergence), so their end still sits on a blank-line boundary that no link-
+ * reference definition or lazy continuation can span.
+ */
+function endsWithBlankLine(source: string, start: number, end: number): boolean {
+  if (end <= start || source[end - 1] !== '\n') return false
+  let p = end - 2
+  while (p >= start && source[p] !== '\n') p--
+  for (let k = p + 1; k < end - 1; k++) {
+    const c = source[k]
+    if (c !== ' ' && c !== '\t' && c !== '\r') return false
+  }
+  return true
+}
+
+/**
  * Walk `tokens` from `fromIdx`, returning the furthest safe boundary found:
  * the token count and source offset just past a qualifying complete blank.
  * Returns the input position when no further safe boundary exists.
+ *
+ * A complete `blank` whose nearest preceding non-blank kind cannot extend across
+ * blanks is sealed at the tokenizer level and is safe immediately (paragraphs,
+ * setext, tables, fences — see the header). A complete `blank` after an
+ * *extendable* kind (`list_item`/`indented_code`/`blockquote`/`footnote_def`) is
+ * only *provisionally* safe (#111): that container can still grow backward across
+ * the blank as long as the line after it is absent or unfrozen (an all-whitespace
+ * tail can gain indentation and become an indented continuation; nothing has yet
+ * proved the blank a real separator). Such a blank is promoted to a real boundary
+ * only once a later **complete** (newline-terminated) non-blank token appears: a
+ * terminated line downstream freezes every break decision up to it — the
+ * container's extent can no longer change under append — so the intervening blank
+ * is provably a separator. Only the final token of a scan can be incomplete, so
+ * "a complete non-blank token follows" is exactly "the extendable container is no
+ * longer the open tail". This keeps list-/blockquote-shaped streams O(n): once an
+ * item/quote is followed by the next completed block it freezes, instead of
+ * re-tokenizing the whole container from its top on every update.
  */
 function advanceSafeBoundary(
+  source: string,
   tokens: BlockToken[],
   fromIdx: number,
   fromOffset: number,
@@ -64,17 +110,48 @@ function advanceSafeBoundary(
   let tokenCount = fromIdx
   let offset = fromOffset
   let lastKind = lastNonBlankKind
+  // Furthest provisional boundary (a blank-line boundary after an extendable
+  // kind) not yet confirmed by a downstream terminated block. Promoted in full
+  // when one is seen.
+  let pending: { tokenCount: number; offset: number } | null = null
   for (let i = fromIdx; i < tokens.length; i++) {
     const token = tokens[i]
     if (!token) break
     if (token.kind === 'blank') {
-      if (token.status === 'complete' && (lastKind === null || !canExtendAcrossBlank(lastKind))) {
+      if (token.status !== 'complete') continue
+      if (lastKind === null || !canExtendAcrossBlank(lastKind)) {
+        // Tokenizer-sealed: safe immediately, and it supersedes any pending
+        // extendable boundary before it.
         tokenCount = i + 1
         offset = token.end
+        pending = null
+      } else {
+        // Provisionally safe: remember the furthest such blank; a later
+        // complete non-blank token promotes it.
+        pending = { tokenCount: i + 1, offset: token.end }
       }
       continue
     }
+    // A terminated non-blank token freezes everything before it, so any pending
+    // extendable boundary is now a proven separator.
+    if (pending && token.status === 'complete') {
+      tokenCount = pending.tokenCount
+      offset = pending.offset
+      pending = null
+    }
     lastKind = token.kind
+    // A complete extendable token can swallow its own trailing blank line
+    // (ordered / loose list items, footnote defs) instead of leaving a separate
+    // `blank` token. Its end sits on a blank-line boundary, so it is provisionally
+    // safe on the same terms as a blank token — promoted once a later complete
+    // token proves the container stopped there rather than folding onward.
+    if (
+      token.status === 'complete' &&
+      canExtendAcrossBlank(token.kind) &&
+      endsWithBlankLine(source, token.start, token.end)
+    ) {
+      pending = { tokenCount: i + 1, offset: token.end }
+    }
   }
   return { tokenCount, offset, lastNonBlankKind: lastKind }
 }
@@ -139,6 +216,7 @@ export class IncrementalSourceScanner {
     // region's link-reference definitions into the cached map (first-wins;
     // both cut points are blank boundaries, which no definition can span).
     const advanced = advanceSafeBoundary(
+      source,
       tokens,
       this.safeTokenCount,
       this.safeOffset,
