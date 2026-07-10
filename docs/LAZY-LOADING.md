@@ -34,7 +34,7 @@ The figures above are minified-only, whole-payload sizes. The number a consumer
 actually pays over the wire is **gzipped**, and — because the peer dependencies
 (dompurify, highlight.js, katex, mermaid, shiki, entities) are the host's to
 bundle — it excludes them. Measured that way (`--bundle --minify --format=esm
---platform=browser`, peers external, gzipped), the **main entry is ~29.7 KB
+--platform=browser`, peers external, gzipped), the **main entry is ~31.5 KB
 gzipped**, and the emoji data subpath is the next largest at ~16.2 KB.
 
 This is no longer a hand-run figure. `scripts/check-bundle-size.mts`
