@@ -21,6 +21,7 @@ import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { renderMarkdownUnsafe } from './renderer.ts'
+import { setEmailAutolinks } from './autolink-syntax.ts'
 import { stripAppCodeDecorations } from './highlight.ts'
 import { installHighlightjs } from './highlight-hljs.ts'
 import { installFullEntityDecoder } from './entity-decoder-full.ts'
@@ -44,6 +45,12 @@ installHighlightjs()
 // `&HilbertSpace;`). The default decoder ships only the HTML4 subset, so register
 // the full `entities`-backed decoder here — this measures config #3 (full).
 installFullEntityDecoder()
+// Bare email autolinking is a GFM autolink-extension feature (#115), not part of
+// CommonMark, so disable it here: a bare `user@host` stays plain text as the
+// base spec expects. The GFM extension conformance suite measures the enabled
+// path (Autolinks (extension) 11/11). Node runs each test file in its own
+// process, so this module-scoped toggle does not leak to other suites.
+setEmailAutolinks(false)
 
 const SPEC_VERSION = commonMarkSpecVersion()
 const spec = loadCommonMarkSpec()

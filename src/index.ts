@@ -159,6 +159,9 @@ export {
   setLinkDecorator,
   setSafeHrefSchemes,
 } from './inline-links.ts'
+// GFM extended email autolinks (#115) are on by default; a host targeting base
+// CommonMark/GFM (a bare `user@host` stays plain text) turns them off here.
+export { isEmailAutolinksEnabled, setEmailAutolinks } from './autolink-syntax.ts'
 // Inline syntax is extensible via registered passes (#53): citations `[@key]`,
 // highlights `==x==`, and friends run inside the inline pipeline with code-span
 // shielding, escape-safe HTML emission (ctx.emit), and streaming-hold support.
