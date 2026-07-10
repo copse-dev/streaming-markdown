@@ -69,6 +69,23 @@ describe('streaming markdown convergence (CommonMark baseline fuzz)', () => {
     }
   })
 
+  // #109: a pending top-level bullet after a trailing blockquote whose last
+  // block is itself a list must stream as a sibling list, matching both the DOM
+  // emitter and the fresh render — not be spliced inside the quote's list. The
+  // pending bullet renders as a committed-position block inside `stream-complete`
+  // for both emitters, so compare that subtree directly (the shared helper's
+  // `.stream-pending` lookup targets the trailing inline span, not this block).
+  it('streams a pending top-level bullet after a trailing blockquote as a sibling in both emitters', () => {
+    const midStream = '> - a\n\n- b'
+    const host = document.createElement('div')
+    new StreamingMarkdownRenderer(host).update(midStream)
+    const domComplete = host.querySelector('.stream-complete')?.innerHTML ?? ''
+    const stringMid = renderStreamingMarkdown(midStream)
+    assert.equal(stringMid, domComplete, 'string emitter matches DOM stream-complete mid-stream')
+    assert.match(stringMid, /<\/blockquote><ul><li[^>]*>b<\/li><\/ul>$/)
+    assert.doesNotMatch(stringMid, /<li>a<\/li><li[^>]*>b<\/li>/)
+  })
+
   it('renderStreamingMarkdown matches the incremental renderer when fully committed', () => {
     for (const ex of baselineExamples) {
       const markdown = ex.markdown
