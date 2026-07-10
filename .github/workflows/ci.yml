@@ -35,20 +35,19 @@ jobs:
            github.event.pull_request.head.repo.full_name != github.repository)
           && 'ubuntu-latest'
           || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
-    # Exercise both the declared engines floor (Node 20) and the primary
-    # dev/publish version (Node 22). `engines.node` is `>=20`, so a Node-20
-    # break (a syntax/API that only lands in 21+) must redden CI here rather
-    # than reach a consumer on the floor.
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [20, 22]
+    # Runs on Node 22, the primary dev/publish version. The dev toolchain
+    # itself requires 21+ (`devEngines.runtime >= 21`, which npm enforces at
+    # install time; the `npm test` glob also relies on the runner expansion
+    # added in Node 21), so the full workflow cannot run on the Node 20
+    # consumer floor. The declared `engines.node >= 20` floor is validated the
+    # right way by the `smoke` job below: build here, then import the built
+    # `dist/` entry under Node 20.
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 22
           cache: npm
 
       - run: npm ci
@@ -74,7 +73,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-report-node${{ matrix.node }}
+          name: coverage-report
           path: coverage/lcov-report
           if-no-files-found: ignore
 
@@ -87,6 +86,54 @@ jobs:
       # python3 (preinstalled on the runner; also present in the ci-runners image).
       - name: Normalizer parity
         run: npm run check:normalizer-parity
+
+  # Consumer-floor smoke test (#113). `engines.node` is `>=20`, but the dev
+  # toolchain needs 21+, so the `build` job can't run on 20. This job builds
+  # with the dev toolchain on Node 22, then switches the runner to Node 20 and
+  # imports the built `dist/` entry — exercising the declared floor without the
+  # dev-only workflow. A syntax/API in the SHIPPED output that only lands in 21+
+  # reddens here rather than reaching a consumer on the floor.
+  smoke:
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name != github.repository)
+          && 'ubuntu-latest'
+          || (vars.CHECKS_RUNNER || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up dev toolchain (Node 22) and build
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Switch the active runtime to the consumer floor. node_modules from the
+      # Node 22 install persists (the peers are pure JS), and the built entry
+      # imports its optional peers lazily, so no reinstall is needed on Node 20.
+      - name: Switch to consumer floor (Node 20)
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Import built dist entry on Node 20
+        run: |
+          node --version
+          node -e "import('./dist/index.js').then((m) => { \
+            if (typeof m.renderMarkdownUnsafe !== 'function') { \
+              console.error('renderMarkdownUnsafe missing from built entry'); process.exit(1) \
+            } \
+            const html = m.renderMarkdownUnsafe('# hi\n\n**bold**'); \
+            if (!html.includes('<h1>') || !html.includes('<strong>')) { \
+              console.error('unexpected render output on Node 20:', html); process.exit(1) \
+            } \
+            console.log('dist entry imports and renders on', process.version) \
+          }).catch((e) => { console.error(e); process.exit(1) })"
 
   # Trusted Types e2e (#113). Runs the shipped bundle in a real, headless
   # Chromium under an ENFORCED `require-trusted-types-for 'script'` CSP —
@@ -111,6 +158,15 @@ jobs:
 
       - run: npm ci
 
+      # Cache the playwright-core Chromium download (~170MB) across runs so it
+      # isn't re-fetched every time. Keyed on the locked playwright-core version
+      # so a version bump busts the cache and pulls the matched build.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       # Install the Chromium build that matches the locked playwright-core.
       # Idempotent and cached; on the self-hosted image (browser preinstalled)
       # this is a fast no-op. `findChromium()` then resolves it via
@@ -118,8 +174,13 @@ jobs:
       - name: Install Chromium (playwright-core)
         run: npx --no-install playwright-core install chromium
 
+      # `E2E_REQUIRE_BROWSER=1` turns the suite's browser-absent SKIP into a
+      # hard failure, so the "five assertions actually ran" guarantee is
+      # explicit here rather than only implied by the install step succeeding.
       - name: Trusted Types e2e (headless Chromium)
         run: npm run test:e2e
+        env:
+          E2E_REQUIRE_BROWSER: '1'
 
   # Streaming performance guard (#113). The coverage job's absolute throughput
   # floors self-skip under c8 instrumentation, so streaming perf had no CI
@@ -145,6 +206,11 @@ jobs:
       - run: npm ci
 
       - name: Bench (fixed fixtures, relative-regression guard)
+        # `shell: bash` runs `bash -eo pipefail`, so a non-zero exit from the
+        # bench guard propagates through the `tee` pipe and fails the job. The
+        # default Linux shell (`bash -e`, no pipefail) would take `tee`'s exit
+        # code (0) and stay green, defeating the guard.
+        shell: bash
         run: npm run bench | tee bench-output.txt
 
       - name: Upload bench output

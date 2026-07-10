@@ -40,9 +40,17 @@ gzipped**, and the emoji data subpath is the next largest at ~16.2 KB.
 This is no longer a hand-run figure. `scripts/check-bundle-size.mts`
 (`npm run size`) measures the main entry and every key subpath against the
 committed budgets in `scripts/bundle-size-budget.json`, and the CI `size` job
-fails the build if any entry exceeds its budget. So a static import that dragged
-a grammar payload — or the emoji table — back into the core bundle would redden
-the PR instead of silently shipping. When an increase is intentional, bump the
+fails the build if any entry exceeds its budget. The emoji table — bundled, not
+external — is caught by that byte budget: dragging it into the core entry blows
+the `.` budget outright.
+
+A peer dependency is trickier: because the host bundles it, esbuild keeps a
+leaked `import 'shiki'` as an ~30-byte external statement, well inside the ~5%
+headroom, while the consumer's real chunk silently grows ~70 KB. So the gate
+also reads esbuild's metafile and fails if the main entry statically imports
+*any* peer — a leaked grammar or math payload reddens the PR on the import
+itself, not on the bytes. (A lazy `import()` of a peer on its own subpath is the
+intended pattern and is left alone.) When an increase is intentional, bump the
 budget deliberately with `npm run size:update` and commit the JSON.
 
 ## The shape: a pluggable backend, mirroring the sanitizer split

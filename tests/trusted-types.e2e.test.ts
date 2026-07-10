@@ -47,6 +47,17 @@ const skip = !hasPlaywright()
     ? 'no Chromium binary found (set CHROMIUM_BIN)'
     : false
 
+// In CI the browser is guaranteed present (the workflow installs the
+// playwright-core-matched Chromium), so a skip there means the five assertions
+// silently never ran. `E2E_REQUIRE_BROWSER=1` promotes that skip to a hard
+// failure, making the "assertions actually executed" guarantee explicit and
+// independent of the install step happening to fail first.
+if (skip && process.env.E2E_REQUIRE_BROWSER) {
+  throw new Error(
+    `E2E_REQUIRE_BROWSER is set but the Trusted Types e2e suite would skip: ${skip}`,
+  )
+}
+
 describe('Trusted Types enforcement e2e (real Chromium)', { skip }, () => {
   let browser: TTBrowser
   let page: PwPage
