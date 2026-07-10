@@ -856,8 +856,12 @@ export function tokenizeBlocks(source: string): BlockToken[] {
     // Final line without newline: open paragraph (setext text line is still open
     // until a following ===/--- line arrives, handled above).
     if (!line.terminated && i === lines.length - 1) {
+      /* c8 ignore start -- unreachable: a final unterminated line that isTableRow
+         is already emitted as a table by the dedicated branch above, so
+         isPotentialTableStart is always false by the time we reach here. */
       if (isPotentialTableStart(lines, i)) {
         pushBlock(blocks, 'table', 'ambiguous', line.start, line.end)
+        /* c8 ignore stop */
       } else {
         pushBlock(blocks, 'paragraph', 'open', line.start, line.end)
       }

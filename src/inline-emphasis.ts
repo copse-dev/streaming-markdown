@@ -203,9 +203,13 @@ function handleCloseRemainder(
           canClose: remRf,
         })
       }
+      /* c8 ignore start -- unreachable: `remOpen` is chosen by findMatchingOpener
+         using emphasisMatchAllowed with the same (remainder, remCanOpen) arguments,
+         so the identical guard just above always holds and this else-if is dead. */
     } else if (remCanOpen) {
       stack.push({ index: remIndex, char: ch, len: remainder, canClose: remRf })
     }
+    /* c8 ignore stop */
   } else if (remCanOpen) {
     stack.push({ index: remIndex, char: ch, len: remainder, canClose: remRf })
   }
@@ -414,13 +418,18 @@ function renderEmphasisSegment(s: string, mask: boolean[], linkRefs: LinkReferen
       continue
     }
     if (skip[i]) {
+      /* c8 ignore start -- unreachable: root matches are consumed wholesale via
+         assembleMatch/matchEnd and matches are properly nested, so skip[] is never
+         true at a scanned index. */
       i++
       continue
     }
+    /* c8 ignore stop */
     let next = s.length
     if (root) next = Math.min(next, root.openIndex)
     for (let j = i + 1; j < next; j++) {
       if (skip[j]) {
+        /* c8 ignore next 3 -- unreachable: same nested-match invariant as above. */
         next = j
         break
       }
