@@ -52,7 +52,7 @@ const skip = !hasPlaywright()
 // silently never ran. `E2E_REQUIRE_BROWSER=1` promotes that skip to a hard
 // failure, making the "assertions actually executed" guarantee explicit and
 // independent of the install step happening to fail first.
-if (skip && process.env.E2E_REQUIRE_BROWSER) {
+if (skip && process.env['E2E_REQUIRE_BROWSER']) {
   throw new Error(
     `E2E_REQUIRE_BROWSER is set but the Trusted Types e2e suite would skip: ${skip}`,
   )
