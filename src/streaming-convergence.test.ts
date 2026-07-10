@@ -86,16 +86,23 @@ describe('streaming markdown convergence (CommonMark baseline fuzz)', () => {
     assert.doesNotMatch(stringMid, /<li>a<\/li><li[^>]*>b<\/li>/)
   })
 
-  it('sweeps a stale pending <li> when a later held frame empties the list tail (#108)', () => {
-    // Frame `- ~~` renders a pending list item; frame `- ~~[` makes the `~~` an
-    // unmatched opener, so the whole tail holds. The pending <li>/<ul> from the
-    // prior frame must be swept, matching a fresh (empty) render.
+  it('sweeps a stale pending <li> and its wrapper when a held frame empties the list tail (#108)', () => {
+    // Frame `- ~~a~~` renders a real pending list item (`<li><del>a</del></li>`);
+    // frame `- ~~a~~~~` drops the length-4 tilde run, leaving the opening `~~` an
+    // unmatched opener so the whole tail holds and `pendingInner` empties. The
+    // prior frame's pending <li> AND the <ul> created solely to host it must
+    // both be swept, converging to a fresh (empty) render — not `<ul></ul>`.
+    // (The earlier `- ~~` → `- ~~[` scenario was vacuous: the trailing-`~~` hold
+    // means `- ~~` never creates an <li>, so both assertions passed even with
+    // the sweep reverted.)
     const host = document.createElement('div')
     const renderer = new StreamingMarkdownRenderer(host)
-    renderer.update('- ~~')
-    renderer.update('- ~~[')
+    renderer.update('- ~~a~~')
+    assert.equal(host.querySelectorAll('li').length, 1, 'frame 1 should render a pending <li>')
+    renderer.update('- ~~a~~~~')
     assert.equal(host.querySelectorAll('li').length, 0, 'stale pending <li> persisted')
-    assert.equal(extractStreamingDisplay(host), streamingDisplayAfterUpdates('- ~~[', [5]))
+    assert.equal(host.querySelectorAll('ul').length, 0, 'stranded empty <ul> wrapper persisted')
+    assert.equal(extractStreamingDisplay(host), streamingDisplayAfterUpdates('- ~~a~~~~', [9]))
   })
 
   it('never flashes a literal trailing ~~ that a later character retracts (#108)', () => {

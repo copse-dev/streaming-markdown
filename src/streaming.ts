@@ -100,7 +100,21 @@ function clearBlockPendingDom(completedEl: HTMLElement, parts: BlockPendingClean
   if (parts.includes('continuation')) clearListContinuationDom(completedEl)
   if (parts.includes('paragraph-continuation')) clearParagraphContinuationDom(completedEl)
   if (parts.includes('list-items')) {
-    tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)?.remove()
+    const pendingLi = tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)
+    const wrapper = pendingLi?.parentElement
+    pendingLi?.remove()
+    // The wrapper <ul>/<ol> may have been created solely to host this pending
+    // item; once the item is swept, a now-empty wrapper is stale content that
+    // diverges from the fresh render (an empty document, not `<ul></ul>`), so
+    // drop it too. A wrapper that still holds committed items stays. Mirrors the
+    // inactive-branch cleanup in syncListPendingDom.
+    if (
+      wrapper &&
+      (wrapper.tagName === 'UL' || wrapper.tagName === 'OL') &&
+      wrapper.childNodes.length === 0
+    ) {
+      wrapper.remove()
+    }
   }
   if (parts.includes('direct-blocks')) {
     tailDirectPendingBlock(completedEl, false)?.remove()
