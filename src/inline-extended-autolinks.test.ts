@@ -149,3 +149,93 @@ describe('extended autolink streaming convergence', () => {
     })
   }
 })
+
+describe('extended autolink boundary and path-validation fixes (#115 review)', () => {
+  // This pass runs AFTER emphasis/strikethrough rendering, so a source flank
+  // char (`*`/`_`/`~`) has already become a tag; the run's preceding char is the
+  // tag-closing `>`. Without `>` as a left boundary these rendered as styled
+  // plain text where GitHub renders styled links.
+  it('links a www host directly inside emphasis / strong / strikethrough', () => {
+    assert.equal(
+      renderInlineSpans('*www.example.com*'),
+      `<em>${anchor('http://www.example.com', 'www.example.com')}</em>`,
+    )
+    assert.equal(
+      renderInlineSpans('**www.example.com**'),
+      `<strong>${anchor('http://www.example.com', 'www.example.com')}</strong>`,
+    )
+    assert.equal(
+      renderInlineSpans('~~www.example.com~~'),
+      `<del>${anchor('http://www.example.com', 'www.example.com')}</del>`,
+    )
+    assert.equal(
+      renderInlineSpans('_www.example.com_'),
+      `<em>${anchor('http://www.example.com', 'www.example.com')}</em>`,
+    )
+  })
+
+  it('still links after an unpaired literal flank char', () => {
+    assert.equal(
+      renderInlineSpans('*www.example.com'),
+      `*${anchor('http://www.example.com', 'www.example.com')}`,
+    )
+  })
+
+  it('applies the valid-domain underscore rule to schemed URLs too, not just www', () => {
+    // GFM runs the same check_domain on a schemed URL: an underscore in the last
+    // two domain segments makes it not a valid domain, so it stays prose.
+    assert.equal(
+      renderInlineSpans('http://foo_bar.example_baz.com/x'),
+      'http://foo_bar.example_baz.com/x',
+    )
+    // A valid schemed domain (and a short host with no dot) still links.
+    assert.equal(
+      renderInlineSpans('http://example.com/x'),
+      anchor('http://example.com/x', 'http://example.com/x'),
+    )
+    assert.equal(
+      renderInlineSpans('http://localhost:3000/x'),
+      anchor('http://localhost:3000/x', 'http://localhost:3000/x'),
+    )
+  })
+
+  it('leaves a lone non-entity trailing ; out of the link (matches cmark / bare-URL pass)', () => {
+    assert.equal(
+      renderInlineSpans('https://example.com/a;'),
+      `${anchor('https://example.com/a', 'https://example.com/a')};`,
+    )
+    // An entity-like `&word;` tail is still trimmed as a whole (excluded from
+    // the link, then emitted as escaped trailing text) — not treated as a lone `;`.
+    assert.equal(
+      renderInlineSpans('www.google.com/s?q=commonmark&hl;'),
+      `${anchor('http://www.google.com/s?q=commonmark', 'www.google.com/s?q=commonmark')}&amp;hl;`,
+    )
+  })
+})
+
+describe('extended autolink performance guards (pathological input, #115 review)', () => {
+  // These forms were O(n²) before the fix: the email domain scan consumed `@`
+  // as a domain char and rescanned the whole tail from every `@`
+  // (GHSA-29g3-96g3-jg6c), and each trailing `)` re-counted every paren in the
+  // link. A single hostile chat message froze the streaming renderer for many
+  // seconds per update. The bound is generous — the linear fix runs in
+  // milliseconds while a quadratic regression takes tens of seconds — so it
+  // catches a regression without flaking.
+  const BUDGET_MS = 2000
+
+  it('linkifies a pathological a@a@a@… run in linear time', () => {
+    const input = 'a@'.repeat(30000)
+    const started = Date.now()
+    renderInlineSpans(input)
+    const elapsed = Date.now() - started
+    assert.ok(elapsed < BUDGET_MS, `email scan took ${String(elapsed)}ms (> ${String(BUDGET_MS)}ms) — quadratic?`)
+  })
+
+  it('trims a long trailing ) run in linear time', () => {
+    const input = `www.a.b/${')'.repeat(100000)}`
+    const started = Date.now()
+    renderInlineSpans(input)
+    const elapsed = Date.now() - started
+    assert.ok(elapsed < BUDGET_MS, `paren trim took ${String(elapsed)}ms (> ${String(BUDGET_MS)}ms) — quadratic?`)
+  })
+})

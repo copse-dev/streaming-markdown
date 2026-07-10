@@ -192,9 +192,25 @@ function renderExtendedAutolinks(text: string): string {
   return mapOutsideInlineHtml(mapOutsideInlineHtml(text, linkifyWwwAndUrlAutolinks), linkifyEmailAutolinks)
 }
 
-/** GFM left-flank characters an extended `www.`/URL autolink may follow. */
+/**
+ * GFM left-flank characters an extended `www.`/URL autolink may follow. `*_~(`
+ * are the source flank set (for a literal, unpaired flank char); `>` is the
+ * close of a non-shielded inline tag (`<em>`/`<strong>`/`<del>`), since this
+ * pass runs after emphasis/strikethrough rendering — without it `*www.x.com*`
+ * arrives as `<em>www.x.com</em>` and the run's preceding char is `>`, so it
+ * would never link where GitHub renders a styled link. A literal source `>` is
+ * escaped to `&gt;` before this pass, so a bare `>` is always a tag close.
+ */
 function isExtendedAutolinkBoundary(prev: string | undefined): boolean {
-  return prev === undefined || /\s/.test(prev) || prev === '*' || prev === '_' || prev === '~' || prev === '('
+  return (
+    prev === undefined ||
+    /\s/.test(prev) ||
+    prev === '*' ||
+    prev === '_' ||
+    prev === '~' ||
+    prev === '(' ||
+    prev === '>'
+  )
 }
 
 const URL_SCHEME_RE = /^(?:https?|ftp):\/\//i
@@ -218,6 +234,16 @@ const AUTOLINK_TRAILING_PUNCTUATION = new Set(['?', '!', '.', ',', ':', '*', '_'
  */
 function trimAutolinkTail(link: string): string {
   let end = link.length
+  // Count parens once up front. Only the `)` branch removes a paren (from the
+  // tail), so decrementing `close` per trim keeps the balance exact while a long
+  // run of trailing `)` costs O(n) total instead of re-counting the whole link
+  // each time (which was O(n²) on hostile input like `www.a/))))…`).
+  let open = 0
+  let close = 0
+  for (let i = 0; i < link.length; i++) {
+    if (link[i] === '(') open++
+    else if (link[i] === ')') close++
+  }
   while (end > 0) {
     const c = link[end - 1] ?? ''
     if (AUTOLINK_TRAILING_PUNCTUATION.has(c)) {
@@ -225,13 +251,8 @@ function trimAutolinkTail(link: string): string {
       continue
     }
     if (c === ')') {
-      let open = 0
-      let close = 0
-      for (let i = 0; i < end; i++) {
-        if (link[i] === '(') open++
-        else if (link[i] === ')') close++
-      }
       if (close <= open) break
+      close--
       end--
       continue
     }
@@ -239,10 +260,13 @@ function trimAutolinkTail(link: string): string {
       let scan = end - 2
       while (scan > 0 && /[A-Za-z]/.test(link[scan] ?? '')) scan--
       if (scan < end - 2 && link[scan] === '&') {
-        end = scan
+        end = scan // trim a whole entity-like `&word;`
         continue
       }
-      break
+      // A lone trailing `;` is ordinary trailing punctuation (matches cmark's
+      // autolink_delim and the bare-URL pass on main); trim just the `;`.
+      end--
+      continue
     }
     break
   }
@@ -281,8 +305,17 @@ function linkifyWwwAndUrlAutolinks(segment: string): string {
       const urlScheme = URL_SCHEME_RE.exec(rest)
       if (urlScheme) {
         const after = segment[i + urlScheme[0].length]
-        // Require at least one domain character after the scheme, like the bare pass.
-        if (after !== undefined && !/\s/.test(after) && after !== '<') {
+        const schemedDomain = /^[A-Za-z0-9._-]+/.exec(rest.slice(urlScheme[0].length))?.[0] ?? ''
+        // Require a domain character after the scheme (like the bare pass) and
+        // enforce the same valid-domain underscore rule GFM applies to `www.`
+        // hosts (cmark runs the same check_domain on schemed URLs).
+        if (
+          after !== undefined &&
+          !/\s/.test(after) &&
+          after !== '<' &&
+          schemedDomain !== '' &&
+          wwwDomainIsValid(schemedDomain)
+        ) {
           const built = buildExtendedAutolink(segment, i, '')
           if (built) {
             out += built.html
@@ -318,15 +351,20 @@ const EMAIL_LOCAL_CHAR_RE = /[A-Za-z0-9.+_-]/
  * as prose). Returns the `<a>` span and its bounds, or null when it is not a
  * valid address.
  */
+interface EmailMatch {
+  html: string
+  start: number
+  end: number
+}
+
 function matchEmailAutolink(
   segment: string,
   at: number,
-): { html: string; start: number; end: number } | null {
+): { match: EmailMatch | null; scanEnd: number } {
   let start = at
   while (start > 0 && EMAIL_LOCAL_CHAR_RE.test(segment[start - 1] ?? '')) start--
-  if (start === at) return null // no local part
+  if (start === at) return { match: null, scanEnd: at + 1 } // no local part
 
-  let atCount = 0
   let dotCount = 0
   let end = at
   while (end < segment.length) {
@@ -334,7 +372,10 @@ function matchEmailAutolink(
     if (/[A-Za-z0-9]/.test(c)) {
       end++
     } else if (c === '@') {
-      atCount++
+      // Stop at a second `@`: a valid address has exactly one, and consuming
+      // past it would rescan the whole tail from every `@`, giving O(n²) on
+      // hostile input like `a@a@a@…` (GHSA-29g3-96g3-jg6c). cmark stops here too.
+      if (end > at) break
       end++
     } else if (c === '.' && end < segment.length - 1 && /[A-Za-z0-9]/.test(segment[end + 1] ?? '')) {
       dotCount++
@@ -346,13 +387,13 @@ function matchEmailAutolink(
     }
   }
   const last = segment[end - 1] ?? ''
-  if (end - at < 2 || atCount !== 1 || dotCount === 0 || (!/[A-Za-z]/.test(last) && last !== '.')) {
-    return null
+  if (end - at < 2 || dotCount === 0 || (!/[A-Za-z]/.test(last) && last !== '.')) {
+    return { match: null, scanEnd: end }
   }
   const email = segment.slice(start, end)
   const href = safeLinkHref(`mailto:${email}`)
-  if (!href) return null
-  return { html: renderedBareLink(email, href), start, end }
+  if (!href) return { match: null, scanEnd: end }
+  return { match: { html: renderedBareLink(email, href), start, end }, scanEnd: end }
 }
 
 function linkifyEmailAutolinks(segment: string): string {
@@ -362,13 +403,18 @@ function linkifyEmailAutolinks(segment: string): string {
   let i = 0
   while (i < segment.length) {
     if (segment[i] === '@') {
-      const match = matchEmailAutolink(segment, i)
+      const { match, scanEnd } = matchEmailAutolink(segment, i)
       if (match) {
         out += segment.slice(emitted, match.start) + match.html
         i = match.end
         emitted = match.end
         continue
       }
+      // No match: jump past the region already scanned as `@`+domain. The only
+      // `@` in (i, scanEnd) is this one, so nothing there can start an address —
+      // skipping it keeps the outer pass O(n) rather than retrying every char.
+      i = Math.max(i + 1, scanEnd)
+      continue
     }
     i++
   }
