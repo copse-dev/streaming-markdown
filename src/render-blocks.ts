@@ -191,6 +191,11 @@ function renderAtxHeading(slice: string, linkRefs: LinkReferenceMap): string {
   return `<h${String(level)}>${renderProseBlock(text, linkRefs)}</h${String(level)}>`
 }
 
+// A setext underline slice (only `=` or `-` runs). Mirrors the tokenizer's
+// `SETEXT_UNDERLINE_RE`, tolerating a trailing newline on the slice. A `***`
+// thematic break never matches, so it keeps rendering as an `<hr>` (#105).
+const SETEXT_UNDERLINE_SLICE_RE = /^ {0,3}(?:=+|-+)[ \t]*\n?$/
+
 function renderSetextHeading(slice: string, linkRefs: LinkReferenceMap): string {
   const lines = dropTrailingNewline(slice).split('\n')
   // All lines above the underline are heading content (spec 81/95).
@@ -592,6 +597,25 @@ export function renderBlocks(
       const group = collectBlockquoteGroup(source, tokens, i, linkRefs)
       if (group.html) parts.push(group.html)
       i = group.next
+      continue
+    }
+    // At rest, a paragraph immediately followed by an unterminated setext
+    // underline (`Heading\n===` at EOF) is a heading, not `<p>` + `<hr>` (#105).
+    // The tokenizer emits `thematic_break:ambiguous` for that underline as a
+    // streaming compromise — the pending underline is held out of the committed
+    // region, so this adjacency only ever surfaces when the whole document is
+    // rendered at rest. Resolve it to the setext heading its terminated form
+    // would produce; a `=` underline must never invent an `<hr>`.
+    const underline = tokens[i + 1]
+    if (
+      token.kind === 'paragraph' &&
+      underline &&
+      underline.kind === 'thematic_break' &&
+      underline.status === 'ambiguous' &&
+      SETEXT_UNDERLINE_SLICE_RE.test(source.slice(underline.start, underline.end))
+    ) {
+      parts.push(renderSetextHeading(source.slice(token.start, underline.end), linkRefs))
+      i += 2
       continue
     }
     const html = renderSingleBlock(
