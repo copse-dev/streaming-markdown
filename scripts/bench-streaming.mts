@@ -80,6 +80,25 @@ function termsOfService(): string {
   return readFileSync(resolve(pkgRoot, 'tests/fixtures/terms-of-service-streaming.md'), 'utf8')
 }
 
+/**
+ * Footnote-heavy fixture (#110): `paras` cited paragraphs followed by their
+ * definitions — the shape LLM citations stream in. References are literal until
+ * their definition arrives, then upgrade to numbered `<sup>` links and grow the
+ * trailing footnotes section. This used to force a full re-morph on every commit
+ * (the whole stream O(n²)); the guard below asserts it no longer does.
+ */
+function footnoteDoc(paras: number): string {
+  const body = Array.from(
+    { length: paras },
+    (_, i) => `Paragraph ${String(i)} makes a claim.[^${String(i)}]`,
+  ).join('\n\n')
+  const defs = Array.from(
+    { length: paras },
+    (_, i) => `[^${String(i)}]: Source number ${String(i)}.`,
+  ).join('\n')
+  return `${body}\n\n${defs}\n`
+}
+
 function chunkBoundaries(length: number, chunk: number): number[] {
   const cuts: number[] = []
   for (let i = chunk; i < length; i += chunk) cuts.push(i)
@@ -129,6 +148,7 @@ const fixtures: { name: string; text: string }[] = [
   { name: 'commonmark-mixed', text: commonMarkMixed() },
   { name: 'terms-of-service', text: termsOfService() },
   { name: 'synthetic-table+list', text: syntheticTableAndList() },
+  { name: 'footnotes-heavy', text: footnoteDoc(80) },
 ]
 
 console.log(
@@ -217,5 +237,42 @@ if (meanGrowth >= 3.0) {
   throw new Error(
     `DOM streaming scaled ${meanGrowth.toFixed(2)}×/doubling — expected sub-quadratic (< 3×). ` +
       `A committed-prefix re-render regression (#21) is the likely cause.`,
+  )
+}
+
+// Footnote scaling (#110): stream a footnote-heavy document at a FIXED chunk so
+// updates grow with size. The old path full-re-morphed on every commit once `[^`
+// was present, so this grew ~4×/doubling (100 paras ≈ 3.5s, 200 ≈ 15s). With the
+// incremental footnote path — re-morphing only the reference blocks a definition
+// changed plus the new section items — it grows sub-quadratically.
+console.log('\nfootnote scaling — DOM path, fixed 48-byte chunk (updates grow with size)\n')
+console.log(scaleCols.join('  '))
+console.log('-'.repeat(scaleCols.join('  ').length))
+let prevFnMs = 0
+const fnGrowthFactors: number[] = []
+for (const paras of [50, 100, 200]) {
+  const text = footnoteDoc(paras)
+  const updates = chunkBoundaries(text.length, 48).length
+  const domMs = measure(() => benchDomPath(text, 48), args.iters, args.warmup)
+  const factor = prevFnMs > 0 ? domMs / prevFnMs : 0
+  if (factor > 0) fnGrowthFactors.push(factor)
+  console.log(
+    [
+      pad(String(paras), 8),
+      padLeft(String(text.length), 8),
+      padLeft(String(updates), 9),
+      padLeft(domMs.toFixed(2), 10),
+      padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
+    ].join('  '),
+  )
+  prevFnMs = domMs
+}
+
+const meanFnGrowth = fnGrowthFactors.reduce((a, x) => a + x, 0) / fnGrowthFactors.length
+console.log(`\nfootnote mean growth per doubling: ${meanFnGrowth.toFixed(2)}× (regression guard: < 3.0×)`)
+if (meanFnGrowth >= 3.0) {
+  throw new Error(
+    `Footnote DOM streaming scaled ${meanFnGrowth.toFixed(2)}×/doubling — expected sub-quadratic ` +
+      `(< 3×). A regression to per-commit full re-morph on '[^' (#110) is the likely cause.`,
   )
 }
