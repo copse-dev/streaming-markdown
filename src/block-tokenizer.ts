@@ -169,17 +169,33 @@ function isProseMetadataPipeLine(line: string): boolean {
   return false
 }
 
-/** True when a line participates in GFM table syntax (not prose metadata with inline pipes). */
-export function isGfmTableRowLine(line: string): boolean {
+/**
+ * A matching delimiter row is unambiguous GFM table syntax and overrides the
+ * prose-metadata heuristic (#106): a header cell with `**Label:**` or an inline
+ * image no longer vetoes the table when the very next line is a valid delimiter
+ * row whose column count matches the header (spec 203).
+ */
+function hasMatchingDelimiterRow(headerLine: string, nextLine: string | undefined): boolean {
+  if (nextLine === undefined) return false
+  if (!TABLE_SEP_RE.test(nextLine)) return false
+  return tableColumnsMatch(headerLine, nextLine)
+}
+
+/**
+ * True when a line participates in GFM table syntax (not prose metadata with
+ * inline pipes). Pass `nextLine` so a prose-metadata header still forms a table
+ * when a matching delimiter row follows (#106).
+ */
+export function isGfmTableRowLine(line: string, nextLine?: string): boolean {
   if (!lineContainsPipeCellDelimiter(line)) return false
-  if (isProseMetadataPipeLine(line)) return false
+  if (isProseMetadataPipeLine(line) && !hasMatchingDelimiterRow(line, nextLine)) return false
   const trimmed = line.trimStart()
   if (trimmed.startsWith('|')) return true
   return splitTableRow(trimmed).length >= 2
 }
 
-function isTableRow(line: string): boolean {
-  return isGfmTableRowLine(line)
+function isTableRow(line: string, nextLine?: string): boolean {
+  return isGfmTableRowLine(line, nextLine)
 }
 
 /**
@@ -231,8 +247,8 @@ function isPartialTableSeparatorLine(line: string): boolean {
  */
 export function isPotentialTableStart(lines: ScannedLine[], i: number): boolean {
   const line = lines[i]
-  if (!line || !isTableRow(line.text)) return false
   const next = lines[i + 1]
+  if (!line || !isTableRow(line.text, next?.text)) return false
   // A terminated separator line is definitive: it's a table iff the column counts
   // match (spec 203). An unterminated one is still streaming and may yet gain
   // columns (`| - |` → `| - | - |`), so hold it as a potential table.
@@ -240,7 +256,7 @@ export function isPotentialTableStart(lines: ScannedLine[], i: number): boolean 
     return next.terminated ? tableColumnsMatch(line.text, next.text) : true
   }
   if (next && isPartialTableSeparatorLine(next.text)) return true
-  if (next && isTableRow(next.text)) return true
+  if (next && isTableRow(next.text, lines[i + 2]?.text)) return true
   return line.text.trimStart().startsWith('|')
 }
 
@@ -437,7 +453,9 @@ function breaksUnorderedListItem(lines: ScannedLine[], itemStart: number, j: num
     BLOCKQUOTE_RE.test(next.text) ||
     FOOTNOTE_DEF_LINE_RE.test(next.text) ||
     tryLinkRefDefBlock(lines, j) !== null ||
-    (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
+    (isTableRow(next.text, lines[j + 1]?.text) &&
+          lines[j + 1] &&
+          TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
   ) {
     return true
   }
@@ -626,7 +644,9 @@ export function tokenizeBlocks(source: string): BlockToken[] {
             BLOCKQUOTE_RE.test(next.text) ||
             FOOTNOTE_DEF_LINE_RE.test(next.text) ||
             tryLinkRefDefBlock(lines, j) !== null ||
-            (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
+            (isTableRow(next.text, lines[j + 1]?.text) &&
+          lines[j + 1] &&
+          TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
           ) {
             break
           }
@@ -682,8 +702,9 @@ export function tokenizeBlocks(source: string): BlockToken[] {
       continue
     }
 
-    if (isTableRow(line.text)) {
-      const nextLine = lines[i + 1]
+    const nextTableLine = lines[i + 1]
+    if (isTableRow(line.text, nextTableLine?.text)) {
+      const nextLine = nextTableLine
       if (
         nextLine &&
         TABLE_SEP_RE.test(nextLine.text) &&
@@ -792,7 +813,9 @@ export function tokenizeBlocks(source: string): BlockToken[] {
         // A FOOTNOTE definition can (cmark-gfm parses it as a container
         // start), so `text[^1]\n[^1]: note` resolves without a blank line.
         FOOTNOTE_DEF_LINE_RE.test(next.text) ||
-        (isTableRow(next.text) && lines[j + 1] && TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
+        (isTableRow(next.text, lines[j + 1]?.text) &&
+          lines[j + 1] &&
+          TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
       ) {
         break
       }
