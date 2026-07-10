@@ -5,8 +5,9 @@ import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
 
-const anchor = (href: string, label: string) =>
-  `<a href="${href}" target="_blank" rel="noopener noreferrer" data-browser-link="true">${label}</a>`
+// Neutral default link output (#124): anchors render as a plain `<a href>` with
+// no target/rel/decorator attributes unless a host installs a link decorator.
+const anchor = (href: string, label: string) => `<a href="${href}">${label}</a>`
 
 /** Visible streaming HTML: committed blocks + any forming table + live tail. */
 function extractStreamingDisplay(host: HTMLElement): string {
