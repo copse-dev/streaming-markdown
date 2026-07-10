@@ -10,8 +10,9 @@ import { renderMarkdownUnsafe } from './renderer.ts'
 import { setSafeHrefSchemes } from './inline-links.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
 
-const anchor = (href: string, label: string): string =>
-  `<a href="${href}" target="_blank" rel="noopener noreferrer" data-browser-link="true">${label}</a>`
+// Neutral default link output (#124): a plain `<a href>` with no
+// target/rel/decorator attributes unless a host installs a link decorator.
+const anchor = (href: string, label: string): string => `<a href="${href}">${label}</a>`
 
 describe('extended www autolinks', () => {
   it('links a bare www host, prefixing http://', () => {
