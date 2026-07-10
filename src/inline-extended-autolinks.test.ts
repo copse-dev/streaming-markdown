@@ -7,6 +7,7 @@ import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderInlineSpans } from './inline-spans.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
+import { setEmailAutolinks } from './autolink-syntax.ts'
 import { setSafeHrefSchemes } from './inline-links.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
 
@@ -211,6 +212,33 @@ describe('extended autolink boundary and path-validation fixes (#115 review)', (
       renderInlineSpans('www.google.com/s?q=commonmark&hl;'),
       `${anchor('http://www.google.com/s?q=commonmark', 'www.google.com/s?q=commonmark')}&amp;hl;`,
     )
+  })
+})
+
+describe('email autolink toggle (#115)', () => {
+  afterEach(() => setEmailAutolinks(true))
+
+  it('links a bare email by default', () => {
+    assert.equal(renderInlineSpans('foo@bar.com'), anchor('mailto:foo@bar.com', 'foo@bar.com'))
+  })
+
+  it('leaves a bare email as plain text when disabled', () => {
+    setEmailAutolinks(false)
+    assert.equal(renderInlineSpans('Reach foo@bar.com today'), 'Reach foo@bar.com today')
+  })
+
+  it('still linkifies www/URL autolinks when only email is disabled', () => {
+    setEmailAutolinks(false)
+    assert.equal(
+      renderInlineSpans('www.example.com'),
+      anchor('http://www.example.com', 'www.example.com'),
+    )
+  })
+
+  it('re-enabling restores email autolinking', () => {
+    setEmailAutolinks(false)
+    setEmailAutolinks(true)
+    assert.equal(renderInlineSpans('foo@bar.com'), anchor('mailto:foo@bar.com', 'foo@bar.com'))
   })
 })
 

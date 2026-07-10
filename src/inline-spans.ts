@@ -1,3 +1,4 @@
+import { isEmailAutolinksEnabled } from './autolink-syntax.ts'
 import { decodeEscapedPunctuation, encodeBackslashEscapes } from './backslash-escapes.ts'
 import { escapeHtmlTextNodes } from './escape.ts'
 import { renderAngleAutolinks } from './inline-autolinks.ts'
@@ -189,7 +190,10 @@ function mapOutsideInlineHtml(text: string, fn: (segment: string) => string): st
 function renderExtendedAutolinks(text: string): string {
   // URL/`www.` first, then email over the result: an email inside a freshly
   // generated `<a>` (e.g. userinfo in a linked URL) is shielded on the re-split.
-  return mapOutsideInlineHtml(mapOutsideInlineHtml(text, linkifyWwwAndUrlAutolinks), linkifyEmailAutolinks)
+  const withUrls = mapOutsideInlineHtml(text, linkifyWwwAndUrlAutolinks)
+  // Email autolinking is a separately toggleable GFM feature (#115): a consumer
+  // targeting base CommonMark/GFM leaves a bare address as plain text.
+  return isEmailAutolinksEnabled() ? mapOutsideInlineHtml(withUrls, linkifyEmailAutolinks) : withUrls
 }
 
 /**
