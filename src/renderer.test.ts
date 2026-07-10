@@ -650,6 +650,23 @@ describe('renderMarkdownUnsafe CommonMark structure fixes', () => {
     assert.match(renderMarkdownUnsafe('Section\n---\n'), /<h2>Section<\/h2>/)
   })
 
+  it('resolves a setext heading whose underline lacks a trailing newline (#105)', () => {
+    // The unterminated underline emits a `thematic_break:ambiguous` streaming
+    // compromise; at rest it must render as the heading, never `<p>` + `<hr>`.
+    assert.equal(renderMarkdownUnsafe('Heading\n======='), '<h1>Heading</h1>')
+    assert.equal(renderMarkdownUnsafe('a\n---'), '<h2>a</h2>')
+    // With or without the trailing newline yields the same heading.
+    assert.equal(renderMarkdownUnsafe('Heading\n=======\n'), '<h1>Heading</h1>')
+    assert.equal(renderMarkdownUnsafe('a\n---\n'), '<h2>a</h2>')
+  })
+
+  it('keeps a `=` underline from ever inventing a thematic break (#105)', () => {
+    assert.doesNotMatch(renderMarkdownUnsafe('Heading\n======='), /<hr>/)
+    // A genuine `***` / `---` thematic break at EOF still renders as `<hr>`.
+    assert.equal(renderMarkdownUnsafe('***'), '<hr>')
+    assert.equal(renderMarkdownUnsafe('a\n***'), '<p>a</p>\n<hr>')
+  })
+
   it('treats an all-hash ATX title as a bare closing sequence', () => {
     assert.match(renderMarkdownUnsafe('### ###'), /<h3><\/h3>/)
     assert.match(renderMarkdownUnsafe('## foo ##'), /<h2>foo<\/h2>/)
