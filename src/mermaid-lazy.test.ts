@@ -7,7 +7,7 @@ import {
   hydratePendingDiagrams,
   setDiagramRenderer,
 } from './mermaid.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 // PROTOTYPE (#lazy-load): proves the diagram-renderer registry + hydration flow
 // without the mermaid library (which can't render in jsdom). A stub
@@ -17,7 +17,7 @@ import { renderMarkdown } from './renderer.ts'
 /** Build a detached DOM subtree from the generator's mermaid scaffolding. */
 function renderToDom(md: string): HTMLElement {
   const host = document.createElement('div')
-  host.innerHTML = renderMarkdown(md)
+  host.innerHTML = renderMarkdownUnsafe(md)
   return host
 }
 

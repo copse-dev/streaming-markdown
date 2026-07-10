@@ -3,7 +3,7 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { hydratePendingMath, setMathRenderer } from './math.ts'
 import { setMathSyntax } from './math-syntax.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import {
   pendingHoldIndex,
@@ -119,7 +119,7 @@ describe('streaming math: convergence between emitters and at-rest render', () =
     for (const [name, doc] of MATH_DOCS) {
       const host = streamCharByChar(doc)
       const display = host.querySelector('.stream-complete')?.innerHTML
-      const atRest = sanitizeRenderedMarkdown(renderMarkdown(doc))
+      const atRest = sanitizeRenderedMarkdown(renderMarkdownUnsafe(doc))
       assert.equal(display, atRest, name)
     }
   })

@@ -9,7 +9,7 @@ import {
   shikiHighlighter,
   shikiThemeCss,
 } from './highlight-shiki.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 
 // The shiki analogue of highlight-lazy.test.ts, run against the REAL shiki
@@ -28,7 +28,7 @@ describe('lazy highlighting via the shiki backend', () => {
     // load resolves it behaves exactly like the core's no-backend fallback.
     setCodeHighlighter(shikiHighlighter)
 
-    const html = renderMarkdown('```ts\nconst x = 1 < 2\n```')
+    const html = renderMarkdownUnsafe('```ts\nconst x = 1 < 2\n```')
     // Class resolution stays in the core (ts → typescript), identical before
     // and after load — no className churn on upgrade.
     assert.match(html, /<pre><code class="hljs lang-typescript">/)
@@ -43,7 +43,7 @@ describe('lazy highlighting via the shiki backend', () => {
     assert.equal(backend, shikiHighlighter)
     assert.equal(getCodeHighlighter(), shikiHighlighter)
 
-    const html = renderMarkdown('```ts\nconst x = 1 < 2\n```')
+    const html = renderMarkdownUnsafe('```ts\nconst x = 1 < 2\n```')
     assert.match(html, /<pre><code class="hljs lang-typescript">/)
     // Tokens carry theme-palette classes, not inline styles (which the sink
     // sanitizer would strip).
@@ -74,7 +74,7 @@ describe('lazy highlighting via the shiki backend', () => {
 
   it('output passes the sink sanitizer unmangled', async () => {
     await loadShiki()
-    const html = renderMarkdown('```ts\nconst n = 1 // note\n```')
+    const html = renderMarkdownUnsafe('```ts\nconst n = 1 // note\n```')
     // Token markup is inside the allowlist (spans + class only), so the
     // sanitizer is a byte-for-byte no-op on it.
     assert.equal(sanitizeRenderedMarkdown(html), html)
@@ -83,7 +83,7 @@ describe('lazy highlighting via the shiki backend', () => {
     // With quotes in the code the sanitizer's serializer relaxes `&quot;` back
     // to `"` in text (valid HTML, same for plain fences) — the token markup
     // itself still survives intact.
-    const quoted = sanitizeRenderedMarkdown(renderMarkdown('```ts\nconst s = "a<b&c"\n```'))
+    const quoted = sanitizeRenderedMarkdown(renderMarkdownUnsafe('```ts\nconst s = "a<b&c"\n```'))
     assert.match(quoted, /<span class="shiki-[0-9a-f]{3,8}">"a&lt;b&amp;c"<\/span>/)
   })
 
@@ -96,7 +96,7 @@ describe('lazy highlighting via the shiki backend', () => {
   it('an unknown language stays escaped plain text', async () => {
     await loadShiki()
     // Through the core (never reaches the backend)…
-    const html = renderMarkdown('```weirdlang\n<script>\n```')
+    const html = renderMarkdownUnsafe('```weirdlang\n<script>\n```')
     assert.match(html, /<code class="hljs lang-weirdlang">&lt;script&gt;/)
     // …and via the drift guard for a core-known id whose grammar isn't loaded.
     assert.equal(shikiHighlighter.highlight('<script>', 'notloaded'), '&lt;script&gt;')
@@ -105,7 +105,7 @@ describe('lazy highlighting via the shiki backend', () => {
   it('an empty fence info string stays plain — shiki has no auto-detect', async () => {
     await loadShiki()
     assert.equal(shikiHighlighter.highlightAuto('const x = 1'), 'const x = 1')
-    const html = renderMarkdown('```\nconst x = 1\n```')
+    const html = renderMarkdownUnsafe('```\nconst x = 1\n```')
     assert.match(html, /<pre><code class="hljs lang-text">const x = 1\n<\/code><\/pre>/)
   })
 

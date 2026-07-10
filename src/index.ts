@@ -1,11 +1,13 @@
 /**
  * Public surface of @copse/streaming-markdown.
  *
- * The renderer returns untrusted HTML strings; hosts must sanitize at their
+ * `renderMarkdown` is the safe, default entry point: it returns sanitized HTML
+ * ready for an `innerHTML` sink. `renderMarkdownUnsafe` is the zero-dependency,
+ * DOM-free path that returns untrusted HTML — hosts must sanitize it at their
  * `innerHTML` sinks (`sanitizeRenderedMarkdown` is the reference sanitizer).
  * See README.md for the design invariants and the streaming architecture.
  */
-export { renderMarkdown, type RenderMarkdownOptions } from './renderer.ts'
+export { renderMarkdown, renderMarkdownUnsafe, type RenderMarkdownOptions } from './renderer.ts'
 // Raw-HTML policy (#600). `'passthrough'` (default) emits well-formed raw HTML
 // for the sink sanitizer to arbitrate; `'escape'` literalizes it. Per-render
 // via `renderMarkdown`/streaming `htmlPolicy`, or process-wide via

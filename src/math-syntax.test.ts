@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { tokenizeBlocks } from './block-tokenizer.ts'
 import { hydratePendingMath, type MathRenderer, setMathRenderer } from './math.ts'
 import { getMathSyntax, setMathSyntax } from './math-syntax.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import {
   pendingHoldIndex,
@@ -48,17 +48,17 @@ describe('gate off (default): byte-identical pre-math output', () => {
 
   it('emits no math scaffolding for any prose fixture', () => {
     for (const [name, md] of PROSE_FIXTURES) {
-      const html = renderMarkdown(md)
+      const html = renderMarkdownUnsafe(md)
       assert.doesNotMatch(html, /math-block|math-inline/, name)
     }
   })
 
   it('renders `set $PATH$ properly` (and friends) as literal prose', () => {
-    assert.equal(renderMarkdown('set $PATH$ properly'), '<p>set $PATH$ properly</p>')
-    assert.equal(renderMarkdown('Euler: $e^2$ wow'), '<p>Euler: $e^2$ wow</p>')
+    assert.equal(renderMarkdownUnsafe('set $PATH$ properly'), '<p>set $PATH$ properly</p>')
+    assert.equal(renderMarkdownUnsafe('Euler: $e^2$ wow'), '<p>Euler: $e^2$ wow</p>')
     // Escaped punctuation keeps its CommonMark literal reading.
-    assert.equal(renderMarkdown('so \\(a + b\\) mid'), '<p>so (a + b) mid</p>')
-    assert.equal(renderMarkdown('\\[ E = mc^2 \\]'), '<p>[ E = mc^2 ]</p>')
+    assert.equal(renderMarkdownUnsafe('so \\(a + b\\) mid'), '<p>so (a + b) mid</p>')
+    assert.equal(renderMarkdownUnsafe('\\[ E = mc^2 \\]'), '<p>[ E = mc^2 ]</p>')
   })
 
   it('tokenizes $$ delimiter lines as ordinary paragraphs (no math_block)', () => {
@@ -82,12 +82,12 @@ describe('gate off (default): byte-identical pre-math output', () => {
     const renderer = new StreamingMarkdownRenderer(host)
     for (let i = 1; i <= doc.length; i++) renderer.update(doc.slice(0, i))
     const display = host.querySelector('.stream-complete')?.innerHTML
-    assert.equal(display, sanitizeRenderedMarkdown(renderMarkdown(doc)))
+    assert.equal(display, sanitizeRenderedMarkdown(renderMarkdownUnsafe(doc)))
     assert.doesNotMatch(display ?? '', /math-block|math-inline/)
   })
 
   it('the ```math fence is NOT gated (explicit author intent, like mermaid)', () => {
-    const html = renderMarkdown('```math\nE = mc^2\n```')
+    const html = renderMarkdownUnsafe('```math\nE = mc^2\n```')
     assert.match(
       html,
       /<div class="math-block math-block--pending"><pre class="math">E = mc\^2<\/pre><\/div>/,
@@ -100,15 +100,15 @@ describe('gate off (default): byte-identical pre-math output', () => {
 describe('gate on via renderer registration', () => {
   it('setMathRenderer(backend) activates the prose grammar', () => {
     setMathRenderer(stubRenderer)
-    assert.match(renderMarkdown('set $PATH$ properly'), /math-inline math-inline--pending/)
-    assert.match(renderMarkdown('$$\nE = mc^2\n$$'), /math-block math-block--pending/)
+    assert.match(renderMarkdownUnsafe('set $PATH$ properly'), /math-inline math-inline--pending/)
+    assert.match(renderMarkdownUnsafe('$$\nE = mc^2\n$$'), /math-block math-block--pending/)
   })
 
   it('setMathRenderer(null) restores literal prose output', () => {
     setMathRenderer(stubRenderer)
-    assert.match(renderMarkdown('$x$'), /math-inline/)
+    assert.match(renderMarkdownUnsafe('$x$'), /math-inline/)
     setMathRenderer(null)
-    assert.equal(renderMarkdown('$x$'), '<p>$x$</p>')
+    assert.equal(renderMarkdownUnsafe('$x$'), '<p>$x$</p>')
     assert.equal(pendingHoldIndex('see $x plus'), 'see $x plus'.length)
   })
 
@@ -122,7 +122,7 @@ describe('gate on via renderer registration', () => {
     // existing setMathRenderer side effect — modelled here with the stub.
     setMathRenderer(stubRenderer)
     const host = document.createElement('div')
-    host.innerHTML = renderMarkdown('$$\nE = mc^2\n$$')
+    host.innerHTML = renderMarkdownUnsafe('$$\nE = mc^2\n$$')
     const count = await hydratePendingMath(host)
     assert.equal(count, 1)
     assert.ok(host.querySelector('.math-block--rendered .katex'))
@@ -133,7 +133,7 @@ describe('setMathSyntax override', () => {
   it('true forces the grammar on without a renderer (scaffolding-only hosts)', async () => {
     setMathSyntax(true)
     assert.equal(getMathSyntax(), true)
-    const html = renderMarkdown('inline $a+b$ here')
+    const html = renderMarkdownUnsafe('inline $a+b$ here')
     assert.match(html, /math-inline math-inline--pending/)
     // No renderer: hydration is a no-op and the scaffolding stays pending.
     const host = document.createElement('div')
@@ -145,22 +145,22 @@ describe('setMathSyntax override', () => {
   it('false forces the grammar off even with a renderer registered', () => {
     setMathRenderer(stubRenderer)
     setMathSyntax(false)
-    assert.equal(renderMarkdown('set $PATH$ properly'), '<p>set $PATH$ properly</p>')
-    assert.doesNotMatch(renderMarkdown('$$\nx\n$$'), /math-block/)
+    assert.equal(renderMarkdownUnsafe('set $PATH$ properly'), '<p>set $PATH$ properly</p>')
+    assert.doesNotMatch(renderMarkdownUnsafe('$$\nx\n$$'), /math-block/)
     assert.equal(pendingHoldIndex('see $x plus'), 'see $x plus'.length)
     // The explicitly labeled fence still works — that is the KaTeX-for-fences-
     // only configuration.
-    assert.match(renderMarkdown('```math\nx\n```'), /math-block--pending/)
+    assert.match(renderMarkdownUnsafe('```math\nx\n```'), /math-block--pending/)
   })
 
   it('null defers back to renderer registration', () => {
     setMathSyntax(false)
     setMathRenderer(stubRenderer)
-    assert.doesNotMatch(renderMarkdown('$x$'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('$x$'), /math-inline/)
     setMathSyntax(null)
-    assert.match(renderMarkdown('$x$'), /math-inline/)
+    assert.match(renderMarkdownUnsafe('$x$'), /math-inline/)
     setMathRenderer(null)
-    assert.doesNotMatch(renderMarkdown('$x$'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('$x$'), /math-inline/)
   })
 
   it('a toggle between renders re-parses cleanly at rest', () => {
@@ -170,10 +170,10 @@ describe('setMathSyntax override', () => {
     // renderer for a clean switch; see setMathSyntax docs.)
     const md = '$$\nx\n$$'
     setMathSyntax(true)
-    assert.match(renderMarkdown(md), /math-block/)
+    assert.match(renderMarkdownUnsafe(md), /math-block/)
     setMathSyntax(false)
-    assert.doesNotMatch(renderMarkdown(md), /math-block/)
+    assert.doesNotMatch(renderMarkdownUnsafe(md), /math-block/)
     setMathSyntax(true)
-    assert.match(renderMarkdown(md), /math-block/)
+    assert.match(renderMarkdownUnsafe(md), /math-block/)
   })
 })

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { renderStrikethrough, strikethroughHoldStart } from './inline-strikethrough.ts'
 import { renderInlineSpans } from './inline-spans.ts'
 import { pendingHoldIndex } from './inline-emphasis.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { scanCodeSpans } from './inline-code-spans.ts'
 
 describe('renderStrikethrough (GFM ~~)', () => {
@@ -48,11 +48,11 @@ describe('strikethrough in the inline pipeline', () => {
   })
 
   it('renders through the full block renderer', () => {
-    assert.equal(renderMarkdown('~~removed~~'), '<p><del>removed</del></p>')
+    assert.equal(renderMarkdownUnsafe('~~removed~~'), '<p><del>removed</del></p>')
   })
 
   it('keeps ~~ inside a fenced code block literal', () => {
-    const html = renderMarkdown('```\n~~notdel~~\n```')
+    const html = renderMarkdownUnsafe('```\n~~notdel~~\n```')
     assert.match(html, /~~notdel~~/)
     assert.doesNotMatch(html, /<del>/)
   })

@@ -9,7 +9,7 @@ import {
   setMathRenderer,
 } from './math.ts'
 import { setMathSyntax } from './math-syntax.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 
 // First-class math support (#70): all four block/inline surface forms emit the
@@ -36,75 +36,75 @@ function inlineSource(html: string): string | null {
 
 describe('display math at rest', () => {
   it('renders a ```math fence as pending block scaffolding', () => {
-    const html = renderMarkdown('```math\nE = mc^2\n```')
+    const html = renderMarkdownUnsafe('```math\nE = mc^2\n```')
     assert.equal(blockSource(html), 'E = mc^2')
   })
 
   it('renders $$ blocks with own-line delimiters', () => {
-    const html = renderMarkdown('before\n\n$$\n\\frac{a}{b}\n$$\n\nafter')
+    const html = renderMarkdownUnsafe('before\n\n$$\n\\frac{a}{b}\n$$\n\nafter')
     assert.equal(blockSource(html), '\\frac{a}{b}')
     assert.match(html, /<p>before<\/p>/)
     assert.match(html, /<p>after<\/p>/)
   })
 
   it('renders a one-line $$…$$ block', () => {
-    assert.equal(blockSource(renderMarkdown('$$E = mc^2$$')), 'E = mc^2')
+    assert.equal(blockSource(renderMarkdownUnsafe('$$E = mc^2$$')), 'E = mc^2')
   })
 
   it('renders \\[ … \\] blocks with own-line delimiters (OpenAI shape)', () => {
-    const html = renderMarkdown('\\[\nE = mc^2\n\\]')
+    const html = renderMarkdownUnsafe('\\[\nE = mc^2\n\\]')
     assert.equal(blockSource(html), 'E = mc^2')
   })
 
   it('renders a one-line \\[ … \\] block', () => {
-    assert.equal(blockSource(renderMarkdown('\\[ E = mc^2 \\]')), 'E = mc^2')
+    assert.equal(blockSource(renderMarkdownUnsafe('\\[ E = mc^2 \\]')), 'E = mc^2')
   })
 
   it('keeps multi-line bodies verbatim (matrix rows, blank lines)', () => {
-    const html = renderMarkdown('$$\na \\\\\nb\n$$')
+    const html = renderMarkdownUnsafe('$$\na \\\\\nb\n$$')
     assert.equal(blockSource(html), 'a \\\\\nb')
   })
 
   it('escapes HTML metacharacters in the source', () => {
-    const html = renderMarkdown('$$\na < b & "c"\n$$')
+    const html = renderMarkdownUnsafe('$$\na < b & "c"\n$$')
     assert.equal(blockSource(html), 'a &lt; b &amp; &quot;c&quot;')
   })
 
   it('$$ interrupts a paragraph like a fence opener', () => {
-    const html = renderMarkdown('text\n$$\nx\n$$')
+    const html = renderMarkdownUnsafe('text\n$$\nx\n$$')
     assert.match(html, /<p>text<\/p>/)
     assert.equal(blockSource(html), 'x')
   })
 
   it('an unclosed $$ block is closed by the end of the document', () => {
-    assert.equal(blockSource(renderMarkdown('$$\nx+y')), 'x+y')
+    assert.equal(blockSource(renderMarkdownUnsafe('$$\nx+y')), 'x+y')
   })
 
   it('a $$ line with content but no closer is prose, not math', () => {
-    const html = renderMarkdown('$$ not closed\nmore prose')
+    const html = renderMarkdownUnsafe('$$ not closed\nmore prose')
     assert.doesNotMatch(html, /math-block/)
     assert.match(html, /\$\$ not closed/)
   })
 
   it('a line that is only \\[\\] (empty body) stays prose (spec escape examples)', () => {
-    const html = renderMarkdown('\\[\\]')
+    const html = renderMarkdownUnsafe('\\[\\]')
     assert.doesNotMatch(html, /math-block/)
     assert.match(html, /\[\]/)
   })
 
   it('four-space-indented $$ is indented code, not math', () => {
-    const html = renderMarkdown('    $$\n    x\n    $$')
+    const html = renderMarkdownUnsafe('    $$\n    x\n    $$')
     assert.doesNotMatch(html, /math-block/)
     assert.match(html, /<pre><code>/)
   })
 
   it('$$ lines inside a fenced code block never open math', () => {
-    const html = renderMarkdown('```\n$$\nx\n$$\n```')
+    const html = renderMarkdownUnsafe('```\n$$\nx\n$$\n```')
     assert.doesNotMatch(html, /math-block/)
   })
 
   it('scaffolding survives the sink sanitizer unchanged', () => {
-    const html = sanitizeRenderedMarkdown(renderMarkdown('$$\na < b\n$$'))
+    const html = sanitizeRenderedMarkdown(renderMarkdownUnsafe('$$\na < b\n$$'))
     assert.match(html, /class="math-block math-block--pending"/)
     assert.match(html, /<pre class="math">a &lt; b<\/pre>/)
   })
@@ -132,94 +132,94 @@ describe('display math at rest', () => {
 
 describe('inline math at rest', () => {
   it('renders $…$ spans', () => {
-    const html = renderMarkdown('Euler: $e^{i\\pi}+1=0$ wow')
+    const html = renderMarkdownUnsafe('Euler: $e^{i\\pi}+1=0$ wow')
     assert.equal(inlineSource(html), 'e^{i\\pi}+1=0')
   })
 
   it('renders mid-line $$…$$ spans', () => {
-    assert.equal(inlineSource(renderMarkdown('so $$x^2$$ mid')), 'x^2')
+    assert.equal(inlineSource(renderMarkdownUnsafe('so $$x^2$$ mid')), 'x^2')
   })
 
   it('renders \\(…\\) spans', () => {
-    assert.equal(inlineSource(renderMarkdown('so \\(a_i + b\\) mid')), 'a_i + b')
+    assert.equal(inlineSource(renderMarkdownUnsafe('so \\(a_i + b\\) mid')), 'a_i + b')
   })
 
   it('keeps math content verbatim across emphasis characters', () => {
-    const html = renderMarkdown('$a_i * b_j$')
+    const html = renderMarkdownUnsafe('$a_i * b_j$')
     assert.equal(inlineSource(html), 'a_i * b_j')
     assert.doesNotMatch(html, /<em>/)
   })
 
   it('restores backslash escapes to their TeX form (\\{ \\$ \\\\)', () => {
-    assert.equal(inlineSource(renderMarkdown('x $\\{a\\}$ y')), '\\{a\\}')
-    assert.equal(inlineSource(renderMarkdown('$a \\$ b$')), 'a \\$ b')
+    assert.equal(inlineSource(renderMarkdownUnsafe('x $\\{a\\}$ y')), '\\{a\\}')
+    assert.equal(inlineSource(renderMarkdownUnsafe('$a \\$ b$')), 'a \\$ b')
   })
 
   it('works inside headings and table cells', () => {
-    assert.equal(inlineSource(renderMarkdown('# Result $x^2$')), 'x^2')
-    const table = renderMarkdown('| a |\n|---|\n| $x^2$ |')
+    assert.equal(inlineSource(renderMarkdownUnsafe('# Result $x^2$')), 'x^2')
+    const table = renderMarkdownUnsafe('| a |\n|---|\n| $x^2$ |')
     assert.equal(inlineSource(table), 'x^2')
   })
 
   it('does NOT fire on currency ($20 and $30, $5 vs $10)', () => {
     for (const md of ['costs $20 and $30 total', '$5 vs $10', 'between $a and $b']) {
-      const html = renderMarkdown(md)
+      const html = renderMarkdownUnsafe(md)
       assert.doesNotMatch(html, /math-inline/, md)
     }
   })
 
   it('does NOT pair when the closing $ is followed by a digit', () => {
-    assert.doesNotMatch(renderMarkdown('$x$5 stays literal'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('$x$5 stays literal'), /math-inline/)
   })
 
   it('an escaped \\$ never delimits', () => {
-    const html = renderMarkdown('a \\$x$ b')
+    const html = renderMarkdownUnsafe('a \\$x$ b')
     assert.doesNotMatch(html, /math-inline/)
     assert.match(html, /\$x\$/)
   })
 
   it('does NOT fire inside code spans or fenced code', () => {
-    assert.doesNotMatch(renderMarkdown('run `$x$` now'), /math-inline/)
-    assert.doesNotMatch(renderMarkdown('```\n$x$\n```'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('run `$x$` now'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('```\n$x$\n```'), /math-inline/)
   })
 
   it('does NOT fire inside link destinations', () => {
-    const html = renderMarkdown('[a](/x?p=$q$r) tail')
+    const html = renderMarkdownUnsafe('[a](/x?p=$q$r) tail')
     assert.doesNotMatch(html, /math-inline/)
     assert.match(html, /href="\/x\?p=\$q\$r"/)
   })
 
   it('does fire inside link labels (their own inline scope)', () => {
-    const html = renderMarkdown('[see $x^2$](/url)')
+    const html = renderMarkdownUnsafe('[see $x^2$](/url)')
     assert.equal(inlineSource(html), 'x^2')
   })
 
   it('requires a non-blank body and tight delimiters', () => {
-    assert.doesNotMatch(renderMarkdown('a $ $ b'), /math-inline/)
-    assert.doesNotMatch(renderMarkdown('a $ x$ b'), /math-inline/)
-    assert.doesNotMatch(renderMarkdown('a $x $ b'), /math-inline/)
-    assert.doesNotMatch(renderMarkdown('empty \\(\\) parens'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('a $ $ b'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('a $ x$ b'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('a $x $ b'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('empty \\(\\) parens'), /math-inline/)
   })
 
   it('never crosses a line ending', () => {
-    assert.doesNotMatch(renderMarkdown('a $x\ny$ b'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('a $x\ny$ b'), /math-inline/)
   })
 
   it('three or more dollars never delimit', () => {
-    assert.doesNotMatch(renderMarkdown('a $$$x$$$ b'), /math-inline/)
+    assert.doesNotMatch(renderMarkdownUnsafe('a $$$x$$$ b'), /math-inline/)
   })
 
   it('a run of the wrong length is content, not a closer (code-span matching)', () => {
-    assert.equal(inlineSource(renderMarkdown('so $$a$b$$ mid')), 'a$b')
+    assert.equal(inlineSource(renderMarkdownUnsafe('so $$a$b$$ mid')), 'a$b')
   })
 
   it('emphasis still wraps a complete math span', () => {
-    const html = renderMarkdown('*$x$*')
+    const html = renderMarkdownUnsafe('*$x$*')
     assert.match(html, /<em><span class="math-inline math-inline--pending">x<\/span><\/em>/)
   })
 
   it('inline scaffolding survives the sink sanitizer', () => {
-    const html = sanitizeRenderedMarkdown(renderMarkdown('so $a<b$ ok'))
+    const html = sanitizeRenderedMarkdown(renderMarkdownUnsafe('so $a<b$ ok'))
     assert.match(html, /<span class="math-inline math-inline--pending">a&lt;b<\/span>/)
   })
 })
@@ -230,7 +230,7 @@ describe('math hydration (registry + hydratePendingMath)', () => {
   /** Build a detached DOM subtree from the generator's math scaffolding. */
   function renderToDom(md: string): HTMLElement {
     const host = document.createElement('div')
-    host.innerHTML = renderMarkdown(md)
+    host.innerHTML = renderMarkdownUnsafe(md)
     return host
   }
 

@@ -6,7 +6,7 @@ import {
   highlightFenceCode,
   setCodeHighlighter,
 } from './highlight.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 // PROTOTYPE (#lazy-load): proves the core renders code WITHOUT highlight.js
 // loaded, then upgrades once the backend is registered — the plain → highlighted
@@ -21,7 +21,7 @@ describe('lazy highlighting (prototype)', () => {
     setCodeHighlighter(null)
     assert.equal(getCodeHighlighter(), null)
 
-    const html = renderMarkdown('```ts\nconst x = 1 < 2\n```')
+    const html = renderMarkdownUnsafe('```ts\nconst x = 1 < 2\n```')
     // Class is resolved by the core (ts → typescript) even with no backend, so it
     // is identical before and after load — no className churn on upgrade.
     assert.match(html, /<pre><code class="hljs lang-typescript">/)
@@ -35,7 +35,7 @@ describe('lazy highlighting (prototype)', () => {
     await loadHighlightjs()
     assert.notEqual(getCodeHighlighter(), null)
 
-    const html = renderMarkdown('```ts\nconst x = 1 < 2\n```')
+    const html = renderMarkdownUnsafe('```ts\nconst x = 1 < 2\n```')
     assert.match(html, /<pre><code class="hljs lang-typescript">/)
     assert.match(html, /hljs-keyword/)
     // The `<` inside the code is still safely escaped (hljs wraps the operands in

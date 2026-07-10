@@ -12,7 +12,7 @@
 
 ## The problem
 
-`renderMarkdown()` (the "generator") is a synchronous string→HTML function. Its
+`renderMarkdownUnsafe()` (the "generator") is a synchronous string→HTML function. Its
 only heavy runtime dependency is **highlight.js** — the core plus a dozen language
 grammars. Because `render-blocks.ts` imported `highlight.ts`, which statically
 imported highlight.js, the whole grammar payload landed in **every** consumer's

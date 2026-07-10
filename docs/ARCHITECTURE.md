@@ -7,15 +7,17 @@ the [README](../README.md).
 
 When extending the renderer or its CSS, preserve these rules:
 
-- **Sanitize at the sink.** `renderMarkdown()` is a pure string→HTML function, but
-  its output assembles HTML by concatenation and is treated as untrusted. Every
+- **Sanitize at the sink.** `renderMarkdownUnsafe()` is a pure string→HTML function,
+  but its output assembles HTML by concatenation and is treated as untrusted. Every
   `innerHTML` assignment of rendered markdown goes through
-  `sanitizeRenderedMarkdown()` (`sanitize.ts`) first — see
-  `conversation.ts`, `streaming.ts`, `context-panel.ts`. If you add a new sink or a
-  new output tag/attribute, route it through the sanitizer and widen its allowlist
-  to match. Mermaid SVG is produced after sanitization and is not re-sanitized.
-  The rationale and the survey of streaming-parser alternatives are tracked in the
-  consuming app's design docs.
+  `sanitizeRenderedMarkdown()` (`sanitize.ts`) first. The public `renderMarkdown()`
+  (#104) bakes that sink in — it returns already-sanitized `SanitizedHtml` and
+  throws when no backend is available — so it is the safe default; the streaming
+  emitters likewise sanitize `renderMarkdownUnsafe()` output at their sinks. If you
+  add a new sink or a new output tag/attribute, route it through the sanitizer and
+  widen its allowlist to match. Mermaid SVG is produced after sanitization and is
+  not re-sanitized. The rationale and the survey of streaming-parser alternatives
+  are tracked in the consuming app's design docs.
 - **Pluggable sanitizer backend.** `sanitize.ts` holds the narrow tag/attr allowlist
   and a single per-element gate (task-list `<input>` lockdown + host
   `SanitizeExtension.onElement`), but delegates the actual sanitize to a
@@ -423,7 +425,8 @@ specs listed below are maintained by the downstream host app.
 
 ### CommonMark conformance (`commonmark-conformance.test.ts`, via `npm test`)
 
-`renderMarkdown` is run against every example in the official CommonMark spec —
+`renderMarkdownUnsafe` (the raw parser output, before any sink) is run against
+every example in the official CommonMark spec —
 loaded from the pinned `commonmark-spec` devDependency at runtime
 (`tests/commonmark/load-spec.ts`), so the ~650 examples are **not** vendored into
 this repo — comparing output to the expected HTML after the spec's own normalizer
@@ -493,7 +496,7 @@ extended autolinks (`www.`/bare-URL/email), and a disallowed-raw-HTML filter. Th
 renderer implements those extensions (GFM mode is always on — there is no
 CommonMark-only switch), so a **second conformance harness** measures the official
 [GFM spec](https://github.github.com/gfm/) the same way `commonmark-conformance.test.ts`
-measures CommonMark: every spec example runs through `renderMarkdown`, is compared
+measures CommonMark: every spec example runs through `renderMarkdownUnsafe`, is compared
 after the shared normalizer, and the passing set is pinned in
 `tests/fixtures/gfm/gfm-conformance-baseline.json` (fail on drift either way;
 re-baseline with `UPDATE_GFM_BASELINE=1 npm test`). The baseline JSON also carries an

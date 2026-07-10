@@ -17,7 +17,7 @@ import {
 import { enforceSanitizerAllowlist } from './sanitize-browser.ts'
 import { dompurifyBackend } from './sanitize-dompurify.ts'
 import { setSanitizedHtml } from './html-sink.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 // Allow `<img>` through the core sink so the image policy has something to gate
 // (image handling is otherwise host-injected). Mirrors what a real image host
@@ -42,7 +42,7 @@ function sanitizeImg(tag: string): string {
 
 describe('setLinkImagePolicy — default (no policy)', () => {
   it('leaves rendered links byte-identical to today', () => {
-    const html = renderMarkdown('[docs](https://docs.example.com/page) and <https://auto.example.com>')
+    const html = renderMarkdownUnsafe('[docs](https://docs.example.com/page) and <https://auto.example.com>')
     const baseline = sanitizeRenderedMarkdown(html)
     assert.doesNotMatch(baseline, /blocked-link/)
     // Installing then removing a policy restores the exact baseline.
@@ -142,7 +142,7 @@ describe('setLinkImagePolicy — links', () => {
       allowedImagePrefixes: [],
       defaultOrigin: APP_ORIGIN,
     })
-    const html = sanitizeRenderedMarkdown(renderMarkdown('see <https://evil.example.com/x>'))
+    const html = sanitizeRenderedMarkdown(renderMarkdownUnsafe('see <https://evil.example.com/x>'))
     assert.match(html, /class="[^"]*blocked-link/)
     assert.doesNotMatch(html, /href="https:\/\/evil\.example\.com/)
   })

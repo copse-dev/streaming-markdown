@@ -11,7 +11,7 @@ import {
 import { pendingHoldIndex } from './inline-emphasis.ts'
 import { setInlinePasses } from './inline-passes.ts'
 import { renderPendingLine } from './render-pending-line.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
 
@@ -25,7 +25,7 @@ afterEach(() => setInlinePasses(null))
 describe('emoji shortcode pass', () => {
   it('renders known shortcodes to their gemoji glyphs', () => {
     setInlinePasses([emojiInlinePass])
-    const html = renderMarkdown(':smile: and :rocket: and :+1:')
+    const html = renderMarkdownUnsafe(':smile: and :rocket: and :+1:')
     assert.match(html, /😄/)
     assert.match(html, /🚀/)
     assert.match(html, /👍/)
@@ -34,34 +34,34 @@ describe('emoji shortcode pass', () => {
 
   it('leaves unknown shortcodes literal', () => {
     setInlinePasses([emojiInlinePass])
-    const html = renderMarkdown('a :notacode: and :also_missing: here')
+    const html = renderMarkdownUnsafe('a :notacode: and :also_missing: here')
     assert.match(html, /:notacode:/)
     assert.match(html, /:also_missing:/)
   })
 
   it('keeps a shortcode inside a code span literal (shielded)', () => {
     setInlinePasses([emojiInlinePass])
-    const html = renderMarkdown('`:smile:` but :smile: outside')
+    const html = renderMarkdownUnsafe('`:smile:` but :smile: outside')
     assert.match(html, /<code>:smile:<\/code>/)
     assert.match(html, /😄/)
   })
 
   it('respects backslash escapes', () => {
     setInlinePasses([emojiInlinePass])
-    const html = renderMarkdown('\\:smile: stays literal')
+    const html = renderMarkdownUnsafe('\\:smile: stays literal')
     assert.match(html, /:smile:/)
     assert.doesNotMatch(html, /😄/)
   })
 
   it('renders emoji inside link labels (before-links stage)', () => {
     setInlinePasses([emojiInlinePass])
-    const html = renderMarkdown('[go :rocket:](https://example.com)')
+    const html = renderMarkdownUnsafe('[go :rocket:](https://example.com)')
     assert.match(html, /<a[^>]*href="https:\/\/example\.com"[^>]*>go 🚀<\/a>/)
   })
 
   it('renders emoji inside GFM table cells', () => {
     setInlinePasses([emojiInlinePass])
-    const html = renderMarkdown('| mood |\n| --- |\n| :smile: |')
+    const html = renderMarkdownUnsafe('| mood |\n| --- |\n| :smile: |')
     assert.match(html, /<td>😄<\/td>/)
   })
 
@@ -69,7 +69,7 @@ describe('emoji shortcode pass', () => {
     setInlinePasses([emojiInlinePass])
     // `:constructor:` / `:tostring:` match the shortcode shape but are not gemoji
     // names; a plain-object lookup would resolve them to Object.prototype members.
-    const html = renderMarkdown(':constructor: :tostring: :hasownproperty:')
+    const html = renderMarkdownUnsafe(':constructor: :tostring: :hasownproperty:')
     assert.match(html, /:constructor:/)
     assert.match(html, /:tostring:/)
     assert.match(html, /:hasownproperty:/)
@@ -80,7 +80,7 @@ describe('emoji shortcode pass', () => {
 describe('createEmojiInlinePass (host extension)', () => {
   it('maps a custom shortcode table', () => {
     setInlinePasses([createEmojiInlinePass({ shipit: '🚢' })])
-    const html = renderMarkdown(':shipit: now, not :smile:')
+    const html = renderMarkdownUnsafe(':shipit: now, not :smile:')
     assert.match(html, /🚢/)
     // A name outside the custom map (even a real gemoji name) stays literal.
     assert.match(html, /:smile:/)
@@ -97,7 +97,7 @@ describe('emoji pass is inert when unregistered', () => {
     const source = 'ship :smile: :rocket: :+1: today'
     const withPass = (() => {
       setInlinePasses(null)
-      return renderMarkdown(source)
+      return renderMarkdownUnsafe(source)
     })()
     setInlinePasses(null)
     assert.match(withPass, /:smile:/)
@@ -147,7 +147,7 @@ describe('emoji pass streaming convergence', () => {
     for (let i = 1; i <= source.length; i++) renderer.update(source.slice(0, i))
     renderer.update(source)
     const expected = document.createElement('div')
-    expected.innerHTML = sanitizeRenderedMarkdown(renderMarkdown(source))
+    expected.innerHTML = sanitizeRenderedMarkdown(renderMarkdownUnsafe(source))
     assert.equal(host.querySelector('p')?.innerHTML, expected.querySelector('p')?.innerHTML)
     assert.equal(host.querySelector('ul')?.outerHTML, expected.querySelector('ul')?.outerHTML)
     // The code span is preserved literally through streaming.

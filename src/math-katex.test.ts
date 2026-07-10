@@ -8,7 +8,7 @@ import {
   katexMathRenderer,
   loadKatex,
 } from './math-katex.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 // The KaTeX backend is a thin lazy adapter over the optional `katex` peer
 // dependency. Registration and the load-once path are exercised through the
@@ -82,7 +82,7 @@ describe('katex backend end-to-end (real library)', () => {
   it('hydrates generator scaffolding into real KaTeX HTML', async () => {
     installKatex()
     const host = document.createElement('div')
-    host.innerHTML = renderMarkdown('$$\nE = mc^2\n$$\n\nInline $a_i$ here.')
+    host.innerHTML = renderMarkdownUnsafe('$$\nE = mc^2\n$$\n\nInline $a_i$ here.')
 
     const count = await hydratePendingMath(host)
 
@@ -98,7 +98,7 @@ describe('katex backend end-to-end (real library)', () => {
   it('renders invalid TeX as a visible katex-error (throwOnError: false)', async () => {
     installKatex()
     const host = document.createElement('div')
-    host.innerHTML = renderMarkdown('$$\n\\badcommand{\n$$')
+    host.innerHTML = renderMarkdownUnsafe('$$\n\\badcommand{\n$$')
     const count = await hydratePendingMath(host)
     assert.equal(count, 1, 'still counts as rendered — katex degrades in place')
     assert.ok(host.querySelector('.katex-error'))

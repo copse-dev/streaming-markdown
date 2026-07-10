@@ -3,7 +3,7 @@ import '../tests/setup-dom-jsdom.ts'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { withHostImagePolicy } from '../tests/host-image-test-policy.ts'
 
 describe('sanitizeRenderedMarkdown', () => {
@@ -97,7 +97,7 @@ describe('sanitizeRenderedMarkdown', () => {
     assert.match(div.textContent, /\u00A0/)
   })
 
-  it('is a no-op for the structures renderMarkdown already produces', () => {
+  it('is a no-op for the structures renderMarkdownUnsafe already produces', () => {
     const source = [
       '## Heading',
       '',
@@ -110,7 +110,7 @@ describe('sanitizeRenderedMarkdown', () => {
       '| - | - |',
       '| 1 | 2 |',
     ].join('\n')
-    assert.equal(sanitizeRenderedMarkdown(renderMarkdown(source)), renderMarkdown(source))
+    assert.equal(sanitizeRenderedMarkdown(renderMarkdownUnsafe(source)), renderMarkdownUnsafe(source))
   })
 
   it('neutralizes a payload even if it reached the rendered HTML directly', () => {

@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { isCjkPunctuation, setCjkFriendly } from './cjk.ts'
 import { renderInlineSpans } from './inline-spans.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 // The extension flips shared module-level registries; always restore the stock
 // CommonMark flanking so a leaked flag can't bleed into other suites.
@@ -64,7 +64,7 @@ describe('setCjkFriendly — emphasis around full-width punctuation', () => {
 describe('setCjkFriendly — bare autolink boundaries', () => {
   it('is off by default: a run-together CJK tail is swallowed into the href', () => {
     assert.equal(
-      renderMarkdown('参照 https://example.com。次'),
+      renderMarkdownUnsafe('参照 https://example.com。次'),
       `<p>参照 ${anchor('https://example.com%E3%80%82%E6%AC%A1', 'https://example.com。次')}</p>`,
     )
   })
@@ -72,7 +72,7 @@ describe('setCjkFriendly — bare autolink boundaries', () => {
   it('stops a bare URL at the first CJK punctuation mark when enabled', () => {
     setCjkFriendly(true)
     assert.equal(
-      renderMarkdown('参照 https://example.com。次を見て'),
+      renderMarkdownUnsafe('参照 https://example.com。次を見て'),
       `<p>参照 ${anchor('https://example.com', 'https://example.com')}。次を見て</p>`,
     )
   })
@@ -80,11 +80,11 @@ describe('setCjkFriendly — bare autolink boundaries', () => {
   it('keeps query strings and trims ASCII trailing punctuation before the CJK boundary', () => {
     setCjkFriendly(true)
     assert.equal(
-      renderMarkdown('見る https://a.com/p?x=1，そして'),
+      renderMarkdownUnsafe('見る https://a.com/p?x=1，そして'),
       `<p>見る ${anchor('https://a.com/p?x=1', 'https://a.com/p?x=1')}，そして</p>`,
     )
     assert.equal(
-      renderMarkdown('(https://a.com/p).、'),
+      renderMarkdownUnsafe('(https://a.com/p).、'),
       `<p>(${anchor('https://a.com/p', 'https://a.com/p')}).、</p>`,
     )
   })
@@ -92,7 +92,7 @@ describe('setCjkFriendly — bare autolink boundaries', () => {
   it('leaves a URL that starts at a CJK mark untouched', () => {
     // The captured run begins with the boundary char, so there is no URL to link.
     setCjkFriendly(true)
-    assert.equal(renderMarkdown('（https://a.com）'), '<p>（https://a.com）</p>')
+    assert.equal(renderMarkdownUnsafe('（https://a.com）'), '<p>（https://a.com）</p>')
   })
 })
 
@@ -110,9 +110,9 @@ describe('setCjkFriendly — no regression to Latin-script output', () => {
   ]
 
   it('is byte-identical for Latin fixtures whether the extension is on or off', () => {
-    const off = latinFixtures.map((s) => renderMarkdown(s))
+    const off = latinFixtures.map((s) => renderMarkdownUnsafe(s))
     setCjkFriendly(true)
-    const on = latinFixtures.map((s) => renderMarkdown(s))
+    const on = latinFixtures.map((s) => renderMarkdownUnsafe(s))
     for (let i = 0; i < latinFixtures.length; i++) {
       assert.equal(on[i], off[i], `Latin output changed for: ${latinFixtures[i]}`)
     }

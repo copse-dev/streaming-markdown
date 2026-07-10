@@ -2,11 +2,20 @@
 
 Status: accepted · Relates to [#600](https://github.com/copse-dev/agent-pane/issues/600)
 
+> **Update (#104).** The "host writes unsanitized `renderMarkdown` strings to a
+> sink" footgun this note calls out (see "Who is affected") is now closed by
+> splitting the entry point: the public **`renderMarkdown` is safe** — it returns
+> already-sanitized `SanitizedHtml` and throws when no sanitizer backend is
+> available — while the raw, DOM-free string→HTML path (this document's
+> `renderMarkdown`) is now **`renderMarkdownUnsafe`**. Read every "`renderMarkdown`"
+> below as `renderMarkdownUnsafe`; the passthrough policy and frozen/tail reasoning
+> are unchanged.
+
 Design note for making raw-HTML **passthrough** the default rendering behavior —
-in both the at-rest `renderMarkdown` path and the streaming emitters — while
-retaining the historical literal-escape behavior behind an explicit opt-out
-(`htmlPolicy: 'passthrough' | 'escape'`). Read alongside the raw-HTML policy and
-frozen/tail invariant discussions in
+in both the at-rest raw-render path (`renderMarkdownUnsafe`) and the streaming
+emitters — while retaining the historical literal-escape behavior behind an
+explicit opt-out (`htmlPolicy: 'passthrough' | 'escape'`). Read alongside the
+raw-HTML policy and frozen/tail invariant discussions in
 [ARCHITECTURE.md](../ARCHITECTURE.md).
 
 ## Motivation

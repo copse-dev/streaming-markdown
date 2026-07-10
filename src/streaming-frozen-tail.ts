@@ -56,7 +56,7 @@ import { getHtmlPolicy } from './html-policy.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml, setSanitizedHtml } from './html-sink.ts'
-import { renderMarkdown, TOP_LEVEL_RENDER_OPTS } from './renderer.ts'
+import { renderMarkdownUnsafe, TOP_LEVEL_RENDER_OPTS } from './renderer.ts'
 import {
   morphElementChildrenFrom,
   morphInnerHtml,
@@ -388,7 +388,7 @@ export class FrozenTailRenderer {
 
   /**
    * Reconcile `completedEl` so it serializes byte-identically to
-   * `sanitizeRenderedMarkdown(renderMarkdown(complete))`, freezing the settled
+   * `sanitizeRenderedMarkdown(renderMarkdownUnsafe(complete))`, freezing the settled
    * prefix and re-rendering only the tail group. `tokens` must be
    * `tokenizeBlocks(complete)` (threaded from the caller, Layer 1), and
    * `providedLinkRefs`, when given, must equal
@@ -703,7 +703,7 @@ export class FrozenTailRenderer {
     tokens: BlockToken[],
     linkRefKey: string,
   ): void {
-    const rawHtml = renderMarkdown(complete, { tokens })
+    const rawHtml = renderMarkdownUnsafe(complete, { tokens })
     // A still-forming `<details>` reaches here every commit (its unbalanced tag
     // trips the freeze guard); flag it off the unsanitized render, before the
     // sink balances the tree.

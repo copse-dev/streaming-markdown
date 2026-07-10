@@ -9,7 +9,7 @@ import '../tests/setup-dom-jsdom.ts'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { loadBaselinePassingExamples } from '../tests/commonmark/baseline-examples.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { StreamingMarkdownRenderer, splitForStreaming } from './streaming.ts'
 import { tokenizeBlocks } from './block-tokenizer.ts'
@@ -39,7 +39,7 @@ describe('frozen-tail full streaming history parity', () => {
         if (split.pending !== '') continue
         assert.equal(
           completeEl(host).innerHTML,
-          sanitizeRenderedMarkdown(renderMarkdown(split.complete)),
+          sanitizeRenderedMarkdown(renderMarkdownUnsafe(split.complete)),
           `example #${String(ex.example)} (${ex.section}) cut=${String(cut)}`,
         )
       }
@@ -65,7 +65,7 @@ function assertCommittedAtRest(chunks: string[]): void {
   const { complete, pending } = splitForStreaming(full)
   assert.equal(pending, '', `input fully commits: ${JSON.stringify(full)}`)
   const { html } = streamCommitted(chunks)
-  assert.equal(html, sanitizeRenderedMarkdown(renderMarkdown(complete)))
+  assert.equal(html, sanitizeRenderedMarkdown(renderMarkdownUnsafe(complete)))
 }
 
 describe('frozen-tail keeps the committed prefix out of per-commit work', () => {
@@ -161,7 +161,7 @@ describe('intra-list tail bounding (#29)', () => {
       if (split.pending !== '') continue
       assert.equal(
         completeEl(host).innerHTML,
-        sanitizeRenderedMarkdown(renderMarkdown(split.complete)),
+        sanitizeRenderedMarkdown(renderMarkdownUnsafe(split.complete)),
         `cut=${String(cut)}`,
       )
     }
@@ -215,7 +215,7 @@ describe('intra-list tail bounding (#29)', () => {
     r.update(bravo)
     assert.equal(
       completeEl(host).innerHTML,
-      sanitizeRenderedMarkdown(renderMarkdown(splitForStreaming(bravo).complete)),
+      sanitizeRenderedMarkdown(renderMarkdownUnsafe(splitForStreaming(bravo).complete)),
     )
   })
 
@@ -378,7 +378,7 @@ describe('review regressions (#21 PR review)', () => {
     r.update(`${md}\n\n`)
     assert.equal(
       completeEl(host).innerHTML,
-      sanitizeRenderedMarkdown(renderMarkdown(`${md}\n\n`)),
+      sanitizeRenderedMarkdown(renderMarkdownUnsafe(`${md}\n\n`)),
       'converges to the at-rest render on commit',
     )
   })
@@ -393,7 +393,7 @@ describe('review regressions (#21 PR review)', () => {
     const html = completeEl(host).innerHTML
     assert.match(html, /Bravo/)
     assert.doesNotMatch(html, /Alpha/)
-    assert.equal(html, sanitizeRenderedMarkdown(renderMarkdown('# Bravo\n\npara one\n\n')))
+    assert.equal(html, sanitizeRenderedMarkdown(renderMarkdownUnsafe('# Bravo\n\npara one\n\n')))
   })
 
   it('an unclosed benign raw inline tag keeps byte-parity with the at-rest render', () => {
@@ -404,7 +404,7 @@ describe('review regressions (#21 PR review)', () => {
     const host = document.createElement('div')
     const r = new StreamingMarkdownRenderer(host)
     for (let cut = 1; cut <= md.length; cut++) r.update(md.slice(0, cut))
-    assert.equal(completeEl(host).innerHTML, sanitizeRenderedMarkdown(renderMarkdown(md)))
+    assert.equal(completeEl(host).innerHTML, sanitizeRenderedMarkdown(renderMarkdownUnsafe(md)))
   })
 
   it('an unclosed benign raw inline tag keeps byte-parity in escape mode too', () => {
@@ -417,7 +417,7 @@ describe('review regressions (#21 PR review)', () => {
     for (let cut = 1; cut <= md.length; cut++) r.update(md.slice(0, cut))
     assert.equal(
       completeEl(host).innerHTML,
-      sanitizeRenderedMarkdown(renderMarkdown(md, { htmlPolicy: 'escape' })),
+      sanitizeRenderedMarkdown(renderMarkdownUnsafe(md, { htmlPolicy: 'escape' })),
     )
   })
 
@@ -448,7 +448,7 @@ describe('frozen-tail seam and sweep edges', () => {
       'second\n',
       '\n',
     ])
-    assert.equal(html, sanitizeRenderedMarkdown(renderMarkdown('first\n\n[x]: https://example.com\n\nsecond\n\n')))
+    assert.equal(html, sanitizeRenderedMarkdown(renderMarkdownUnsafe('first\n\n[x]: https://example.com\n\nsecond\n\n')))
   })
 
   it('a commit performed while a block-level pending element is attached sweeps it (gap E)', () => {
@@ -463,7 +463,7 @@ describe('frozen-tail seam and sweep edges', () => {
     assert.equal(complete.querySelector('.stream-pending-heading'), null, 'stale pending swept on commit')
     assert.equal(
       complete.innerHTML,
-      sanitizeRenderedMarkdown(renderMarkdown('intro\n\n### Sec\n\nbody\n\n')),
+      sanitizeRenderedMarkdown(renderMarkdownUnsafe('intro\n\n### Sec\n\nbody\n\n')),
     )
   })
 })

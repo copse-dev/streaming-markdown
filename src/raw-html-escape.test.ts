@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 // Under the `'escape'` policy (the historical behavior, now an explicit opt-out
 // — passthrough is the default, #600) the renderer preserves a small set of its
@@ -11,7 +11,7 @@ import { renderMarkdown } from './renderer.ts'
 // literal-escape output exactly: forged/dangerous tags must be escaped, while
 // the renderer's own legitimate output must survive verbatim.
 describe('raw-HTML escaping boundary (htmlPolicy: escape)', () => {
-  const escaped = (md: string) => renderMarkdown(md, { htmlPolicy: 'escape' })
+  const escaped = (md: string) => renderMarkdownUnsafe(md, { htmlPolicy: 'escape' })
 
   it('escapes a raw javascript: anchor typed in prose', () => {
     const html = escaped('<a href="javascript:alert(1)">click</a>')

@@ -6,7 +6,7 @@ import {
   decodeEscapedPunctuationRaw,
   encodeBackslashEscapes,
 } from './backslash-escapes.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 describe('encodeBackslashEscapes', () => {
   it('round-trips escaped punctuation through the PUA encoding', () => {
@@ -44,9 +44,9 @@ describe('encodeBackslashEscapes', () => {
   })
 })
 
-describe('renderMarkdown backslash escapes', () => {
+describe('renderMarkdownUnsafe backslash escapes', () => {
   it('makes escaped delimiters inert (spec #14)', () => {
-    const html = renderMarkdown('\\*not emphasized* \\[not a link](/foo) \\`not code`')
+    const html = renderMarkdownUnsafe('\\*not emphasized* \\[not a link](/foo) \\`not code`')
     assert.doesNotMatch(html, /<em>|<a |<code>/)
     assert.match(html, /\*not emphasized\*/)
     assert.match(html, /\[not a link\]\(\/foo\)/)
@@ -54,25 +54,25 @@ describe('renderMarkdown backslash escapes', () => {
   })
 
   it('escaped backslash before emphasis stays literal (spec #15)', () => {
-    assert.match(renderMarkdown('\\\\*emphasis*'), /\\<em>emphasis<\/em>/)
+    assert.match(renderMarkdownUnsafe('\\\\*emphasis*'), /\\<em>emphasis<\/em>/)
   })
 
   it('drops the backslash from escaped heading closers (spec #76)', () => {
-    assert.match(renderMarkdown('### foo \\###'), /<h3>foo ###<\/h3>/)
+    assert.match(renderMarkdownUnsafe('### foo \\###'), /<h3>foo ###<\/h3>/)
   })
 
   it('decodes escapes in link destinations and titles (spec #22)', () => {
-    const html = renderMarkdown('[foo](/bar\\* "ti\\*tle")')
+    const html = renderMarkdownUnsafe('[foo](/bar\\* "ti\\*tle")')
     assert.match(html, /href="\/bar\*"/)
     assert.match(html, /title="ti\*tle"/)
   })
 
   it('matches reference labels across escaped forms', () => {
-    const html = renderMarkdown('[foo\\!]\n\n[foo\\!]: /url\n')
+    const html = renderMarkdownUnsafe('[foo\\!]\n\n[foo\\!]: /url\n')
     assert.match(html, /<a href="\/url"[^>]*>foo!<\/a>/)
   })
 
   it('keeps backslashes literal inside code spans', () => {
-    assert.match(renderMarkdown('`\\[\\]`'), /<code>\\\[\\\]<\/code>/)
+    assert.match(renderMarkdownUnsafe('`\\[\\]`'), /<code>\\\[\\\]<\/code>/)
   })
 })

@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { isGfmTableRowLine, tokenizeBlocks } from './block-tokenizer.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 
 const FIXTURE_PATH = resolve(
   process.cwd(),
@@ -31,7 +31,7 @@ describe('job description metadata pipes', () => {
 
   it('renders metadata as prose and keeps both lines visible', () => {
     const prefix = JD.slice(0, JD.indexOf('## 1.'))
-    const html = renderMarkdown(prefix)
+    const html = renderMarkdownUnsafe(prefix)
     assert.doesNotMatch(html, /<table>/)
     assert.match(html, /Department/)
     assert.match(html, /Employment Type/)
@@ -40,7 +40,7 @@ describe('job description metadata pipes', () => {
   })
 
   it('still renders the benefits table when present', () => {
-    const html = renderMarkdown(JD)
+    const html = renderMarkdownUnsafe(JD)
     const tables = html.match(/<table>/g) ?? []
     assert.equal(tables.length, 1)
     assert.match(html, /<th>Category<\/th>/)

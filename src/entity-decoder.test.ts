@@ -13,7 +13,7 @@ import {
   setNamedEntities,
 } from './entity-decoder.ts'
 import { fullEntityDecoder } from './entity-decoder-full.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { stripAppCodeDecorations } from './highlight.ts'
 import { stripAppImageAttributes, stripAppLinkAttributes } from './inline-links.ts'
 import { normalizeHtml } from '../tests/commonmark/normalize.ts'
@@ -146,7 +146,7 @@ describe('CommonMark conformance across decoder configs', () => {
   const spec = loadCommonMarkSpec()
   const conforms = (ex: SpecExample): boolean => {
     const html = stripAppCodeDecorations(
-      stripAppImageAttributes(stripAppLinkAttributes(renderMarkdown(ex.markdown))),
+      stripAppImageAttributes(stripAppLinkAttributes(renderMarkdownUnsafe(ex.markdown))),
     )
     return normalizeHtml(html) === normalizeHtml(ex.html)
   }

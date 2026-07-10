@@ -13,20 +13,26 @@ npm install @copse/streaming-markdown
 
 ## Quick start
 
-**At rest** — render a complete string into an element. `setSanitizedHtml` is
-the reference sink: it sanitizes for you (and is Trusted Types-safe), so
-sanitization can't be forgotten at the call site:
+**At rest** — `renderMarkdown` is the safe, default entry point: its output has
+already passed through the sink sanitizer, so it drops straight into `innerHTML`
+(or `setSanitizedHtml`, which is also Trusted Types-safe):
 
 ```ts
 import { renderMarkdown, setSanitizedHtml } from '@copse/streaming-markdown'
 
 setSanitizedHtml(el, renderMarkdown('# Hi\n\n**bold** and ~~strike~~'))
+// el.innerHTML = renderMarkdown('…') is also safe — the output is sanitized.
 ```
 
-Working with strings end-to-end (SSR, snapshots, non-DOM pipelines)?
-`renderMarkdown` returns **untrusted** HTML — pass it through
-`sanitizeRenderedMarkdown` before it reaches any `innerHTML` sink you manage
-yourself.
+Because sanitizing builds a DOM, `renderMarkdown` needs a sanitizer backend (the
+browser's native Sanitizer API by default, or a registered one such as
+[`…/sanitizers/dompurify`](docs/EXTENDING.md)); with neither available it **throws**
+rather than return unsafe HTML.
+
+Working with strings end-to-end (SSR, snapshots, non-DOM pipelines) with no
+backend? Use `renderMarkdownUnsafe` — the zero-dependency, DOM-free path. It
+returns **untrusted** HTML, so pass it through `sanitizeRenderedMarkdown` before
+it reaches any `innerHTML` sink you manage yourself.
 
 **Streaming** — feed the growing string on each token. The string emitter is the
 simplest; the DOM emitter patches incrementally instead of replacing `innerHTML`:

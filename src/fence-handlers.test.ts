@@ -8,7 +8,7 @@ import {
   getFenceHandler,
   setFenceHandler,
 } from './fence-handlers.ts'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { buildFormingFenceHtml, syncFormingFenceDom } from './streaming-fence-dom.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
@@ -44,13 +44,13 @@ describe('fence handler registry', () => {
 
   it('resolves the fence language case-insensitively', () => {
     assert.equal(getFenceHandler('MERMAID'), getFenceHandler('mermaid'))
-    const html = renderMarkdown('```MERMAID\ngraph TD\nA-->B\n```')
+    const html = renderMarkdownUnsafe('```MERMAID\ngraph TD\nA-->B\n```')
     assert.match(html, /mermaid-diagram--pending/)
   })
 
   it('unregistering mermaid restores the default <pre><code> emission', () => {
     setFenceHandler('mermaid', null)
-    const html = renderMarkdown('```mermaid\ngraph TD\nA-->B\n```')
+    const html = renderMarkdownUnsafe('```mermaid\ngraph TD\nA-->B\n```')
     assert.doesNotMatch(html, /mermaid-diagram/)
     assert.match(html, /<pre><code class="hljs lang-mermaid">/)
   })
@@ -59,7 +59,7 @@ describe('fence handler registry', () => {
 describe('custom handler: at-rest render', () => {
   it('renders a registered language through its handler', () => {
     setFenceHandler('math', mathHandler)
-    const html = renderMarkdown('before\n\n```math\nE = mc^2\n```\n\nafter')
+    const html = renderMarkdownUnsafe('before\n\n```math\nE = mc^2\n```\n\nafter')
     assert.match(html, /<div class="math-block math-block--pending"><pre class="math">E = mc\^2<\/pre><\/div>/)
     assert.doesNotMatch(html, /hljs lang-math/)
     // Surrounding prose is unaffected.
@@ -69,13 +69,13 @@ describe('custom handler: at-rest render', () => {
 
   it('escaped handler scaffolding survives the sanitizer sink', () => {
     setFenceHandler('math', mathHandler)
-    const html = sanitizeRenderedMarkdown(renderMarkdown('```math\nx < y & "z"\n```'))
+    const html = sanitizeRenderedMarkdown(renderMarkdownUnsafe('```math\nx < y & "z"\n```'))
     assert.match(html, /class="math-block math-block--pending"/)
     assert.match(html, /x &lt; y &amp; "z"|x &lt; y &amp;amp; "z"/)
   })
 
   it('unregistered languages keep the default highlighted emission', () => {
-    const html = renderMarkdown('```graphviz\ndigraph { a -> b }\n```')
+    const html = renderMarkdownUnsafe('```graphviz\ndigraph { a -> b }\n```')
     assert.match(html, /<pre><code class="hljs lang-graphviz">/)
   })
 })
@@ -174,7 +174,7 @@ describe('custom handler: streaming convergence', () => {
     }
     renderer.update(source)
     const expected = document.createElement('div')
-    expected.innerHTML = sanitizeRenderedMarkdown(renderMarkdown(source))
+    expected.innerHTML = sanitizeRenderedMarkdown(renderMarkdownUnsafe(source))
     assert.equal(
       host.querySelector('.math-block')?.outerHTML,
       expected.querySelector('.math-block')?.outerHTML,

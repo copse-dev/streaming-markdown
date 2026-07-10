@@ -12,7 +12,7 @@
 import '../tests/setup-dom-jsdom.ts'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderMarkdown } from './renderer.ts'
+import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import {
   renderStreamingMarkdown,
@@ -189,7 +189,7 @@ describe('remend corpus: committed render equals the static render (invariant b)
         'expected the input to fully commit after a blank line',
       )
       const streamed = streamingDisplayAfterUpdates(committed, [committed.length])
-      const atRest = sanitizeRenderedMarkdown(renderMarkdown(committed))
+      const atRest = sanitizeRenderedMarkdown(renderMarkdownUnsafe(committed))
       assert.equal(streamed, atRest)
     })
   }
