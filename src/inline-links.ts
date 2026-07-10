@@ -131,15 +131,27 @@ export interface LinkDecoration {
  * Host hook that returns the attribute string appended after `href` on a
  * rendered `<a>` (e.g. ` target="_blank" rel="…" data-browser-link="true"`).
  * Keeps app-specific link decoration out of the parser core so the package can
- * be hosted elsewhere (#601). Replace with {@link setLinkDecorator}.
+ * be hosted elsewhere (#601). Install with {@link setLinkDecorator}.
  */
 export type LinkDecorator = (link: LinkDecoration) => string
 
 /**
- * Default decorator — the Copse app's workspace/browser routing, so the package
- * works in-app out of the box. `data-workspace-link` / `data-browser-link` flag
- * links for `workspace-links.ts` / `browser-links.ts`; external links open in a
- * new context. A different host injects its own via {@link setLinkDecorator}.
+ * Built-in default decorator — neutral, host-agnostic output (#112). It emits
+ * only a `title` attribute when the link carries one and nothing else: no
+ * `target`, no `rel`, no `class`, and no `data-*` routing hooks. A general
+ * "just render this" consumer gets plain CommonMark-shaped anchors and opts into
+ * host semantics explicitly via {@link setLinkDecorator}.
+ */
+export const neutralLinkDecorator: LinkDecorator = ({ title }) =>
+  title ? ` title="${escapeHtml(title)}"` : ''
+
+/**
+ * Copse app's workspace/browser routing decorator (#112). `data-workspace-link`
+ * / `data-browser-link` flag links for `workspace-links.ts` / `browser-links.ts`
+ * and external links open in a new context. This is host-specific and lives
+ * behind the `@copse/streaming-markdown/host/workspace` entry; a host that wants
+ * the pre-0.10 in-app behaviour restores it with a single call:
+ * `setLinkDecorator(appLinkDecorator)`.
  */
 export const appLinkDecorator: LinkDecorator = ({ isWorkspace, title }) => {
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
@@ -148,10 +160,11 @@ export const appLinkDecorator: LinkDecorator = ({ isWorkspace, title }) => {
     : ` target="_blank" rel="noopener noreferrer" data-browser-link="true"${titleAttr}`
 }
 
-let activeLinkDecorator: LinkDecorator = appLinkDecorator
+let activeLinkDecorator: LinkDecorator = neutralLinkDecorator
 
 /**
- * Inject a host {@link LinkDecorator}; pass `null` to restore the app default.
+ * Inject a host {@link LinkDecorator}; pass `null` to restore the neutral
+ * built-in default ({@link neutralLinkDecorator}).
  *
  * Note: rendered `<a>` output still passes the escape allowlist
  * (`SAFE_OUTER_TAG_RE` in `escape.ts`) and, at the host sink, DOMPurify
@@ -160,7 +173,7 @@ let activeLinkDecorator: LinkDecorator = appLinkDecorator
  * custom decorator's vocabulary (they are the security gate, by design).
  */
 export function setLinkDecorator(decorator: LinkDecorator | null): void {
-  activeLinkDecorator = decorator ?? appLinkDecorator
+  activeLinkDecorator = decorator ?? neutralLinkDecorator
 }
 
 /** Render an `<a>` for a resolved link, applying the active {@link LinkDecorator}. */

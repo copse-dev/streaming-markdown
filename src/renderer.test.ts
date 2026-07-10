@@ -147,11 +147,8 @@ describe('renderMarkdownUnsafe', () => {
     const html = renderMarkdownUnsafe(
       '[Experiment Framework v2](/docs/experiments/v2.md)\n\n[intro][ref]\n\n[ref]: /docs "guide"\n',
     )
-    assert.match(html, /href="\/docs\/experiments\/v2\.md"[^>]*data-workspace-link="true"/)
-    assert.match(
-      html,
-      /<a href="\/docs"[^>]*data-workspace-link="true"[^>]*title="guide"[^>]*>intro<\/a>/,
-    )
+    assert.match(html, /<a href="\/docs\/experiments\/v2\.md">Experiment Framework v2<\/a>/)
+    assert.match(html, /<a href="\/docs" title="guide">intro<\/a>/)
     assert.doesNotMatch(html, /\[ref\]:/)
   })
 
@@ -163,7 +160,7 @@ describe('renderMarkdownUnsafe', () => {
     )
     assert.match(
       html,
-      /<a href="https:\/\/github\.com\/org\/repo\/pull\/204" target="_blank" rel="noopener noreferrer" data-browser-link="true">PR #204<\/a>/,
+      /<a href="https:\/\/github\.com\/org\/repo\/pull\/204">PR #204<\/a>/,
     )
     assert.match(
       html,
@@ -191,7 +188,7 @@ describe('renderMarkdownUnsafe', () => {
     const html = renderMarkdownUnsafe('Open https://example.com/docs, not `https://example.com/raw`.')
     assert.match(
       html,
-      /<a href="https:\/\/example\.com\/docs" target="_blank" rel="noopener noreferrer" data-browser-link="true">https:\/\/example\.com\/docs<\/a>,/,
+      /<a href="https:\/\/example\.com\/docs">https:\/\/example\.com\/docs<\/a>,/,
     )
     assert.match(html, /<code>https:\/\/example\.com\/raw<\/code>/)
   })
