@@ -467,3 +467,25 @@ describe('frozen-tail seam and sweep edges', () => {
     )
   })
 })
+
+describe('frozen-tail intra-list and footnote commit edges', () => {
+  it('adopts a tight→loose flip before any list item has frozen', () => {
+    // Four items enter intra-list mode; the blank line before `- e` flips the
+    // group loose while nothing is frozen yet, so the renderer adopts the new
+    // looseness in place rather than falling back (commitSharedList adopt path).
+    assertCommittedAtRest(['- a\n- b\n- c\n- d\n', '\n- e\n', '- f\n', '\ndone\n\n'])
+  })
+
+  it('full-morphs a footnote document whose body part sanitizes to two elements', () => {
+    // A single source block that renders to two top-level <div>s breaks the
+    // footnote incremental node-shape mapping (fnRebuild gives up), and the
+    // presence of <details>/raw-HTML routes the commit through the full-morph
+    // path — the result must still equal the at-rest render.
+    assertCommittedAtRest([
+      'x[^1]\n\n',
+      '<div>a</div>\n<div>b</div>\n\n',
+      '[^1]: note\n',
+      'tail\n\n',
+    ])
+  })
+})

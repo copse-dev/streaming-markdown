@@ -51,6 +51,20 @@ export interface RenderBlocksOptions {
   indentedCode?: boolean
 }
 
+/**
+ * Block rendering recurses once per nesting level (a blockquote renders its
+ * inner source, a list item its content), and the input is untrusted model
+ * output — so `'> '.repeat(2000)` or a deeply indented list would otherwise
+ * overflow the call stack (a reachable DoS, #136). Past this depth the remaining
+ * source renders as literal escaped text instead of recursing further. The cap
+ * is far above any real document (CommonMark's deepest nesting is single digits)
+ * and far below the stack limit (the overflow reproduced at ~2000 levels), so it
+ * never changes normal output. All block recursion funnels through
+ * `renderBlocksToParts`, so guarding that one function covers every path (nested
+ * blockquotes, lists, and footnote-definition content) and both emitters.
+ */
+const MAX_BLOCK_NESTING_DEPTH = 100
+let blockNestingDepth = 0
 
 function renderFencedBlock(lang: string, code: string): string {
   const handler = getFenceHandler(lang)
@@ -609,6 +623,39 @@ export function renderBlocksToParts(
   const tightParagraphs = options.tightParagraphs ?? false
   const htmlFromIndent = options.htmlFromIndent ?? false
   const indentedCode = options.indentedCode ?? true
+  if (blockNestingDepth >= MAX_BLOCK_NESTING_DEPTH) {
+    // Too deeply nested (untrusted input, #136): stop recursing and emit the
+    // remaining source as a single literal escaped paragraph.
+    const literal = escapeHtml(dropTrailingNewline(source))
+    // Defensive: the cap is only reached with non-empty nested marker text —
+    // truly-empty blockquote/list content is resolved before recursing this deep.
+    /* c8 ignore next */
+    if (literal.trim() === '') return []
+    return [{ start: 0, end: source.length, html: `<p>${literal}</p>` }]
+  }
+  blockNestingDepth++
+  try {
+    return renderBlockParts(
+      source,
+      tokens,
+      linkRefs,
+      tightParagraphs,
+      htmlFromIndent,
+      indentedCode,
+    )
+  } finally {
+    blockNestingDepth--
+  }
+}
+
+function renderBlockParts(
+  source: string,
+  tokens: BlockToken[],
+  linkRefs: LinkReferenceMap,
+  tightParagraphs: boolean,
+  htmlFromIndent: boolean,
+  indentedCode: boolean,
+): RenderedPart[] {
   const parts: RenderedPart[] = []
   let i = 0
   while (i < tokens.length) {

@@ -6,6 +6,8 @@ import { isTableSeparatorLine } from './render-blocks.ts'
 import { renderProseInline } from './render-prose-inline.ts'
 import { syncAttributes } from './streaming-dom-morph.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
+import { renderEmphasisDelimiters } from './inline-emphasis.ts'
+import { tokenizeBlocks } from './block-tokenizer.ts'
 
 // Targeted coverage for narrow edge branches that the broader suites don't reach.
 
@@ -77,5 +79,40 @@ describe('inline link label with an escaped closing bracket', () => {
     const html = renderMarkdownUnsafe('[a\\]b](https://example.com)')
     assert.match(html, />a\]b<\/a>/)
     assert.match(html, /href="https:\/\/example\.com"/)
+  })
+
+  it('skips a literal backslash from an invalid escape while scanning the label', () => {
+    // `\b` is not a CommonMark escape, so the backslash stays literal and is
+    // present when the label is scanned for its closing bracket — exercising the
+    // backslash-skip branch in parseBracketedLabelOutsideInlineCode (inline-links).
+    assert.equal(renderMarkdownUnsafe('[a\\b](/x)'), '<p><a href="/x">a\\b</a></p>')
+  })
+})
+
+describe('renderEmphasisDelimiters: nested close remainder', () => {
+  it('opens a new run from a closing remainder after closing two nested openers', () => {
+    // A closing delimiter run that closes one opener, whose leftover closes a
+    // second (deeper) opener, still has a left-flanking remainder that opens a
+    // fresh run — the remRemainder-opens branch in handleCloseRemainder. Output
+    // matches cmark's delimiter algorithm.
+    assert.equal(renderEmphasisDelimiters('*a **b*****.'), '<em>a <strong>b</strong></em>**.')
+  })
+})
+
+describe('tokenizeBlocks: a GFM table directly interrupts a list item', () => {
+  it('breaks an unordered item when the next line begins a table', () => {
+    // The header+separator table check inside breaksUnorderedListItem.
+    const kinds = tokenizeBlocks('- item\n| a | b |\n| --- | --- |\n| 1 | 2 |\n').map(
+      (b) => b.kind,
+    )
+    assert.deepEqual(kinds, ['list_item', 'table'])
+  })
+
+  it('breaks an ordered item after a blank line when a table follows', () => {
+    // The same header+separator check inside the ordered-list continuation loop.
+    const kinds = tokenizeBlocks('1. item\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n').map(
+      (b) => b.kind,
+    )
+    assert.deepEqual(kinds, ['list_item', 'table'])
   })
 })

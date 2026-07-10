@@ -720,9 +720,12 @@ export class FrozenTailRenderer {
     const templateHost = completedEl.cloneNode(false) as HTMLElement
     setSanitizedHtml(templateHost, `${open}${delta.itemsHtml}${tail.itemsHtml}${close}`)
     const templateList = templateHost.firstElementChild
+    /* c8 ignore start -- unreachable defensive guard: the sanitized
+       `${open}…${close}` template always parses to the expected list element. */
     if (!(templateList instanceof HTMLElement) || templateList.tagName !== wantTag) {
       return 'fallback'
     }
+    /* c8 ignore stop */
     syncAttributes(listEl, templateList)
     morphElementChildrenFrom(listEl, templateList, this.listFrozenLis)
 
@@ -919,8 +922,12 @@ export class FrozenTailRenderer {
       !(template instanceof HTMLElement) ||
       template.tagName !== el.tagName
     ) {
+      /* c8 ignore start -- unreachable defensive guard: the incremental path only
+         re-morphs parts whose source span is unchanged, so a footnote-reference
+         upgrade never changes the block's element count or tag here. */
       return false
     }
+    /* c8 ignore stop */
     syncAttributes(el, template)
     morphElementChildrenFrom(el, template, 0)
     return true
