@@ -97,6 +97,28 @@ export function createFootnoteContext(defs: FootnoteDefinitionMap): FootnoteCont
   }
 }
 
+/**
+ * A context carrying `from`'s numbering/slug state forward onto a fresh (current)
+ * definition map, with the per-render ref-count/id state reset — the streaming
+ * fast path (#133) reseats each commit so newly-arrived definitions resolve while
+ * existing references keep their assigned numbers and ids.
+ */
+export function reseatFootnoteContext(
+  defs: FootnoteDefinitionMap,
+  from: FootnoteContext,
+): FootnoteContext {
+  return {
+    defs,
+    order: [...from.order],
+    numbers: new Map(from.numbers),
+    slugs: new Map(from.slugs),
+    usedSlugs: new Set(from.usedSlugs),
+    refCounts: new Map(),
+    usedRefIds: new Set(),
+    firstRefIds: new Map(from.firstRefIds),
+  }
+}
+
 let activeFootnotes: FootnoteContext | null = null
 
 /**
@@ -178,6 +200,21 @@ export function renderFootnoteRefs(text: string, emit: (html: string) => string)
     const html = footnoteRefHtml(ctx, label)
     return html === null ? match : emit(html)
   })
+}
+
+/**
+ * Every `[^label]` reference in `text`, normalized, in occurrence order (repeats
+ * included). A raw-source scan for the streaming footnote fast path (#133): it
+ * over-approximates against code-span/escaped `[^…]`, so the caller must confirm
+ * its resolved-label order matches the real render before trusting it.
+ */
+export function footnoteRefLabelsIn(text: string): string[] {
+  if (!text.includes('[^')) return []
+  const labels: string[] = []
+  for (const m of text.matchAll(FOOTNOTE_REF_RE)) {
+    labels.push(normalizeFootnoteLabel(m[1] as string))
+  }
+  return labels
 }
 
 /**

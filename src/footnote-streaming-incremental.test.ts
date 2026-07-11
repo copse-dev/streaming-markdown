@@ -74,6 +74,18 @@ describe('footnote streaming stays correct as definitions arrive (#110)', () => 
     assertConvergesAtEveryCommit('See[^a] here.\n\n[^a]: refers on[^b]\n[^b]: the deeper note\n')
   })
 
+  it('body content arriving after a definition falls back and still converges', () => {
+    // A new body paragraph committed after footnotes started disqualifies the
+    // append-only fast path (the body is no longer fixed) — the full path takes over.
+    assertConvergesAtEveryCommit('Intro[^1].\n\n[^1]: one\n\nMore prose[^2].\n\n[^2]: two\n')
+  })
+
+  it('an unreferenced definition before the first real one converges', () => {
+    // The first committed definition resolves nothing (no body reference), so no
+    // section exists yet; the later real definition makes it appear via rebuild.
+    assertConvergesAtEveryCommit('Body[^1].\n\n[^unused]: nothing\n[^1]: one\n')
+  })
+
   it('references mixed with an unrelated resolved footnote stay independently numbered', () => {
     assertConvergesAtEveryCommit(
       'Intro[^i] with a list:\n\n- item one[^one]\n- item two[^two]\n\n[^i]: intro\n[^one]: first\n[^two]: second\n',

@@ -72,7 +72,13 @@ const TRAILING_OPEN_LI_CLOSE_RE = /(<li(?:\s[^>]*)?>)([\s\S]*?)(<\/li>\s*<\/(?:u
 
 /** A pending descendant (continuation span, pending `<li>`) inside the trailing list. */
 function tailPendingDescendant(completedEl: HTMLElement, selector: string): Element | null {
-  return completedEl.lastElementChild?.querySelector(selector) ?? null
+  const last = completedEl.lastElementChild
+  if (!last) return null
+  // The committed footnotes section is never a pending-tail host, and it grows
+  // with the document (N `<li>`), so walking it per update is the residual O(n)
+  // cost of a footnote stream (#133). Skip it — the pending tail is a sibling.
+  if (last.tagName === 'SECTION' && last.classList.contains('footnotes')) return null
+  return last.querySelector(selector) ?? null
 }
 
 /** A pending block element attached directly to `completedEl` (always the last child). */

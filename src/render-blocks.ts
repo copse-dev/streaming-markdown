@@ -771,11 +771,13 @@ export function renderFootnoteSection(ctx: FootnoteContext, linkRefs: LinkRefere
 export function renderFootnoteSectionItems(
   ctx: FootnoteContext,
   linkRefs: LinkReferenceMap,
+  startIndex = 0,
 ): string[] {
   const items: string[] = []
   // `ctx.order` may grow while items render (a footnote referencing another
   // footnote first used inside the section) — iterate by index, not snapshot.
-  for (let i = 0; i < ctx.order.length; i++) {
+  // `startIndex` renders only the appended items (the streaming fast path, #133).
+  for (let i = startIndex; i < ctx.order.length; i++) {
     const key = ctx.order[i]
     const def = key === undefined ? undefined : ctx.defs.get(key)
     const slug = key === undefined ? undefined : ctx.slugs.get(key)
