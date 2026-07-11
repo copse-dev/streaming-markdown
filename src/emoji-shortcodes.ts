@@ -4,14 +4,15 @@ import { emojiShortcodes } from './emoji-shortcode-map.ts'
 // The optional emoji-shortcode inline pass (#86): maps `:smile:` → 😄 for hosts
 // whose LLM emits GitHub-style shortcodes. It is the inline-pass analogue of the
 // highlight/mermaid backends — a ready-made plugin built entirely on the public
-// `setInlinePasses` contract (`inline-passes.ts`), shipped behind its own
-// `@copse/streaming-markdown/inline/emoji` subpath so the (large) gemoji table
+// `MarkdownConfig.inlinePasses` contract (`inline-passes.ts`), shipped behind its
+// own `@copse/streaming-markdown/inline/emoji` subpath so the (large) gemoji table
 // lands in a bundle only when a host references this entry. Nothing here is in
 // the default bundle; a consumer that never imports it pays zero bytes.
 //
-//   import { setInlinePasses } from '@copse/streaming-markdown'
+//   import { renderMarkdown } from '@copse/streaming-markdown'
 //   import { emojiInlinePass } from '@copse/streaming-markdown/inline/emoji'
-//   setInlinePasses([emojiInlinePass])   // once, before the first render
+//   renderMarkdown(md, { inlinePasses: [emojiInlinePass] })
+//   // or once at setup: setDefaultConfig({ inlinePasses: [emojiInlinePass] })
 //
 // The registry already carries the three inline-extension costs for us
 // (`inline-passes.ts`): the pass only sees text *outside* rendered

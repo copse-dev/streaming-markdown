@@ -24,9 +24,10 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { renderMarkdownUnsafe } from './renderer.ts'
+import { setDefaultConfig } from './config.ts'
 import { stripAppCodeDecorations } from './highlight.ts'
-import { installHighlightjs } from './highlight-hljs.ts'
-import { installFullEntityDecoder } from './entity-decoder-full.ts'
+import { highlightjsHighlighter } from './highlight-hljs.ts'
+import { fullEntityDecoder } from './entity-decoder-full.ts'
 import { stripAppImageAttributes, stripAppLinkAttributes } from './inline-links.ts'
 import { normalizeHtml } from '../tests/commonmark/normalize.ts'
 import {
@@ -63,14 +64,21 @@ if (!existsSync(GFM_SPEC_PATH)) {
 } else runGfmConformance()
 
 function runGfmConformance(): void {
-// The baseline was recorded with highlighting on; register the backend so the
-// conformance render matches it (span decorations are stripped before comparison).
-installHighlightjs()
-// GFM is a strict superset of CommonMark, so — like the CommonMark harness — the
-// entity section exercises the full HTML5 named-reference set (e.g. `&HilbertSpace;`).
-// The default decoder ships only the HTML4 subset, so register the full
-// `entities`-backed decoder here to measure conformance under config #3 (full).
-installFullEntityDecoder()
+// Suite-wide config for every spec case, installed once into the process defaults
+// (Node runs each test file in its own process, so this does not leak). This keeps
+// the per-case `renderMarkdownUnsafe` calls unchanged.
+//   - highlighting: the baseline was recorded with highlighting on; register the
+//     backend so the conformance render matches it (span decorations are stripped
+//     before comparison).
+//   - full entity decoder: GFM is a strict superset of CommonMark, so — like the
+//     CommonMark harness — the entity section exercises the full HTML5
+//     named-reference set (e.g. `&HilbertSpace;`). The default decoder ships only
+//     the HTML4 subset, so register the full `entities`-backed decoder to measure
+//     conformance under config #3 (full).
+setDefaultConfig({
+  codeHighlighter: highlightjsHighlighter,
+  entityDecoder: fullEntityDecoder,
+})
 
 const SPEC_VERSION = gfmSpecVersion()
 const spec = loadGfmSpec()

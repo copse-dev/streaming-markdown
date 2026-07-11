@@ -11,8 +11,8 @@
 // or a per-session download URL — all collapse to the same
 // `data-host-image-path`. That determinism is what stops the rendered DOM (and
 // any screenshot of it) from churning when those environment details change.
-import { setRawImageRenderer, normalizeHostImagePath, type RawImageTag } from '../src/raw-images.ts'
-import { setSanitizeExtension } from '../src/sanitize.ts'
+import { setDefaultConfig } from '../src/config.ts'
+import { normalizeHostImagePath, type RawImageTag } from '../src/raw-images.ts'
 import { escapeHtml } from '../src/escape.ts'
 
 const HOST_IMAGE_CLASS = 'host-image'
@@ -44,13 +44,11 @@ const hostImageSanitize = {
 }
 
 export function installHostImagePolicy(): void {
-  setRawImageRenderer(hostImageRenderer)
-  setSanitizeExtension(hostImageSanitize)
+  setDefaultConfig({ rawImageRenderer: hostImageRenderer, sanitizeExtension: hostImageSanitize })
 }
 
 export function resetHostImagePolicy(): void {
-  setRawImageRenderer(null)
-  setSanitizeExtension(null)
+  setDefaultConfig({ rawImageRenderer: null, sanitizeExtension: null })
 }
 
 /** Run `body` with the host image policy installed, resetting afterward. */

@@ -21,7 +21,8 @@ When extending the renderer or its CSS, preserve these rules:
 - **Pluggable sanitizer backend.** `sanitize.ts` holds the narrow tag/attr allowlist
   and a single per-element gate (task-list `<input>` lockdown + host
   `SanitizeExtension.onElement`), but delegates the actual sanitize to a
-  `SanitizerBackend` (`setSanitizerBackend`). Two ship: the zero-dependency native
+  `SanitizerBackend` (the `sanitizerBackend` config field, applied around each
+  render by `withConfig`). Two ship: the zero-dependency native
   Sanitizer API (`sanitize-browser.ts`, `Element.setHTML` + a strict allowlist walk;
   the default when available) and DOMPurify (`sanitize-dompurify.ts`, imported only
   via the `@copse/streaming-markdown/sanitizers/dompurify` entry so it stays out of
@@ -31,36 +32,38 @@ When extending the renderer or its CSS, preserve these rules:
   unsanitized HTML. DOMPurify is an optional peer dependency; `dompurify` must not be
   imported outside `sanitize-dompurify.ts`, or it re-enters the default bundle.
 - **Pluggable syntax highlighter.** `highlight.ts` holds only cheap string work
-  (language aliases, `KNOWN_LANGUAGES`, `fenceCodeClass`) and a registry
-  (`setCodeHighlighter`); it imports no highlight.js. The highlight.js grammars live
-  in `highlight-hljs.ts`, imported only via the
+  (language aliases, `KNOWN_LANGUAGES`, `fenceCodeClass`) and a config-injected slot
+  (the `codeHighlighter` field, applied by `withConfig`); it imports no highlight.js.
+  The highlight.js grammars live in `highlight-hljs.ts`, imported only via the
   `@copse/streaming-markdown/highlighters/highlightjs` entry (`highlightjsHighlighter`,
-  `installHighlightjs`, `loadHighlightjs`), so they stay out of bundles that don't opt
-  in — the same split as the sanitizer backend. With no backend registered,
-  `highlightFenceCode` returns escaped plain text; a later `setCodeHighlighter` + re-render
-  upgrades fence interiors to token spans while `fenceCodeClass` keeps the element's class
-  stable across the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the backend
+  `loadHighlightjs` — the value, and the `load*` helper returning it to pass via
+  config), so they stay out of bundles that don't opt in — the same split as the
+  sanitizer backend. With no highlighter configured, `highlightFenceCode`
+  returns escaped plain text; a later render with a `codeHighlighter` set upgrades fence
+  interiors to token spans while `fenceCodeClass` keeps the element's class stable across
+  the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the backend
   registers. `highlight.js` must not be imported outside `highlight-hljs.ts`, or it
   re-enters the default bundle. See [`LAZY-LOADING.md`](LAZY-LOADING.md).
-- **Pluggable fence handlers (#53).** Which HTML a fenced code block emits is a registry
-  keyed by the fence's info-string language (`fence-handlers.ts`, `setFenceHandler`,
-  case-insensitive). A `FenceHandler` supplies the at-rest `render` plus an optional
+- **Pluggable fence handlers (#53).** Which HTML a fenced code block emits is a map
+  keyed by the fence's info-string language (`fence-handlers.ts`, the `fenceHandlers`
+  config field, case-insensitive). A `FenceHandler` supplies the at-rest `render` plus an optional
   `forming` shape (string HTML + incremental DOM `sync`) used by both streaming emitters
   while the fence is still open; without one, forming falls back to `render` (string) and
   a sanitized-`innerHTML` replace (DOM). Fences are opaque to the block tokenizer, so a
   handler changes **emission only** — no parser surface. The built-in mermaid scaffolding
-  is itself the reference handler, registered by default (remove with
-  `setFenceHandler('mermaid', null)`). Security posture is the mermaid two-phase shape:
+  is itself the reference handler, present by default (remove with
+  `{ fenceHandlers: { mermaid: null } }`). Security posture is the mermaid two-phase shape:
   handler output is emitted **before** the sink sanitizer, so scaffolding must stay inside
-  the sanitizer allowlist (or the handler's host widens it via `setSanitizeExtension`);
+  the sanitizer allowlist (or the handler's host widens it via `sanitizeExtension`);
   rich output is injected post-sanitization by a hydration step (`hydratePendingDiagrams`
   for mermaid, host-owned for others). Forming markup should carry
   `FORMING_FENCE_PRE_CLASS` on its root so promotion stays a class-only change (see the
   motion contract below).
 - **Pluggable diagram renderer.** Mermaid is never bundled — the generator emits inert
   `mermaid-diagram--pending` scaffolding and `mermaid-source.ts` is pure string prep.
-  `mermaid.ts` adds the registry (`setDiagramRenderer`) plus `hydratePendingDiagrams`,
-  which walks pending containers, tries the gentle then aggressive
+  `mermaid.ts` adds the async renderer seam (the `diagramRenderer` config field,
+  consumed by `hydrate()` / `hydratePendingDiagrams`'s `renderer` option — not the
+  synchronous render) plus `hydratePendingDiagrams`, which walks pending containers, tries the gentle then aggressive
   `mermaidSourceCandidates`, and injects the backend's SVG (or marks `--error`). The
   mermaid backend (`mermaid-mermaidjs.ts`, `mermaidDiagramRenderer` / `loadMermaid`) is
   imported only via the `@copse/streaming-markdown/diagrams/mermaid` entry, with `mermaid`
@@ -74,21 +77,23 @@ When extending the renderer or its CSS, preserve these rules:
   or a one-line `$$E=mc^2$$`; a tokenizer construct, `math_block`), and
   `math-inline--pending` spans for `$…$` / `$$…$$` / `\(…\)` inline math (a built-in
   pass in `inline-math.ts`, shielded through the inline-pass emit table). The **prose
-  grammar is gated on renderer registration (#78)**: `$…$`-style delimiters have
+  grammar is opt-in via `mathSyntax` (#78)**: `$…$`-style delimiters have
   realistic non-math readings (`set $PATH$ properly`), so the `math_block` construct,
-  the inline pass, and their streaming holds activate only once `setMathRenderer` gets a
-  backend — preserving the invariant that output is byte-identical until a host
-  registers something — with `setMathSyntax(true | false | null)` as the explicit
-  override (`math-syntax.ts`, a dependency-free leaf flag both the tokenizer and the
-  inline pipeline read). The explicitly labeled ```` ```math ```` fence is never gated,
+  the inline pass, and their streaming holds activate only when the `mathSyntax` config
+  field turns them on — preserving the invariant that output is byte-identical until a
+  host opts in. `mathSyntax` (`true | false | null`) is a dependency-free leaf flag
+  (`math-syntax.ts`) both the tokenizer and the inline pipeline read: `true` forces
+  the grammar on, and `false`/`null` (the default) leave it off — a scaffolding-only
+  host sets `{ mathSyntax: true }` and hydrates later with a renderer. The explicitly labeled ```` ```math ```` fence is never gated,
   like mermaid's. With the grammar on: single-dollar
   math carries remark-math's currency guards (no whitespace just inside the delimiters,
   no digit after the closing `$`), so `$20 and $30` stays prose; escaped `\$`, code
   spans/fences, and link destinations never delimit. Recognizing `\(…\)` / `\[…\]` — the
   OpenAI delimiter style — deliberately diverges from CommonMark's escaped-punctuation
   reading, gated to non-empty bodies so both conformance baselines are unchanged.
-  `math.ts` holds the registry (`setMathRenderer`) plus `hydratePendingMath`, which
-  renders each pending element (display mode for blocks, inline for spans) and flips it
+  `math.ts` holds the async renderer seam (the `mathRenderer` config field, consumed by
+  `hydrate()` / `hydratePendingMath`'s `renderer` option — not the synchronous render)
+  plus `hydratePendingMath`, which renders each pending element (display mode for blocks, inline for spans) and flips it
   to `--rendered` or `--error` (escaped source kept visible). The KaTeX backend
   (`math-katex.ts`, `katexMathRenderer` / `loadKatex`, `throwOnError:false` +
   `trust:false`) is imported only via the `@copse/streaming-markdown/math/katex` entry,
@@ -106,21 +111,21 @@ When extending the renderer or its CSS, preserve these rules:
   points, so any built-in name decodes byte-identically to the full table) plus all
   numeric references, which are algorithmic (Windows-1252 C1 remap + surrogate/range →
   U+FFFD, matching `entities`/`he`). Across the whole CommonMark spec that subset costs
-  exactly one example (#25). `setEntityDecoder` swaps in full coverage: `browserEntityDecoder`
+  exactly one example (#25). The `entityDecoder` config field swaps in full coverage: `browserEntityDecoder`
   borrows the browser's own parser table through a detached `<textarea>` (zero bundle
   cost, strict because only complete `&name;` tokens are handed to it, so the parser's
   semicolon-less legacy decoding never fires), or the `@copse/streaming-markdown/entities/full`
-  entry registers the `entities`-backed decoder (`entities` an optional peer dependency).
-  `addNamedEntities` / `setNamedEntities` extend the built-in set without a full decoder.
+  entry provides the `entities`-backed `fullEntityDecoder` (`entities` an optional peer
+  dependency). The `namedEntities` config field extends the built-in set without a full decoder.
 - **Package boundary.** The core stays app-independent so it can version and ship on
   its own, so host-specific behaviour is **injected, not hard-coded**:
-  - `setLinkDecorator` (`inline-links.ts`) — a `LinkDecorator` returns the attributes
-    for a rendered `<a>`. The built-in default is **neutral** (#112): anchors carry
-    only `href`/`title`, with no `target`, `rel`, `class`, or `data-*` routing hooks.
+  - `linkDecorator` (config field; `inline-links.ts`) — a `LinkDecorator` returns the
+    attributes for a rendered `<a>`. The built-in default is **neutral** (#112): anchors
+    carry only `href`/`title`, with no `target`, `rel`, `class`, or `data-*` routing hooks.
     The app's workspace/browser routing decorator (`appLinkDecorator`) lives behind the
     host-only `@copse/streaming-markdown/host/workspace` entry; a host restores the
-    pre-0.10 in-app behaviour with `setLinkDecorator(appLinkDecorator)`.
-  - `setRawImageRenderer` (`raw-images.ts`) — a `RawImageRenderer` decides what a raw
+    pre-0.10 in-app behaviour with `{ linkDecorator: appLinkDecorator }`.
+  - `rawImageRenderer` (config field; `raw-images.ts`) — a `RawImageRenderer` decides what a raw
     `<img>` becomes (e.g. an app's artifact placeholder). The core escapes every
     `<img>` by default; the renderer's output bypasses escaping via a placeholder and
     is restored afterward.
@@ -136,7 +141,7 @@ When extending the renderer or its CSS, preserve these rules:
     `normalizeHostImagePath(src).path` gets identical output across machines. Hosts should
     route their artifact `<img>` through it and never fold volatile query params into a
     snapshot-visible attribute.
-  - `setSanitizeExtension` (`sanitize.ts`) — widens the sanitizer allowlist and adds a
+  - `sanitizeExtension` (config field; `sanitize.ts`) — widens the sanitizer allowlist and adds a
     per-element gate so a host's injected markup (e.g. its artifact `<img>`) survives
     sanitization. The core allowlist stays the security gate; keep additions narrow.
 
@@ -146,7 +151,7 @@ When extending the renderer or its CSS, preserve these rules:
   `<hr>`) must never end up inside `<p>`. Mixed single-newline blocks (heading → subheading → list)
   are common in LLM output; split at block boundaries before wrapping paragraphs.
 - **Pluggable inline passes (#53).** Custom inline syntax (citation `[@key]`, `==highlight==`,
-  …) registers as ordered passes (`inline-passes.ts`, `setInlinePasses`) that run inside the
+  …) are supplied as ordered passes (`inline-passes.ts`, the `inlinePasses` config field) that run inside the
   inline pipeline at a declared stage: `before-links` (after strikethrough, before markdown
   link resolution — bracket syntaxes must consume their text before `[` is read as a label
   opener, as in Pandoc) or `after-links` (last, over rendered `<a>`/`<code>`). The registry —
@@ -157,7 +162,7 @@ When extending the renderer or its CSS, preserve these rules:
   characters are stripped before any pass runs); and a pass's optional `holdStart` composes
   into `pendingHoldIndex` so a half-open `[@doe` / `==foo` holds mid-stream instead of
   flashing raw. Emitted HTML still passes the sink sanitizer — the second gate — so passes
-  using tags/attributes beyond the core allowlist must widen it via `setSanitizeExtension`.
+  using tags/attributes beyond the core allowlist must widen it via `sanitizeExtension`.
   Passes may run more than once over nested link-label text and must be idempotent
   (placeholder tokens make emitted output inert automatically).
 - **Inline formatting order.** Fenced code → inline code → inline math (#70, when the
@@ -230,8 +235,8 @@ When extending the renderer or its CSS, preserve these rules:
   handlers are removed. The keep/escape decision lives in `escapeHtmlOutsideSafeTags`
   (`escape.ts`, gated on `getHtmlPolicy()`); a lone `<`, a `<` that never forms a
   tag (`a < b`, `<3`), and an unterminated `<div` stay literal under either policy.
-  The opt-out `htmlPolicy: 'escape'` (on `renderMarkdown` / the streaming entry
-  points, or process-wide via `setHtmlPolicy`) reproduces the historical behavior
+  The opt-out `htmlPolicy: 'escape'` (the config field on `renderMarkdown` / the
+  streaming entry points) reproduces the historical behavior
   byte-for-byte: every tag outside the benign attribute-less inline allowlist
   (`<b> <i> <u> <s> <del> <ins> <sub> <sup> <kbd> <mark> <br>`,
   `BENIGN_RAW_INLINE_TAG_RE`) is escaped into literal prose. Block-level raw HTML
@@ -478,13 +483,13 @@ per-section counts; treat the two headline figures here as approximate.
 
 **Deliberate autolink-scheme divergence (#139).** Angle autolinks (`<scheme:…>`)
 route through the same scheme allowlist as markdown links (`safeLinkHref` /
-`setSafeHrefSchemes`) rather than a `javascript:`/`data:`/`vbscript:` deny-list,
+the `safeHrefSchemes` config field) rather than a `javascript:`/`data:`/`vbscript:` deny-list,
 so an unlisted scheme fails **closed** (stays literal) instead of rendering a
 live `<a href>`. This is the security posture — a deny-list is the only fail-open
 link path — at the cost of **4 CommonMark autolink examples** (`<irc://…>`,
 `<a+b+c:d>`, `<made-up-scheme://…>`, `<localhost:5001/…>`) that the spec links but
 carry non-allowlisted schemes. `http(s)`/`mailto`/`ftp(s)`/`tel`/`sms` autolinks
-are unaffected; a host widens the set with `setSafeHrefSchemes`.
+are unaffected; a host widens the set with the `safeHrefSchemes` config field.
 
 **Passthrough is now the runtime default** (`htmlPolicy: 'passthrough'`,
 `html-policy.ts`): the renderer emits well-formed raw HTML and the sink sanitizer

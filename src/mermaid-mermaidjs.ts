@@ -1,4 +1,4 @@
-import { type DiagramRenderer, setDiagramRenderer } from './mermaid.ts'
+import { type DiagramRenderer } from './mermaid.ts'
 
 // PROTOTYPE (#lazy-load): the mermaid backend — the diagram analogue of
 // `highlight-hljs.ts`. It is the only module that pulls in `mermaid`, and lives
@@ -6,15 +6,14 @@ import { type DiagramRenderer, setDiagramRenderer } from './mermaid.ts'
 // mermaid library is fetched only when a host references this entry. `mermaid` is
 // an OPTIONAL peer dependency: the host installs it, the package never bundles it.
 //
-//   • static (mermaid ready from first hydration):
-//       import { setDiagramRenderer } from '@copse/streaming-markdown'
-//       import { mermaidDiagramRenderer } from '@copse/streaming-markdown/diagrams/mermaid'
-//       setDiagramRenderer(mermaidDiagramRenderer)
+//   • static: import { mermaidDiagramRenderer } from '@copse/streaming-markdown/diagrams/mermaid'
+//     and pass it via `MarkdownConfig.diagramRenderer` (streaming `hydrate()`) or
+//     the `hydratePendingDiagrams(root, { renderer })` option.
 //
 //   • lazy (fetch the library as its own chunk only when first needed):
 //       const { loadMermaid } = await import('@copse/streaming-markdown/diagrams/mermaid')
-//       await loadMermaid()
-//       await hydratePendingDiagrams(messageEl)
+//       const mermaid = await loadMermaid()
+//       await hydratePendingDiagrams(messageEl, { renderer: mermaid })
 
 /** The slice of the mermaid API this backend uses (avoids a hard type dependency). */
 interface MermaidLike {
@@ -54,7 +53,10 @@ async function loadMermaidLib(): Promise<MermaidLike> {
   return lib
 }
 
-/** Mermaid-backed {@link DiagramRenderer}. Register it via {@link installMermaid}. */
+/**
+ * Mermaid-backed {@link DiagramRenderer}. Pass it via `MarkdownConfig.diagramRenderer`
+ * (streaming `hydrate()`) or the hydrate `renderer` option.
+ */
 export const mermaidDiagramRenderer: DiagramRenderer = {
   async render(source: string) {
     const lib = await loadMermaidLib()
@@ -64,18 +66,14 @@ export const mermaidDiagramRenderer: DiagramRenderer = {
   },
 }
 
-/** Register the mermaid backend synchronously (the library still loads lazily on first render). */
-export function installMermaid(): DiagramRenderer {
-  setDiagramRenderer(mermaidDiagramRenderer)
-  return mermaidDiagramRenderer
-}
-
 /**
- * Lazy convenience: register the mermaid backend. When called through a dynamic
+ * Return the mermaid {@link DiagramRenderer} (the library still loads lazily on
+ * the first {@link mermaidDiagramRenderer.render}). When called through a dynamic
  * `import('.../diagrams/mermaid')`, the mermaid library is a code-split chunk
- * fetched at this point (or on the first {@link mermaidDiagramRenderer.render}).
- * Idempotent.
+ * fetched at this point. Pass the result via `MarkdownConfig.diagramRenderer` or
+ * the hydrate `renderer` option; equivalent to importing
+ * {@link mermaidDiagramRenderer} directly.
  */
 export function loadMermaid(): Promise<DiagramRenderer> {
-  return Promise.resolve(installMermaid())
+  return Promise.resolve(mermaidDiagramRenderer)
 }

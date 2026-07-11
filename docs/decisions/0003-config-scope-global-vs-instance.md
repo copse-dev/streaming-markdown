@@ -1,21 +1,53 @@
 # 0003 — Configuration scope: global backends, per-render policies
 
-Status: accepted · Relates to [#137](https://github.com/copse-dev/streaming-markdown/issues/137)
+Status: accepted, then superseded in part · Relates to [#137](https://github.com/copse-dev/streaming-markdown/issues/137)
 
-> **Update.** Option C is adopted, and **phase 1 (the security tier) is
-> implemented**: `sanitizeExtension`, `linkImagePolicy`, `safeHrefSchemes`, and
-> `trustedTypesPolicy` are now per-render options on `renderMarkdown` and the
-> streaming entry points, applied via `withRenderPolicies` (`render-policies.ts`).
-> The behavioral tier and the `reset*` ergonomics remain as additive follow-ups.
+> **Superseded / updated 2026-07-11.** This ADR chose Option C — per-render
+> *policy* overrides layered **additively on top of** the process-wide `set*`
+> singletons, which stayed as "default movers". That additive layer proved to be
+> the wrong end state: keeping ~22 mutable global slots *and* a per-render
+> override path meant two sources of truth, the exact multi-tenant/leak hazards
+> below in a subtler form, and a larger 1.0 surface. **The `set*` setters have now
+> been removed entirely.** A single injected `MarkdownConfig` object is the whole
+> configuration mechanism: pass it as the 2nd argument to `renderMarkdown` /
+> `renderMarkdownUnsafe` / `renderStreamingMarkdown`, or capture it on
+> `new StreamingMarkdownRenderer(host, config)` (applied around every `update()`).
+> The synchronous **save-set-restore** seam this ADR designed is retained, but
+> simplified past what the ADR imagined: rather than N per-module slots each moved
+> and restored, the entire config is **one ambient object**. `withConfig`
+> (`config.ts`) swaps that single object for the render and restores it (merging
+> over the parent so nested renders inherit); every read site reads its setting
+> through `activeConfig()`. The old per-module `set*`/`get*` writers and the
+> `withRenderPolicies` helper (`render-policies.ts`) are deleted outright.
+>
+> This ADR's split of the 22 slots into "per-render policies" and "install-once
+> backends" proved prescient in **both** directions:
+>
+> - The async backends — `mathRenderer` / `diagramRenderer`, read *after* the
+>   synchronous render during hydration — genuinely cannot ride a synchronous
+>   scope, exactly as argued. They are **not** in the `withConfig` scope; they flow
+>   through `hydrate()` / the `hydratePending*` `renderer` option.
+> - The "install-once" insight is realized as **`setDefaultConfig(config)`**: a
+>   single process-wide default a Node/SSR host or a test harness sets once (its
+>   `sanitizerBackend`, a `codeHighlighter`) that every per-render `MarkdownConfig`
+>   overrides. It is the *only* remaining mutable-global entry point, and it sets
+>   defaults for the one ambient object rather than reintroducing per-knob setters.
+>
+> Everything else read during the synchronous render — `sanitizeExtension`,
+> `fenceHandlers`, `inlinePasses`, `entityDecoder`, `mathSyntax`, and the whole
+> policy tier — is a plain `MarkdownConfig` field, no setter.
+>
+> The analysis below is preserved as the historical record; read "the global
+> `set*` remain as default movers" as the intermediate step that the setter
+> removal replaced.
 
-Design note for the v1 configuration model. The renderer today exposes ~22
-process-wide `set*` singletons. Two consumers in one process (two chat panes
-with different link policies, an SSR server rendering for multiple tenants, or
-just two test suites) cannot hold different configuration, and the
+Design note for the v1 configuration model. At the time of writing the renderer
+exposed ~22 process-wide `set*` singletons. Two consumers in one process (two chat
+panes with different link policies, an SSR server rendering for multiple tenants,
+or just two test suites) cannot hold different configuration, and the
 security-relevant knobs leak across renders. This note picks the model v1 should
 commit to — because the shape of the config API is one of the few things a 1.0
-freezes that is expensive to revise later. Read alongside the singleton
-rationale in [html-policy.ts](../../src/html-policy.ts) and the sink model in
+freezes that is expensive to revise later. Read alongside the sink model in
 [ARCHITECTURE.md](../ARCHITECTURE.md).
 
 ## Motivation
@@ -91,14 +123,23 @@ helper covering all policy slots. The global `set*` remain, now as *default
 movers*; an override on `renderMarkdown(md, {...})` or
 `new StreamingMarkdownRenderer(el, {...})` wins for that render/instance.
 
+> *Final state (2026-07-11):* the additive "global `set*` remain as default
+> movers" half of C did not survive — the setters were removed outright, so the
+> injected options object is the *only* mover, and the scoped wrapper was widened
+> from the four security slots to the whole synchronous config tier (see the note
+> at the top). The synchronous save-set-restore mechanism C designed is exactly
+> what shipped.
+
 ## Recommendation: C
 
 Generalize the existing `htmlPolicy` seam. Today (renderer.ts:82-90) the entry
 point resolves an optional `options.htmlPolicy`, saves the previous slot value,
 sets it, renders in a `try`, and restores in `finally`; the deep call stack keeps
 reading the global getter and needs no new parameter. Extend this to one
-`withRenderPolicies(options, fn)` helper that saves/sets/restores every policy
-slot the caller overrode, wrapped around the three entry points:
+`withRenderPolicies(options, fn)` helper (shipped, then generalized and renamed
+to `withConfig` in `config.ts` once the setters were removed and it had to cover
+the full config tier) that saves/sets/restores every config slot the caller
+overrode, wrapped around the three entry points:
 
 - `renderMarkdown` / `renderMarkdownUnsafe` (renderer.ts),
 - `renderStreamingMarkdown` (streaming.ts),
@@ -129,68 +170,85 @@ saves and restores its own previous value, so the stack composes — a nested sc
 restores to the enclosing scope's value, not the global default (covered by
 `render-policies.test.ts`). What would break the guarantee is an async render that
 suspends mid-pass; async hydration (`hydratePendingMath`,
-`hydratePendingDiagrams`) is safe because it runs *after* the scoped block and
-reads only the global *backend* tier.
+`hydratePendingDiagrams`) is safe because it runs *after* the scoped block. **This
+is the reasoning that decided the final async split:** the `mathRenderer` and
+`diagramRenderer` backends do their work inside that post-render async hydration,
+so a synchronous save-set-restore block cannot scope them — there is no
+synchronous window that contains their execution. That is why, in the shipped
+API, those two backends are **not** `withConfig` fields but flow through
+`hydrate()` / the `hydratePending*` `renderer` option, while every backend and
+policy read *during* the synchronous render (`sanitizerBackend`, `codeHighlighter`,
+`entityDecoder`, `fenceHandlers`, `inlinePasses`, and the policy tier) is scoped
+by `withConfig`.
 
-This also resolves the mid-stream config-flip hazard (#145): an instance that
-pins its policies is immune to a global `set*` flipped after construction; an
-instance that relies on the global default is covered by the config-epoch
-invalidation that #145 adds. The two fixes compose.
+This also resolved the mid-stream config-flip hazard (#145): an instance pins its
+config at construction and re-applies it around every `update()`, so there is no
+mutable global left to flip after construction — the setter removal closes the
+hazard outright.
 
 ## Security argument
 
-The five trust-boundary slots — `setSanitizerBackend`, `setSanitizeExtension`,
-`setSafeHrefSchemes`, `setLinkImagePolicy`, `setTrustedTypesPolicy` — are handled
+The five trust-boundary slots — `sanitizerBackend`, `sanitizeExtension`,
+`safeHrefSchemes`, `linkImagePolicy`, `trustedTypesPolicy` — are handled
 deliberately:
 
-- `setSanitizerBackend` stays **global**. Two tenants sharing one backend both get
-  the same allowlist enforcement; sharing is safe, and the backend loads a heavy
-  dependency you want once. What differs per tenant is not the backend but the
-  *allowlist extension* and *origin policy* layered on top —
-- `setSanitizeExtension`, `setLinkImagePolicy`, `setSafeHrefSchemes`,
-  `setTrustedTypesPolicy` move to the **per-render** tier. These are precisely the
-  knobs a multi-tenant host must vary, and under C each render is gated by its own
-  values with no bleed. Crucially, the origin policy and scheme allowlist become
-  *impossible to leak across tenants by construction*, rather than relying on the
-  host to remember a manual save/restore.
+- `sanitizerBackend` — this ADR originally kept it **global** (two tenants sharing
+  one backend both get the same allowlist enforcement, and the backend loads a
+  heavy dependency you want once). In the final state it is a per-render
+  `MarkdownConfig` field like the rest, because it is read *synchronously* during
+  the render and so is fully covered by the `withConfig` save-set-restore — sharing
+  is still the common case (omit the field and every render uses the same default
+  backend), but a multi-tenant host can now vary it per render with no bleed.
+- `sanitizeExtension`, `linkImagePolicy`, `safeHrefSchemes`, `trustedTypesPolicy`
+  are the **per-render** trust knobs a multi-tenant host must vary, and each render
+  is gated by its own values with no bleed. Crucially, the origin policy and scheme
+  allowlist are *impossible to leak across tenants by construction*, rather than
+  relying on the host to remember a manual save/restore.
 
-The sink remains the sole arbiter and its allowlist is not widened; C changes
-*who can scope* a policy, not what the policy can permit.
+The sink remains the sole arbiter and its allowlist is not widened; the config
+model changes *who can scope* a policy, not what the policy can permit.
 
 ## Back-compat & migration
 
-C is **additive, not breaking**. The global `set*` keep working and keep their
-meaning (they move the default); every new option is optional and inherits the
-global when omitted, exactly as `htmlPolicy` does. So although v1 is the right
-moment to establish the config *shape*, none of this forces a breaking change at
-1.0 or later — the per-render overrides can even land incrementally behind the
-same options bag.
+C was designed as **additive, not breaking**, and shipped that way first: the
+per-render overrides landed behind the same options bag while the global `set*`
+kept working as default movers.
 
-Suggested phasing:
+The phasing it followed, and where it ended up:
 
-1. **Security tier first** — thread `sanitizeExtension`, `linkImagePolicy`,
+1. **Security tier first** — `sanitizeExtension`, `linkImagePolicy`,
    `safeHrefSchemes`, `trustedTypesPolicy` as per-render options via
-   `withRenderPolicies`. This closes the multi-tenant security footgun before
-   hosts adopt the global-only pattern, and is the highest-value slice.
+   `withRenderPolicies`. This closed the multi-tenant security footgun first.
 2. **Behavioral tier** — `mathSyntax`, `linkDecorator`, `rawImageRenderer`,
    `emailAutolinks`, CJK boundaries.
-3. **Ergonomics** — a `reset*` (or a single `resetConfig()`) for every slot to
-   de-fragilize tests, and document the backend tier as explicitly
-   install-once/process-wide so the split is legible.
+3. **Full config tier + setter removal (2026-07-11, the breaking step).** With
+   every slot expressible per render, keeping the mutable `set*` globals in
+   parallel was pure liability — two sources of truth for the same value. They
+   were removed; `withRenderPolicies` was generalized to `withConfig` covering the
+   whole synchronous tier; `fenceHandlers`, `inlinePasses`, `codeHighlighter`,
+   `sanitizerBackend`, and `entityDecoder` / `namedEntities` — the "ambiguous
+   middle" registries this ADR was unsure whether to promote — all became
+   `MarkdownConfig` fields too. `mathRenderer` / `diagramRenderer` stayed out of
+   the sync scope (they run in async hydration; see the Security argument) and
+   flow via `hydrate()` / `hydratePending*` options. No `reset*` ergonomics were
+   needed — with no global to reset, test isolation is free.
 
-`setInlinePasses` and `setFenceHandler` are the ambiguous middle — a registry
-(backend-like) that also carries per-consumer behavior. Default them to the
-backend tier (global) for v1; promote to per-render only if a concrete
-multi-tenant need appears, since that stays additive.
+This last step is a **breaking change** (hosts on the `set*` API migrate to the
+config object — see the mapping in the top note and [`EXTENDING.md`](../EXTENDING.md)),
+which is why it was taken deliberately rather than left as an open-ended additive
+layer.
 
 ## Decision
 
-C is adopted, shipping **phase 1 (the security tier) for v1** —
-`sanitizeExtension`, `linkImagePolicy`, `safeHrefSchemes`, and
-`trustedTypesPolicy` as per-render options, closing the multi-tenant security
-footgun before hosts build on the global-only model. The behavioral tier
-(`mathSyntax`, `linkDecorator`, `rawImageRenderer`, `emailAutolinks`, CJK) and the
-`reset*` ergonomics stay as additive follow-ups, safe to land any time because C
-is non-breaking. Option B (the fuller instance/context model) is not pursued: its
-pipeline-wide threading of the hot inline paths is disproportionate to the
-reentrancy guarantee a synchronous renderer needs.
+C's **synchronous save-set-restore mechanism** is adopted and is what shipped —
+first as `withRenderPolicies` over the security tier, then generalized to
+`withConfig` over the whole synchronous config tier. Its *additive* half (keeping
+the `set*` globals as default movers) was **not** kept: once every slot was
+expressible per render, the setters were removed and the injected `MarkdownConfig`
+object became the single configuration mechanism (2026-07-11). The only slots that
+remain outside the per-render scope are the genuinely async `mathRenderer` /
+`diagramRenderer`, which run in post-render hydration and flow via `hydrate()` /
+`hydratePending*` options. Option B (the fuller instance/context model) is not
+pursued: its pipeline-wide threading of the hot inline paths is disproportionate
+to the reentrancy guarantee a synchronous renderer needs — the config captured on
+the instance and re-applied around each `update()` gives the same isolation.

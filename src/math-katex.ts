@@ -1,4 +1,4 @@
-import { type MathRenderer, setMathRenderer } from './math.ts'
+import { type MathRenderer } from './math.ts'
 
 // The KaTeX backend (#70) — the math analogue of `mermaid-mermaidjs.ts`. It is
 // the only module that pulls in `katex`, and lives behind the
@@ -7,15 +7,15 @@ import { type MathRenderer, setMathRenderer } from './math.ts'
 // peer dependency: the host installs it (and loads the KaTeX stylesheet/fonts —
 // the HTML is unreadable without them), the package never bundles it.
 //
-//   • static (KaTeX ready from first hydration):
-//       import { setMathRenderer } from '@copse/streaming-markdown'
-//       import { katexMathRenderer } from '@copse/streaming-markdown/math/katex'
-//       setMathRenderer(katexMathRenderer)
+//   • static: import { katexMathRenderer } from '@copse/streaming-markdown/math/katex'
+//     and pass it via `MarkdownConfig.mathRenderer` (or the hydrate `renderer`
+//     option). Pair with `mathSyntax: true` for the prose `$…$` grammar.
 //
 //   • lazy (fetch the library as its own chunk only when first needed):
 //       const { loadKatex } = await import('@copse/streaming-markdown/math/katex')
-//       await loadKatex()
-//       await hydratePendingMath(messageEl)
+//       const katex = await loadKatex()
+//       new StreamingMarkdownRenderer(host, { mathSyntax: true, mathRenderer: katex })
+//       // …update(), then await renderer.hydrate()
 
 /** The slice of the katex API this backend uses (avoids a hard type dependency). */
 interface KatexLike {
@@ -49,7 +49,7 @@ async function loadKatexLib(): Promise<KatexLike> {
   return katexLib
 }
 
-/** KaTeX-backed {@link MathRenderer}. Register it via {@link installKatex}. */
+/** KaTeX-backed {@link MathRenderer}. Pass it via `MarkdownConfig.mathRenderer` or {@link loadKatex}. */
 export const katexMathRenderer: MathRenderer = {
   async render(source: string, { displayMode }) {
     const lib = await loadKatexLib()
@@ -66,21 +66,13 @@ export const katexMathRenderer: MathRenderer = {
 }
 
 /**
- * Register the KaTeX backend synchronously (the library still loads lazily on
- * first render). Registration also activates the `$…$`-style prose math grammar
- * via `setMathRenderer` (#78) — this one call is the whole opt-in.
- */
-export function installKatex(): MathRenderer {
-  setMathRenderer(katexMathRenderer)
-  return katexMathRenderer
-}
-
-/**
- * Lazy convenience: register the KaTeX backend (activating the prose math
- * grammar, #78). When called through a dynamic `import('.../math/katex')`, the
- * katex library is a code-split chunk fetched at this point (or on the first
- * {@link katexMathRenderer.render}). Idempotent.
+ * Return the KaTeX {@link MathRenderer} (the library still loads lazily on the
+ * first {@link katexMathRenderer.render}). When called through a dynamic
+ * `import('.../math/katex')`, the katex library is a code-split chunk fetched at
+ * this point. Pass the result via `MarkdownConfig.mathRenderer` (with
+ * `mathSyntax: true` for the prose grammar) or the hydrate `renderer` option;
+ * equivalent to importing {@link katexMathRenderer} directly.
  */
 export function loadKatex(): Promise<MathRenderer> {
-  return Promise.resolve(installKatex())
+  return Promise.resolve(katexMathRenderer)
 }

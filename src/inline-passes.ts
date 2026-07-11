@@ -15,7 +15,7 @@
 //    characters are stripped from the input before any pass runs, so markdown
 //    text can never address the side table. The sink sanitizer remains the
 //    second gate: emitted HTML using non-allowlisted tags/attributes needs
-//    `setSanitizeExtension`.
+//    `MarkdownConfig.sanitizeExtension`.
 // 3. **Streaming hold.** `pendingHoldIndex` (`inline-emphasis.ts`) takes the min
 //    over registered passes' {@link InlinePass.holdStart}, so a half-open
 //    construct (`[@doe`, `==foo`) holds instead of flashing raw mid-stream —
@@ -26,6 +26,8 @@
 // without creating an import cycle.
 
 /** Where in the inline pipeline a pass runs. */
+import { activeConfig } from './config.ts'
+
 export type InlinePassStage = 'before-links' | 'after-links'
 
 /** Render-time services handed to {@link InlinePass.apply}. */
@@ -34,7 +36,7 @@ export interface InlinePassContext {
    * Shield trusted HTML from later passes and the escape step. Returns an inert
    * placeholder token to splice into the returned text; the pipeline restores
    * the HTML after escaping. The HTML still passes the host's sanitizer sink —
-   * stay inside the allowlist or widen it via `setSanitizeExtension`.
+   * stay inside the allowlist or widen it via `MarkdownConfig.sanitizeExtension`.
    */
   emit(html: string): string
 }
@@ -68,22 +70,17 @@ export interface InlinePass {
   holdStart?(line: string, mask: boolean[]): number
 }
 
-let inlinePasses: readonly InlinePass[] = []
+const NO_PASSES: readonly InlinePass[] = []
 
 /**
- * Register the active inline passes wholesale (execution order = array order
- * within each stage), or pass `null`/`[]` to remove them. Set once, before the
- * first render — the at-rest and streaming emitters share this registry.
+ * The inline passes configured for the current render (execution order = array
+ * order within each stage), optionally filtered to one pipeline stage. Set them
+ * per render via `MarkdownConfig.inlinePasses`.
  */
-export function setInlinePasses(passes: readonly InlinePass[] | null): void {
-  inlinePasses = passes ? [...passes] : []
-  emitted.clear()
-}
-
-/** The registered passes, optionally filtered to one pipeline stage. */
 export function getInlinePasses(stage?: InlinePassStage): readonly InlinePass[] {
-  if (stage === undefined) return inlinePasses
-  return inlinePasses.filter((pass) => (pass.stage ?? 'before-links') === stage)
+  const passes = activeConfig().inlinePasses ?? NO_PASSES
+  if (stage === undefined) return passes
+  return passes.filter((pass) => (pass.stage ?? 'before-links') === stage)
 }
 
 // Placeholder tokens for pass-emitted HTML: PUA characters that are inert to

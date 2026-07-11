@@ -1,7 +1,8 @@
-import { afterEach, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { appLinkDecorator, type LinkDecorator, renderAnchor, setLinkDecorator } from './inline-links.ts'
+import { appLinkDecorator, type LinkDecorator, renderAnchor } from './inline-links.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
+import { withConfig } from './config.ts'
 
 // #146: renderAnchor exposes `isWorkspace` on the LinkDecoration lazily — the
 // neutral default decorator never reads it, so the per-anchor
@@ -9,8 +10,6 @@ import { renderMarkdownUnsafe } from './renderer.ts'
 // must still deliver the correct value (and only when read). These pin that.
 
 describe('renderAnchor lazy isWorkspace (#146)', () => {
-  afterEach(() => setLinkDecorator(null))
-
   it('neutral default emits host-agnostic anchors (never reads isWorkspace)', () => {
     assert.equal(renderMarkdownUnsafe('[y](src/main.ts)'), '<p><a href="src/main.ts">y</a></p>')
     const html = renderMarkdownUnsafe('[x](https://example.com) and [y](docs/guide.md)')
@@ -18,13 +17,20 @@ describe('renderAnchor lazy isWorkspace (#146)', () => {
   })
 
   it('a decorator that reads isWorkspace still gets the correct value per anchor', () => {
-    setLinkDecorator(appLinkDecorator)
     // A relative in-workspace path resolves as a workspace link…
-    assert.match(renderMarkdownUnsafe('[a](docs/guide.md)'), /data-workspace-link="true"/)
+    assert.match(
+      renderMarkdownUnsafe('[a](docs/guide.md)', { linkDecorator: appLinkDecorator }),
+      /data-workspace-link="true"/,
+    )
     // …an external http(s) URL is a browser link.
-    assert.match(renderMarkdownUnsafe('[b](https://example.com)'), /data-browser-link="true"/)
+    assert.match(
+      renderMarkdownUnsafe('[b](https://example.com)', { linkDecorator: appLinkDecorator }),
+      /data-browser-link="true"/,
+    )
     // Both, correctly distinguished, in a single render.
-    const html = renderMarkdownUnsafe('[a](docs/guide.md) then [b](https://example.com)')
+    const html = renderMarkdownUnsafe('[a](docs/guide.md) then [b](https://example.com)', {
+      linkDecorator: appLinkDecorator,
+    })
     assert.match(html, /docs\/guide\.md"[^>]*data-workspace-link="true"/)
     assert.match(html, /https:\/\/example\.com"[^>]*data-browser-link="true"/)
   })
@@ -35,8 +41,9 @@ describe('renderAnchor lazy isWorkspace (#146)', () => {
       reads.push(isWorkspace, isWorkspace) // access the getter twice
       return isWorkspace ? ' data-ws="1"' : ' data-ext="1"'
     }
-    setLinkDecorator(doubleReader)
-    assert.equal(renderAnchor('t', 'docs/guide.md'), '<a href="docs/guide.md" data-ws="1">t</a>')
+    withConfig({ linkDecorator: doubleReader }, () => {
+      assert.equal(renderAnchor('t', 'docs/guide.md'), '<a href="docs/guide.md" data-ws="1">t</a>')
+    })
     assert.deepEqual(reads, [true, true]) // consistent across repeated reads
   })
 })

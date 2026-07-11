@@ -3,11 +3,10 @@
 // backend can't run here, but its allowlist-narrowing walk (the security-critical
 // part) is exercised directly against pre-parsed DOM.
 import '../tests/setup-dom-jsdom.ts'
-import { describe, it, afterEach } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   sanitizeRenderedMarkdown,
-  setSanitizerBackend,
   type SanitizerBackend,
 } from './sanitize.ts'
 import {
@@ -15,13 +14,13 @@ import {
   enforceSanitizerAllowlist,
   isBrowserSanitizerSupported,
 } from './sanitize-browser.ts'
-import { dompurifyBackend } from './sanitize-dompurify.ts'
+import { withConfig } from './config.ts'
 
-// setup-dom-jsdom registers the DOMPurify backend; restore it after any test
-// that swaps the backend so the rest of the suite is unaffected.
-afterEach(() => setSanitizerBackend(dompurifyBackend))
+// setup-dom-jsdom installs the DOMPurify backend as the process default; each
+// test that needs a different backend scopes it with `withConfig` for the single
+// render, so no per-test restore is needed.
 
-describe('setSanitizerBackend', () => {
+describe('sanitizerBackend', () => {
   it('routes sanitization through a swapped-in backend', () => {
     const seen: string[] = []
     const recordingBackend: SanitizerBackend = {
@@ -30,8 +29,9 @@ describe('setSanitizerBackend', () => {
         return '<p>from custom backend</p>'
       },
     }
-    setSanitizerBackend(recordingBackend)
-    const out = sanitizeRenderedMarkdown('<p>hi</p>')
+    const out = withConfig({ sanitizerBackend: recordingBackend }, () =>
+      sanitizeRenderedMarkdown('<p>hi</p>'),
+    )
     assert.equal(out, '<p>from custom backend</p>')
     assert.deepEqual(seen, ['<p>hi</p>'])
   })
@@ -39,24 +39,29 @@ describe('setSanitizerBackend', () => {
   it('passes the merged core allowlist and an onElement gate to the backend', () => {
     const tags: string[] = []
     let hasGate = false
-    setSanitizerBackend({
-      sanitize(_html, config) {
-        tags.push(...config.allowedTags)
-        hasGate = typeof config.onElement === 'function'
-        return ''
+    withConfig(
+      {
+        sanitizerBackend: {
+          sanitize(_html, config) {
+            tags.push(...config.allowedTags)
+            hasGate = typeof config.onElement === 'function'
+            return ''
+          },
+        },
       },
-    })
-    sanitizeRenderedMarkdown('<p>x</p>')
+      () => sanitizeRenderedMarkdown('<p>x</p>'),
+    )
     assert.ok(tags.includes('p'))
     assert.ok(tags.includes('code'))
     assert.equal(hasGate, true)
   })
 
   it('throws (never returns unsanitized HTML) when no backend is available', () => {
-    // Clearing the backend falls back to the native API, which jsdom lacks.
-    setSanitizerBackend(null)
     if (isBrowserSanitizerSupported()) return // real browser: default backend works
-    assert.throws(() => sanitizeRenderedMarkdown('<p>x</p>'), /No HTML sanitizer backend/)
+    // `sanitizerBackend: null` falls back to the native API, which jsdom lacks.
+    withConfig({ sanitizerBackend: null }, () => {
+      assert.throws(() => sanitizeRenderedMarkdown('<p>x</p>'), /No HTML sanitizer backend/)
+    })
   })
 })
 

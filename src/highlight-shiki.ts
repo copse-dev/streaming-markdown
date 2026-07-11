@@ -1,5 +1,5 @@
 import { escapeHtml } from './escape.ts'
-import { type CodeHighlighter, setCodeHighlighter } from './highlight.ts'
+import type { CodeHighlighter } from './highlight.ts'
 
 // PROTOTYPE (#lazy-load): the Shiki backend — a second {@link CodeHighlighter},
 // sibling of `highlight-hljs.ts`. It is the ONLY module that references `shiki`,
@@ -237,22 +237,19 @@ export function loadShiki(options?: ShikiOptions): Promise<CodeHighlighter> {
     loaded = state
     return shikiHighlighter
   })
-  return loadPromise.then((backend) => {
-    setCodeHighlighter(backend)
-    return backend
-  })
+  return loadPromise
 }
 
 /**
- * Register the shiki backend synchronously and start loading the library in the
- * background. Fences render as escaped plain text (with the stable core-resolved
- * `hljs lang-*` class) until the load completes; a re-render then upgrades them
- * in place. `await loadShiki()` instead to observe load completion or failure —
- * this fire-and-forget form surfaces a missing peer as an unhandled rejection,
- * the async analogue of a failing static `highlight.js` import.
+ * Return the shiki {@link CodeHighlighter} synchronously and start loading the
+ * library in the background. Pass the result via `MarkdownConfig.codeHighlighter`:
+ * fences render as escaped plain text (with the stable core-resolved `hljs lang-*`
+ * class) until the load completes, and a re-render then upgrades them in place.
+ * `await loadShiki()` instead to observe load completion or failure — this
+ * fire-and-forget form surfaces a missing peer as an unhandled rejection, the
+ * async analogue of a failing static `highlight.js` import.
  */
 export function installShiki(options?: ShikiOptions): CodeHighlighter {
-  setCodeHighlighter(shikiHighlighter)
   void loadShiki(options)
   return shikiHighlighter
 }

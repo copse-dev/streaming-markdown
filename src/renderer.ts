@@ -9,7 +9,7 @@ import {
   getActiveFootnoteContext,
   setActiveFootnoteContext,
 } from './footnotes.ts'
-import { type RenderPolicyOptions, withRenderPolicies } from './render-policies.ts'
+import { type MarkdownConfig, withConfig } from './config.ts'
 import { renderBlocks, renderFootnoteSection } from './render-blocks.ts'
 import { sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 
@@ -25,7 +25,7 @@ export { escapeHtml } from './escape.ts'
  */
 export const TOP_LEVEL_RENDER_OPTS = { htmlFromIndent: true, indentedCode: true } as const
 
-export interface RenderMarkdownOptions extends RenderPolicyOptions {
+export interface RenderMarkdownOptions extends MarkdownConfig {
   /**
    * Recognize 4-column (space or tab) indented lines as CommonMark indented code
    * blocks. Defaults to `true` — indented code is supported and conforms (#9).
@@ -57,10 +57,19 @@ export interface RenderMarkdownOptions extends RenderPolicyOptions {
  * For a pure `string → HTML` result with no backend (SSR, snapshots, non-DOM
  * pipelines), use {@link renderMarkdownUnsafe} and sanitize at your own sink.
  */
+// Only `MarkdownConfig` fields belong in the ambient scope. `tokens` (a
+// potentially large per-call array) and `indentedCode` are call options read
+// directly by renderMarkdownCore; leaking them into the ambient object would
+// hand an outer render's tokens to any nested render that consulted them.
+function scopedConfig(options: RenderMarkdownOptions): MarkdownConfig {
+  const { tokens, indentedCode, ...config } = options
+  return config
+}
+
 export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {}): SanitizedHtml {
   // The scope covers the sink too (sanitizeExtension / linkImagePolicy /
   // trustedTypesPolicy are read during sanitize), so wrap the whole thing.
-  return withRenderPolicies(options, () =>
+  return withConfig(scopedConfig(options), () =>
     sanitizeRenderedMarkdown(renderMarkdownCore(raw, options)),
   )
 }
@@ -79,7 +88,7 @@ export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {})
  * their sinks) and by hosts that own their own sanitization boundary.
  */
 export function renderMarkdownUnsafe(raw: string, options: RenderMarkdownOptions = {}): string {
-  return withRenderPolicies(options, () => renderMarkdownCore(raw, options))
+  return withConfig(scopedConfig(options), () => renderMarkdownCore(raw, options))
 }
 
 function renderMarkdownCore(raw: string, options: RenderMarkdownOptions): string {
@@ -101,7 +110,7 @@ function renderMarkdownCore(raw: string, options: RenderMarkdownOptions): string
   // API (fence handlers, inline passes) invites recursive renderMarkdownUnsafe
   // calls, and a footnote-bearing inner render must not strand the outer
   // document's context — every later `[^ref]` in the outer doc would otherwise
-  // render literal (#144). Mirrors the scoped setHtmlPolicy `previous` pattern.
+  // render literal (#144). Mirrors withConfig's save/restore pattern.
   const previousFootnotes = getActiveFootnoteContext()
   setActiveFootnoteContext(footnotes)
   try {

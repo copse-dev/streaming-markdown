@@ -55,17 +55,19 @@ budget deliberately with `npm run size:update` and commit the JSON.
 
 ## The shape: a pluggable backend, mirroring the sanitizer split
 
-This reuses the exact pattern the sanitizer already uses (`setSanitizerBackend` +
-the `@copse/streaming-markdown/sanitizers/dompurify` subpath):
+This reuses the exact pattern the sanitizer already uses (the `sanitizerBackend`
+config field + the `@copse/streaming-markdown/sanitizers/dompurify` subpath):
 
 - **`highlight.ts` (core)** carries *no* highlight.js code. It keeps only the
   cheap string work — language aliases, the `KNOWN_LANGUAGES` set, and
-  `fenceCodeClass` — and a registry: `setCodeHighlighter(backend | null)` /
-  `getCodeHighlighter()`. With no backend registered, `highlightFenceCode` returns
+  `fenceCodeClass` — and a config-injected slot: the `codeHighlighter` field, read
+  internally via `getCodeHighlighter()` and applied around each render by
+  `withConfig`. With no highlighter configured, `highlightFenceCode` returns
   **escaped plain text**.
 - **`highlight-hljs.ts` (backend)** is the only module that imports highlight.js.
-  It registers the grammars and exports `highlightjsHighlighter`,
-  `installHighlightjs()`, and `loadHighlightjs()`. It lives behind the
+  It registers the grammars and exports `highlightjsHighlighter` (the value) and
+  `loadHighlightjs()` (which returns that `CodeHighlighter`), to pass via
+  `MarkdownConfig.codeHighlighter`. It lives behind the
   `@copse/streaming-markdown/highlighters/highlightjs` subpath, so a bundler drops
   it unless the host references that entry.
 
@@ -83,10 +85,10 @@ must stay in sync with the grammars the backend registers.
 Eager (highlighting from first paint — pulls the chunk into your bundle):
 
 ```ts
-import { setCodeHighlighter } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 import { highlightjsHighlighter } from '@copse/streaming-markdown/highlighters/highlightjs'
 
-setCodeHighlighter(highlightjsHighlighter) // once, before the first render
+renderMarkdown(md, { codeHighlighter: highlightjsHighlighter })
 ```
 
 Lazy (the grammars are a separate chunk, fetched only when this runs):
@@ -94,10 +96,11 @@ Lazy (the grammars are a separate chunk, fetched only when this runs):
 ```ts
 // e.g. on the first fenced block seen, or during an idle callback
 const { loadHighlightjs } = await import('@copse/streaming-markdown/highlighters/highlightjs')
-await loadHighlightjs() // calls setCodeHighlighter internally
+const codeHighlighter = await loadHighlightjs() // returns the highlighter
 
-// re-render the message so already-rendered fences upgrade from plain → highlighted
-rerender()
+// re-render the message with { codeHighlighter } in config so already-rendered
+// fences upgrade from plain → highlighted
+rerender({ codeHighlighter })
 ```
 
 Until either runs, code fences render as safe, escaped plain text with the correct
@@ -106,7 +109,7 @@ Until either runs, code fences render as safe, escaped plain text with the corre
 ## Shiki — same registry, an async-loading backend
 
 `@copse/streaming-markdown/highlighters/shiki` is a second highlighter backend
-over the same `setCodeHighlighter` registry. It sits between the two patterns
+for the same `codeHighlighter` config slot. It sits between the two patterns
 above: like mermaid, `shiki` is an **optional peer dependency** reached only
 through variable-specifier dynamic imports (the package builds without it, and
 zero shiki bytes can land in the main entry — or in the subpath chunk itself);
@@ -134,25 +137,27 @@ inject SVG, retry on the aggressive source candidate" dance.
 
 The same registry shape as highlighting now ships for it:
 
-- **`mermaid.ts` (core)** carries no mermaid code. It holds the registry
-  (`setDiagramRenderer` / `getDiagramRenderer`), the `DiagramRenderer` interface,
-  and `hydratePendingDiagrams(root, opts?)` — which finds every
+- **`mermaid.ts` (core)** carries no mermaid code. It holds the async renderer
+  seam (the `diagramRenderer` config field, consumed by `hydrate()` /
+  `hydratePendingDiagrams`'s `renderer` option — not the synchronous render), the
+  `DiagramRenderer` interface, and `hydratePendingDiagrams(root, opts?)` — which finds every
   `mermaid-diagram--pending` container under `root`, tries the gentle then
   aggressive `mermaidSourceCandidates()` until one renders, and flips the container
   to `--rendered` (SVG injected) or `--error`.
 - **`mermaid-mermaidjs.ts` (backend)** is the only module that references
   `mermaid`. It lives behind `@copse/streaming-markdown/diagrams/mermaid` and
-  exports `mermaidDiagramRenderer`, `installMermaid()`, and `loadMermaid()`.
-  `mermaid` is an **optional peer dependency** — the host installs it, the package
-  never bundles it. The dynamic import uses a variable specifier so the package
+  exports `mermaidDiagramRenderer` and `loadMermaid()` (which returns the renderer
+  value — pass it via `MarkdownConfig.diagramRenderer` or the hydrate `renderer`
+  option). `mermaid` is an **optional peer dependency** — the host installs it, the
+  package never bundles it. The dynamic import uses a variable specifier so the package
   builds and type-checks even when the peer isn't installed.
 
 ```ts
 import { hydratePendingDiagrams } from '@copse/streaming-markdown'
 
 const { loadMermaid } = await import('@copse/streaming-markdown/diagrams/mermaid')
-await loadMermaid()                 // registers the backend; library loads lazily
-await hydratePendingDiagrams(messageEl) // pending → rendered SVG
+const renderer = await loadMermaid()    // returns the backend; library loads lazily
+await hydratePendingDiagrams(messageEl, { renderer }) // pending → rendered SVG
 ```
 
 **Trust boundary:** mermaid SVG is produced by the trusted library *after* the sink
@@ -172,29 +177,33 @@ blocks, and `$…$` / `\(…\)` inline spans
 (`math-block--pending` / `math-inline--pending`, escaped TeX source inside) —
 so the KaTeX payload is never needed at render time. The *prose* delimiter
 grammar (everything except the always-on ```` ```math ```` fence) is itself
-gated on registration (#78): until `setMathRenderer` gets a backend — or a
-host forces it with `setMathSyntax(true)` — `$…$`-style text stays ordinary
-prose and output is byte-identical to a math-free build, so hosts that never
-opt in pay nothing at all:
+opt-in via `mathSyntax` (#78): until `{ mathSyntax: true }` turns it on (the
+`null` default defers to a process-wide renderer registration), `$…$`-style text
+stays ordinary prose and output is byte-identical to a math-free build, so hosts
+that never opt in pay nothing at all:
 
-- **`math.ts` (core)** carries no KaTeX code: the registry (`setMathRenderer` /
-  `getMathRenderer`), the `MathRenderer` interface, and
+- **`math.ts` (core)** carries no KaTeX code: the async renderer seam (the
+  `mathRenderer` config field, consumed by `hydrate()` / `hydratePendingMath`'s
+  `renderer` option — not the synchronous render), the `MathRenderer` interface, and
   `hydratePendingMath(root, opts?)` — which finds every pending block/span under
   `root`, renders it (display mode for blocks, inline for spans), and flips the
   element to `--rendered` (HTML injected) or `--error` (escaped source kept
   visible).
 - **`math-katex.ts` (backend)** is the only module that references `katex`. It
   lives behind `@copse/streaming-markdown/math/katex` and exports
-  `katexMathRenderer`, `installKatex()`, and `loadKatex()`. `katex` is an
-  **optional peer dependency**, imported through a variable-specifier dynamic
-  import so the package builds and type-checks without it.
+  `katexMathRenderer` and `loadKatex()` (which returns the renderer value — pass it
+  via `MarkdownConfig.mathRenderer`, with `mathSyntax: true` for the prose grammar,
+  or the hydrate `renderer` option). `katex` is an **optional peer dependency**,
+  imported through a variable-specifier dynamic import so the package builds and
+  type-checks without it.
 
 ```ts
 import { hydratePendingMath } from '@copse/streaming-markdown'
 
 const { loadKatex } = await import('@copse/streaming-markdown/math/katex')
-await loadKatex()                   // registers the backend (activating the prose grammar)
-await hydratePendingMath(messageEl) // pending → rendered KaTeX HTML
+const renderer = await loadKatex()  // returns the backend; library loads lazily
+// render with { mathSyntax: true } to turn the prose grammar on, then:
+await hydratePendingMath(messageEl, { renderer }) // pending → rendered KaTeX HTML
 ```
 
 The host also loads KaTeX's stylesheet/fonts (`katex/dist/katex.min.css`).
@@ -214,13 +223,13 @@ bundle only when a host imports that entry, so a consumer that never opts in pay
 zero bytes for it (`src/emoji-shortcodes.test.ts` asserts this with an esbuild
 bundle of the main entry). Unlike the highlighter/mermaid/KaTeX backends there is
 no optional peer dependency — the pass is pure string work built on the public
-`setInlinePasses` contract, so it needs no registry in the core at all.
+`inlinePasses` config field, so it needs no registry in the core at all.
 
 ```ts
-import { setInlinePasses } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 import { emojiInlinePass } from '@copse/streaming-markdown/inline/emoji'
 
-setInlinePasses([emojiInlinePass]) // `:smile:` → 😄; see EXTENDING.md#custom-inline-syntax-inline-passes
+renderMarkdown(md, { inlinePasses: [emojiInlinePass] }) // `:smile:` → 😄; see EXTENDING.md#custom-inline-syntax-inline-passes
 ```
 
 ## Input smoothing — an opt-in reveal cadence (#84)

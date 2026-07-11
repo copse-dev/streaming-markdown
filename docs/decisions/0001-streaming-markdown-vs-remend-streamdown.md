@@ -50,7 +50,7 @@ These are not the same kind of tool, so a flat "A vs B" is the wrong axis:
   catches super-linear regressions.
 - **Pluggable math with streaming holds (#70/#75/#78).** `$…$` / `$$…$$` /
   `\(…\)` / `\[…\]` prose math and ```` ```math ```` fences are recognized and
-  KaTeX-rendered via an injectable renderer (`setMathRenderer`); KaTeX is never
+  KaTeX-rendered via an injectable math renderer; KaTeX is never
   bundled, and prose-math syntax is opt-in (it turns on when a renderer is
   registered), so output stays byte-identical for hosts that never register one.
 
@@ -136,7 +136,7 @@ This is implemented in [`src/remend-corpus.test.ts`](../../src/remend-corpus.tes
   br`) is the only passthrough. See ARCHITECTURE "Raw-HTML policy".
 - **Math is supported, renderer-injected (#70/#75/#78).** `$…$` / `$$…$$` /
   `\(…\)` / `\[…\]` prose math and ```` ```math ```` fences are recognized and
-  KaTeX-rendered through `setMathRenderer`; KaTeX is never bundled and prose-math
+  KaTeX-rendered through an injectable math renderer; KaTeX is never bundled and prose-math
   syntax is opt-in (on once a renderer is registered), so output is byte-identical
   for hosts that never register one. See ARCHITECTURE "Pluggable math renderer".
 
@@ -149,7 +149,7 @@ here as a deliberate known gap.
 | Item | Status |
 | --- | --- |
 | Port the remend streaming input corpus into a convergence/no-flash test (inputs only, copse invariants as assertions). | **Done** — `src/remend-corpus.test.ts` asserts invariants (a) no marker flash, (b) committed == static, (c) prefix convergence. |
-| KaTeX / `$$…$$` math — decide known-gap vs. implement. | **Shipped** (#70/#75/#78) — prose math (`$…$`/`$$…$$`/`\(…\)`/`\[…\]`) and ```` ```math ```` fences, KaTeX-rendered via injectable `setMathRenderer`; opt-in prose syntax keeps output byte-identical when unregistered. |
+| KaTeX / `$$…$$` math — decide known-gap vs. implement. | **Shipped** (#70/#75/#78) — prose math (`$…$`/`$$…$$`/`\(…\)`/`\[…\]`) and ```` ```math ```` fences, KaTeX-rendered via an injectable math renderer; opt-in prose syntax keeps output byte-identical until enabled. |
 | Single tilde (`20~25`) stays literal while streaming. | **Covered** — no `<del>`/`<s>` in any frame; a half-open trailing `~` is held, the full input reveals `~` literally. |
 | Comparison operators (`20 < 30`) — no spurious tag/entity mid-stream. | **Covered** — `<` stays escaped; no `a`/`em`/`strong`/`del` element in any frame. |
 | Images — forming `![alt](partial` / `[alt](partial` reveal gracefully. | **Covered** — no `<img>`/`<a>`, no partial `src`/destination in any frame; label revealed. |

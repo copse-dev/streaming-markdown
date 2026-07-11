@@ -10,13 +10,14 @@
  * (which need no table — they are algorithmic). That covers essentially every
  * entity real markdown contains at ~1 KB instead of ~23 KB.
  *
- * Hosts that need the full HTML5 set register a decoder with {@link setEntityDecoder}:
- *   - `@copse/streaming-markdown/entities/full` — one call, backed by `entities`
+ * Hosts that need the full HTML5 set pass a decoder via `MarkdownConfig.entityDecoder`
+ * (or install one process-wide with `setDefaultConfig({ entityDecoder })`):
+ *   - `@copse/streaming-markdown/entities/full` — backed by `entities`
  *     (adds the full table to the bundle; opt in when you want it).
  *   - {@link browserEntityDecoder} — borrows the browser's own parser table via a
  *     detached `<textarea>`, so full coverage costs zero bundle bytes in the DOM.
  * Hosts that just need a few extra names extend the built-in map with
- * {@link addNamedEntities} — no full decoder required.
+ * `MarkdownConfig.namedEntities` — no full decoder required.
  *
  * The named map values are the HTML5 code points (so `&lang;`/`&rang;` decode to
  * the mathematical angle brackets the full table produces, not their HTML4
@@ -28,6 +29,8 @@
  * cycles or pulling `entities` into the default bundle.
  */
 
+import { activeConfig } from './config.ts'
+
 /** Decodes HTML character references in `text` (strict: a trailing `;` is required). */
 export type EntityDecoder = (text: string) => string
 
@@ -38,7 +41,7 @@ export type EntityDecoder = (text: string) => string
  *
  * @experimental Internal data table, exported from the main entry but not part of
  * the stable v1 surface (#147). Its shape/contents may change; extend the decoder
- * with `addNamedEntities` / `setNamedEntities` rather than reading this directly.
+ * with `MarkdownConfig.namedEntities` rather than reading this directly.
  */
 export const BUILTIN_NAMED_ENTITIES: Readonly<Record<string, string>> = Object.freeze({
   aacute: "á",
@@ -362,76 +365,47 @@ function decodeStrictWith(text: string, resolveNamed: (name: string) => string |
   })
 }
 
-let userNamed: Record<string, string> = {}
-let effectiveNamed: Record<string, string> = { ...BUILTIN_NAMED_ENTITIES }
-let customDecoder: EntityDecoder | null = null
-
-function rebuildEffective(): void {
-  effectiveNamed = { ...BUILTIN_NAMED_ENTITIES, ...userNamed }
+// The effective named set is `BUILTIN ⊕ config.namedEntities`; rebuild it once per
+// distinct `config.namedEntities` value (the decode runs on link/fence/escape text).
+let cachedNamedSource: Record<string, string> | undefined
+let cachedEffective: Record<string, string> = BUILTIN_NAMED_ENTITIES
+function effectiveNamed(): Record<string, string> {
+  const source = activeConfig().namedEntities
+  if (!source) return BUILTIN_NAMED_ENTITIES
+  if (source !== cachedNamedSource) {
+    cachedNamedSource = source
+    cachedEffective = { ...BUILTIN_NAMED_ENTITIES, ...source }
+  }
+  return cachedEffective
 }
 
 function builtinDecode(text: string): string {
-  return decodeStrictWith(text, (name) => effectiveNamed[name])
+  const named = effectiveNamed()
+  return decodeStrictWith(text, (name) => named[name])
 }
 
 /**
  * Decode HTML character references in `text`, strictly (a trailing `;` is
- * required, per CommonMark). Routes through a decoder registered with
- * {@link setEntityDecoder}, else uses the built-in numeric + HTML4-named decoder.
- * This is the entry point the parser's link, fence, and escape passes call.
+ * required, per CommonMark). Routes through the render's `entityDecoder` config
+ * (e.g. the full `entities` table or {@link browserEntityDecoder}) when set, else
+ * the built-in numeric + HTML4-named decoder. The parser's link, fence, and
+ * escape passes call this.
  */
 export function decodeHtmlEntities(text: string): string {
-  return (customDecoder ?? builtinDecode)(text)
+  return (activeConfig().entityDecoder ?? builtinDecode)(text)
 }
 
-/**
- * Replace the reference decoder wholesale — e.g. the full `entities` table or
- * {@link browserEntityDecoder}. Pass `null` to restore the built-in decoder.
- * A custom decoder is responsible for its own strictness; the built-in one and
- * {@link browserEntityDecoder} both require the trailing `;`.
- */
-export function setEntityDecoder(decoder: EntityDecoder | null): void {
-  customDecoder = decoder
-}
-
-/** The decoder registered with {@link setEntityDecoder}, or `null` when using the built-in. */
+/** The render's `entityDecoder` config, or `null` when using the built-in. */
 export function getEntityDecoder(): EntityDecoder | null {
-  return customDecoder
+  return activeConfig().entityDecoder ?? null
 }
 
 /**
- * Replace the user-defined named references layered over the built-in HTML4 set.
- * Keys are bare names (no `&`/`;`); values are the literal replacement strings.
- * User entries win over built-ins on collision. Only affects the built-in
- * decoder — a custom {@link setEntityDecoder} decoder owns its own set.
+ * The effective named set the built-in decoder uses for the current render
+ * (built-in HTML4 ⊕ the render's `namedEntities` config).
  */
-export function setNamedEntities(named: Record<string, string>): void {
-  userNamed = { ...named }
-  rebuildEffective()
-}
-
-/** Merge additional named references into the user layer (see {@link setNamedEntities}). */
-export function addNamedEntities(named: Record<string, string>): void {
-  userNamed = { ...userNamed, ...named }
-  rebuildEffective()
-}
-
-/** The effective named set the built-in decoder uses (built-in ⊕ user entries). */
 export function getNamedEntities(): Readonly<Record<string, string>> {
-  return { ...effectiveNamed }
-}
-
-/**
- * Restore the default decoder and clear user-added names (test/host reset).
- *
- * @experimental Test/reset helper, exported from the main entry but not part of
- * the stable v1 surface (#147). May move behind a test-utilities subpath or be
- * removed in a minor release.
- */
-export function resetEntityDecoder(): void {
-  userNamed = {}
-  customDecoder = null
-  rebuildEffective()
+  return { ...effectiveNamed() }
 }
 
 let sharedTextarea: { innerHTML: string; value: string } | null = null
@@ -461,7 +435,8 @@ function decodeNamedViaDom(name: string): string | undefined {
 /**
  * A full-HTML5 decoder that borrows the browser's built-in character-reference
  * table through a detached `<textarea>` — full named coverage at zero bundle
- * cost, for DOM hosts. Register it with `setEntityDecoder(browserEntityDecoder)`.
+ * cost, for DOM hosts. Pass it via `MarkdownConfig.entityDecoder` (or
+ * `setDefaultConfig({ entityDecoder: browserEntityDecoder })`).
  * It stays strict because only complete `&name;` tokens are handed to the parser,
  * so the browser's semicolon-less legacy decoding never triggers. Throws if
  * called without a `document`.

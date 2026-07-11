@@ -1,3 +1,4 @@
+import { activeConfig } from './config.ts'
 import { escapeMermaidHtml } from './escape.ts'
 import { mathBlockHtml, syncFormingMathBlockDom } from './math-block.ts'
 
@@ -13,7 +14,7 @@ import { mathBlockHtml, syncFormingMathBlockDom } from './math-block.ts'
 // separate hydration step — `hydratePendingDiagrams` for mermaid, or a
 // host-owned equivalent — upgrades it after sanitization. Scaffolding therefore
 // MUST stay inside the sanitizer allowlist (`sanitize.ts`), or the handler's
-// author widens it via `setSanitizeExtension`; hydration output injected after
+// author widens it via `MarkdownConfig.sanitizeExtension`; hydration output injected after
 // the sink is the trusted escape hatch (see the mermaid design invariant in
 // docs/ARCHITECTURE.md).
 
@@ -46,12 +47,12 @@ export interface FenceHandlerForming {
 /**
  * Pluggable renderer for a fenced code block with a specific info-string
  * language — the seam behind ```` ```mermaid ````-style custom blocks
- * (math, graphviz, vega, …). Register with {@link setFenceHandler}.
+ * (math, graphviz, vega, …). Supply per render via `MarkdownConfig.fenceHandlers`.
  *
  * `render` returns the at-rest HTML for a completed fence. The code is
  * verbatim fence content (trailing newline included when present); the output
  * is later sanitized at the host's sink like all renderer output, so emit only
- * allowlisted tags/attributes or widen the allowlist via `setSanitizeExtension`.
+ * allowlisted tags/attributes or widen the allowlist via `MarkdownConfig.sanitizeExtension`.
  */
 export interface FenceHandler {
   render(code: string, lang: string): string
@@ -123,25 +124,39 @@ function normalizeFenceLang(lang: string): string {
   return lang.trim().toLowerCase()
 }
 
-const fenceHandlers = new Map<string, FenceHandler>([
+/** The built-in handlers, always present unless a render's config overrides them. */
+const BUILTIN_FENCE_HANDLERS = new Map<string, FenceHandler>([
   ['mermaid', mermaidFenceHandler],
   ['math', mathFenceHandler],
 ])
 
-/**
- * Register a {@link FenceHandler} for a fence language, replacing any existing
- * one, or pass `null` to remove it (removing `'mermaid'` restores the default
- * highlighted `<pre><code>` for mermaid fences). Set handlers once, before the
- * first render — at-rest and streaming emitters share this registry, so a
- * mid-stream change would render a fence differently across frames.
- */
-export function setFenceHandler(lang: string, handler: FenceHandler | null): void {
-  const key = normalizeFenceLang(lang)
-  if (handler) fenceHandlers.set(key, handler)
-  else fenceHandlers.delete(key)
+// A render's `config.fenceHandlers` is a plain object with arbitrary-case keys;
+// normalize it into a lookup Map once per distinct config object (fences aren't
+// hot, but a code-heavy document reads this per block).
+let cachedOverrideSource: Record<string, FenceHandler | null> | undefined
+let cachedOverrideMap: Map<string, FenceHandler | null> | undefined
+function overrideHandlers(): Map<string, FenceHandler | null> | undefined {
+  const source = activeConfig().fenceHandlers
+  if (!source) return undefined
+  if (source !== cachedOverrideSource) {
+    cachedOverrideSource = source
+    cachedOverrideMap = new Map()
+    for (const [lang, handler] of Object.entries(source)) {
+      cachedOverrideMap.set(normalizeFenceLang(lang), handler)
+    }
+  }
+  return cachedOverrideMap
 }
 
-/** The registered {@link FenceHandler} for a fence language, or `null`. */
+/**
+ * The {@link FenceHandler} for a fence language, or `null`. A render's
+ * `config.fenceHandlers` layers over the built-in `mermaid`/`math` handlers: a
+ * value there replaces (or, if `null`, removes) the handler for that language for
+ * this render only.
+ */
 export function getFenceHandler(lang: string): FenceHandler | null {
-  return fenceHandlers.get(normalizeFenceLang(lang)) ?? null
+  const key = normalizeFenceLang(lang)
+  const overrides = overrideHandlers()
+  if (overrides?.has(key)) return overrides.get(key) ?? null
+  return BUILTIN_FENCE_HANDLERS.get(key) ?? null
 }

@@ -21,10 +21,10 @@ import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { renderMarkdownUnsafe } from './renderer.ts'
-import { setEmailAutolinks } from './autolink-syntax.ts'
+import { setDefaultConfig } from './config.ts'
 import { stripAppCodeDecorations } from './highlight.ts'
-import { installHighlightjs } from './highlight-hljs.ts'
-import { installFullEntityDecoder } from './entity-decoder-full.ts'
+import { highlightjsHighlighter } from './highlight-hljs.ts'
+import { fullEntityDecoder } from './entity-decoder-full.ts'
 import { stripAppImageAttributes, stripAppLinkAttributes } from './inline-links.ts'
 import { normalizeHtml } from '../tests/commonmark/normalize.ts'
 import {
@@ -38,20 +38,26 @@ import {
   type SpecExample,
 } from '../tests/commonmark/load-spec.ts'
 
-// The baseline was recorded with highlighting on; register the backend so the
-// conformance render matches it (span decorations are stripped before comparison).
-installHighlightjs()
-// Full CommonMark conformance requires the complete HTML5 named-reference set
-// (the spec's entity section exercises the long tail, e.g. `&Dcaron;`,
-// `&HilbertSpace;`). The default decoder ships only the HTML4 subset, so register
-// the full `entities`-backed decoder here — this measures config #3 (full).
-installFullEntityDecoder()
-// Bare email autolinking is a GFM autolink-extension feature (#115), not part of
-// CommonMark, so disable it here: a bare `user@host` stays plain text as the
-// base spec expects. The GFM extension conformance suite measures the enabled
-// path (Autolinks (extension) 11/11). Node runs each test file in its own
-// process, so this module-scoped toggle does not leak to other suites.
-setEmailAutolinks(false)
+// Suite-wide config for every spec case, installed once into the process defaults
+// (Node runs each test file in its own process, so this does not leak to other
+// suites). This keeps the per-case `renderMarkdownUnsafe` calls unchanged.
+//   - highlighting: the baseline was recorded with highlighting on; register the
+//     backend so the conformance render matches it (span decorations are stripped
+//     before comparison).
+//   - full entity decoder: full CommonMark conformance requires the complete HTML5
+//     named-reference set (the spec's entity section exercises the long tail, e.g.
+//     `&Dcaron;`, `&HilbertSpace;`). The default decoder ships only the HTML4
+//     subset, so register the full `entities`-backed decoder — this measures
+//     config #3 (full).
+//   - emailAutolinks off: bare email autolinking is a GFM autolink-extension
+//     feature (#115), not part of CommonMark, so disable it here so a bare
+//     `user@host` stays plain text as the base spec expects. The GFM extension
+//     conformance suite measures the enabled path (Autolinks (extension) 11/11).
+setDefaultConfig({
+  codeHighlighter: highlightjsHighlighter,
+  entityDecoder: fullEntityDecoder,
+  emailAutolinks: false,
+})
 
 const SPEC_VERSION = commonMarkSpecVersion()
 const spec = loadCommonMarkSpec()

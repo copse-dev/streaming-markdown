@@ -1,3 +1,4 @@
+import { activeConfig } from './config.ts'
 import { applyLinkImagePolicy } from './link-image-policy.ts'
 import { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize-browser.ts'
 
@@ -116,7 +117,8 @@ export interface SanitizerConfig {
  * dropping every tag/attribute outside the allowlist and invoking
  * {@link SanitizerConfig.onElement} for each element it keeps.
  *
- * Swap the active backend with {@link setSanitizerBackend}. The package ships
+ * Swap the backend per render via `MarkdownConfig.sanitizerBackend`, or
+ * process-wide with `setDefaultConfig({ sanitizerBackend })`. The package ships
  * {@link browserSanitizerBackend} (native Sanitizer API, the default) and, behind
  * the `@copse/streaming-markdown/sanitizers/dompurify` entry point, a DOMPurify
  * backend for environments without the native API.
@@ -156,25 +158,15 @@ export interface SanitizerBackend {
   sanitizeInto?(target: Element, html: string, config: SanitizerConfig): void
 }
 
-let sanitizerBackend: SanitizerBackend | null = null
-
 /**
- * Swap the sanitizer implementation used by {@link sanitizeRenderedMarkdown}.
- * Pass `null` to fall back to the built-in default (the native browser Sanitizer
- * API when available). Set this once, before the first sink render — e.g. to the
- * DOMPurify backend in Node/jsdom or older browsers. When deriving a backend
- * from a bundled one, mind the {@link SanitizerBackend.sanitizeInto} note:
- * spreading copies the bundled node path, which internal sinks prefer over
- * your overridden `sanitize`.
- *
- * ```ts
- * import { setSanitizerBackend } from '@copse/streaming-markdown'
- * import { dompurifyBackend } from '@copse/streaming-markdown/sanitizers/dompurify'
- * setSanitizerBackend(dompurifyBackend)
- * ```
+ * The {@link SanitizerBackend} in effect for the current render, or `null` (the
+ * native browser Sanitizer). Set it per render via `MarkdownConfig.sanitizerBackend`,
+ * or process-wide via `setDefaultConfig({ sanitizerBackend })` — the "install once"
+ * seam a Node/jsdom/SSR host uses (e.g. `dompurifyBackend` from
+ * `@copse/streaming-markdown/sanitizers/dompurify`).
  */
-export function setSanitizerBackend(backend: SanitizerBackend | null): void {
-  sanitizerBackend = backend
+export function getSanitizerBackend(): SanitizerBackend | null {
+  return activeConfig().sanitizerBackend ?? null
 }
 
 /**
@@ -184,27 +176,13 @@ export function setSanitizerBackend(backend: SanitizerBackend | null): void {
  * these stay the security gate, so keep additions as narrow as the injected
  * output. `onElement` runs for every element (the core already gates the
  * task-list `<input>`), letting the host drop or lock down its own tags (e.g.
- * remove any non-artifact `<img>` and strip its `src`).
+ * remove any non-artifact `<img>` and strip its `src`). Set it per render via
+ * `MarkdownConfig.sanitizeExtension`.
  */
 export interface SanitizeExtension {
   allowedTags?: readonly string[]
   allowedAttr?: readonly string[]
   onElement?: (node: Element, tagName: string) => void
-}
-
-let sanitizeExtension: SanitizeExtension | null = null
-
-/**
- * Inject a host {@link SanitizeExtension}; pass `null` to restore the core
- * allowlist. Returns the previous value so a caller can scope a per-render
- * override and restore it in a `finally` (see `withRenderPolicies`).
- */
-export function setSanitizeExtension(
-  extension: SanitizeExtension | null,
-): SanitizeExtension | null {
-  const previous = sanitizeExtension
-  sanitizeExtension = extension
-  return previous
 }
 
 // The single per-element gate the active backend runs for every kept element.
@@ -238,16 +216,18 @@ function gateElement(node: Element, tagName: string): void {
   // origin-vetted `<a>`/`<img>`, and composes with (never replaces) it.
   applyLinkImagePolicy(node, tagName)
   // Host-specific gating (e.g. a remote-artifact `<img>` policy) runs here.
-  sanitizeExtension?.onElement?.(node, tagName)
+  activeConfig().sanitizeExtension?.onElement?.(node, tagName)
 }
 
 function resolveBackend(): SanitizerBackend {
-  if (sanitizerBackend) return sanitizerBackend
+  const backend = getSanitizerBackend()
+  if (backend) return backend
   if (isBrowserSanitizerSupported()) return browserSanitizerBackend
   throw new Error(
-    'No HTML sanitizer backend is available. Call setSanitizerBackend() before ' +
-      'rendering — e.g. `import { dompurifyBackend } from ' +
-      '"@copse/streaming-markdown/sanitizers/dompurify"` in Node/jsdom or older ' +
+    'No HTML sanitizer backend is available. Pass `sanitizerBackend` in the render ' +
+      'config, or install one process-wide with ' +
+      '`setDefaultConfig({ sanitizerBackend })` — e.g. `import { dompurifyBackend } ' +
+      'from "@copse/streaming-markdown/sanitizers/dompurify"` in Node/jsdom or older ' +
       'browsers — or run where the native Sanitizer API (Element.setHTML) exists.',
   )
 }
@@ -281,7 +261,7 @@ function normalizeDoubleEncodedNbsp(root: Element): void {
 }
 
 function buildSanitizerConfig(): SanitizerConfig {
-  const extension = sanitizeExtension
+  const extension = activeConfig().sanitizeExtension
   const allowedTags = extension?.allowedTags
     ? [...ALLOWED_TAGS, ...extension.allowedTags]
     : ALLOWED_TAGS

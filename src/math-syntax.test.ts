@@ -1,9 +1,10 @@
 import '../tests/setup-dom-jsdom.ts'
-import { describe, it, afterEach } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { tokenizeBlocks } from './block-tokenizer.ts'
-import { hydratePendingMath, type MathRenderer, setMathRenderer } from './math.ts'
-import { getMathSyntax, setMathSyntax } from './math-syntax.ts'
+import { withConfig } from './config.ts'
+import { hydratePendingMath, type MathRenderer } from './math.ts'
+import { getMathSyntax } from './math-syntax.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import {
@@ -14,10 +15,11 @@ import {
 
 // The math prose-syntax gate (#78): recognizing `$…$` / `$$…$$` / `\(…\)` /
 // `\[…\]` in prose is a grammar change with realistic false positives
-// (`set $PATH$ properly`), so it activates only when a math renderer is
-// registered — restoring the invariant that output is byte-identical until a
-// host registers something — with `setMathSyntax` as the explicit override.
-// The ```math FENCE stays always-on (explicit author intent, like mermaid).
+// (`set $PATH$ properly`), so it stays off by default — restoring the
+// invariant that output is byte-identical until a host opts in — and is turned
+// on explicitly via `MarkdownConfig.mathSyntax: true` (passed per render, or
+// scoped with `withConfig` for low-level reads). The ```math FENCE stays
+// always-on (explicit author intent, like mermaid).
 
 const stubRenderer: MathRenderer = {
   render: (source) => Promise.resolve({ html: `<span class="katex">${source}</span>` }),
@@ -35,11 +37,6 @@ const PROSE_FIXTURES: [string, string][] = [
   ['one-line bracket block', '\\[ E = mc^2 \\]'],
   ['escaped parens', 'so \\(a_i + b\\) mid'],
 ]
-
-afterEach(() => {
-  setMathSyntax(null)
-  setMathRenderer(null)
-})
 
 describe('gate off (default): byte-identical pre-math output', () => {
   it('defaults to no override (null)', () => {
@@ -97,43 +94,41 @@ describe('gate off (default): byte-identical pre-math output', () => {
   })
 })
 
-describe('gate on via renderer registration', () => {
-  it('setMathRenderer(backend) activates the prose grammar', () => {
-    setMathRenderer(stubRenderer)
-    assert.match(renderMarkdownUnsafe('set $PATH$ properly'), /math-inline math-inline--pending/)
-    assert.match(renderMarkdownUnsafe('$$\nE = mc^2\n$$'), /math-block math-block--pending/)
+describe('gate on via { mathSyntax: true }', () => {
+  it('activates the prose grammar (inline and block)', () => {
+    assert.match(
+      renderMarkdownUnsafe('set $PATH$ properly', { mathSyntax: true }),
+      /math-inline math-inline--pending/,
+    )
+    assert.match(
+      renderMarkdownUnsafe('$$\nE = mc^2\n$$', { mathSyntax: true }),
+      /math-block math-block--pending/,
+    )
   })
 
-  it('setMathRenderer(null) restores literal prose output', () => {
-    setMathRenderer(stubRenderer)
-    assert.match(renderMarkdownUnsafe('$x$'), /math-inline/)
-    setMathRenderer(null)
-    assert.equal(renderMarkdownUnsafe('$x$'), '<p>$x$</p>')
-    assert.equal(pendingHoldIndex('see $x plus'), 'see $x plus'.length)
+  it('holds streaming tails once the grammar is on', () => {
+    withConfig({ mathSyntax: true }, () => {
+      assert.equal('see $x plus'.slice(0, pendingHoldIndex('see $x plus')), 'see ')
+    })
   })
 
-  it('holds streaming tails once a renderer is registered', () => {
-    setMathRenderer(stubRenderer)
-    assert.equal('see $x plus'.slice(0, pendingHoldIndex('see $x plus')), 'see ')
-  })
-
-  it('end-to-end: register, render, hydrate (the loadKatex one-call story)', async () => {
-    // installKatex()/loadKatex() activate the grammar purely through their
-    // existing setMathRenderer side effect — modelled here with the stub.
-    setMathRenderer(stubRenderer)
+  it('end-to-end: enable, render, hydrate (the loadKatex one-call story)', async () => {
+    // A host enables the grammar with `{ mathSyntax: true }` config and passes
+    // the loaded backend per hydration call — modelled here with the stub.
     const host = document.createElement('div')
-    host.innerHTML = renderMarkdownUnsafe('$$\nE = mc^2\n$$')
-    const count = await hydratePendingMath(host)
+    host.innerHTML = renderMarkdownUnsafe('$$\nE = mc^2\n$$', { mathSyntax: true })
+    const count = await hydratePendingMath(host, { renderer: stubRenderer })
     assert.equal(count, 1)
     assert.ok(host.querySelector('.math-block--rendered .katex'))
   })
 })
 
-describe('setMathSyntax override', () => {
+describe('mathSyntax config override', () => {
   it('true forces the grammar on without a renderer (scaffolding-only hosts)', async () => {
-    setMathSyntax(true)
-    assert.equal(getMathSyntax(), true)
-    const html = renderMarkdownUnsafe('inline $a+b$ here')
+    const html = withConfig({ mathSyntax: true }, () => {
+      assert.equal(getMathSyntax(), true)
+      return renderMarkdownUnsafe('inline $a+b$ here')
+    })
     assert.match(html, /math-inline math-inline--pending/)
     // No renderer: hydration is a no-op and the scaffolding stays pending.
     const host = document.createElement('div')
@@ -142,38 +137,28 @@ describe('setMathSyntax override', () => {
     assert.ok(host.querySelector('.math-inline--pending'))
   })
 
-  it('false forces the grammar off even with a renderer registered', () => {
-    setMathRenderer(stubRenderer)
-    setMathSyntax(false)
-    assert.equal(renderMarkdownUnsafe('set $PATH$ properly'), '<p>set $PATH$ properly</p>')
-    assert.doesNotMatch(renderMarkdownUnsafe('$$\nx\n$$'), /math-block/)
-    assert.equal(pendingHoldIndex('see $x plus'), 'see $x plus'.length)
+  it('false forces the grammar off', () => {
+    assert.equal(
+      renderMarkdownUnsafe('set $PATH$ properly', { mathSyntax: false }),
+      '<p>set $PATH$ properly</p>',
+    )
+    assert.doesNotMatch(renderMarkdownUnsafe('$$\nx\n$$', { mathSyntax: false }), /math-block/)
+    withConfig({ mathSyntax: false }, () => {
+      assert.equal(pendingHoldIndex('see $x plus'), 'see $x plus'.length)
+    })
     // The explicitly labeled fence still works — that is the KaTeX-for-fences-
     // only configuration.
-    assert.match(renderMarkdownUnsafe('```math\nx\n```'), /math-block--pending/)
-  })
-
-  it('null defers back to renderer registration', () => {
-    setMathSyntax(false)
-    setMathRenderer(stubRenderer)
-    assert.doesNotMatch(renderMarkdownUnsafe('$x$'), /math-inline/)
-    setMathSyntax(null)
-    assert.match(renderMarkdownUnsafe('$x$'), /math-inline/)
-    setMathRenderer(null)
-    assert.doesNotMatch(renderMarkdownUnsafe('$x$'), /math-inline/)
+    assert.match(renderMarkdownUnsafe('```math\nx\n```', { mathSyntax: false }), /math-block--pending/)
   })
 
   it('a toggle between renders re-parses cleanly at rest', () => {
     // The flag is read by the shared tokenizer/pipeline: whole at-rest renders
-    // are consistent under whichever state is current. (Mid-stream toggles
-    // only affect regions rendered afterwards — recreate the streaming
-    // renderer for a clean switch; see setMathSyntax docs.)
+    // are consistent under whichever per-render config is passed. (Mid-stream
+    // toggles only affect regions rendered afterwards — recreate the streaming
+    // renderer for a clean switch.)
     const md = '$$\nx\n$$'
-    setMathSyntax(true)
-    assert.match(renderMarkdownUnsafe(md), /math-block/)
-    setMathSyntax(false)
-    assert.doesNotMatch(renderMarkdownUnsafe(md), /math-block/)
-    setMathSyntax(true)
-    assert.match(renderMarkdownUnsafe(md), /math-block/)
+    assert.match(renderMarkdownUnsafe(md, { mathSyntax: true }), /math-block/)
+    assert.doesNotMatch(renderMarkdownUnsafe(md, { mathSyntax: false }), /math-block/)
+    assert.match(renderMarkdownUnsafe(md, { mathSyntax: true }), /math-block/)
   })
 })

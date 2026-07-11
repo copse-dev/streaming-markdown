@@ -21,8 +21,8 @@ import { dirname, resolve } from 'node:path'
 import { renderStreamingMarkdown, StreamingMarkdownRenderer } from '../src/streaming.ts'
 import { IncrementalSourceScanner } from '../src/incremental-scan.ts'
 import { tokenizeBlocks } from '../src/block-tokenizer.ts'
-import { setCodeHighlighter } from '../src/highlight.ts'
-import { installHighlightjs } from '../src/highlight-hljs.ts'
+import { setDefaultConfig } from '../src/config.ts'
+import { highlightjsHighlighter } from '../src/highlight-hljs.ts'
 import { loadBaselinePassingExamples } from '../tests/commonmark/baseline-examples.ts'
 
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -451,7 +451,7 @@ console.log('\ncode-block scaling — DOM path + highlight.js, fixed 64-byte chu
 const codeScaleCols = [pad('blocks', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
 console.log(codeScaleCols.join('  '))
 console.log('-'.repeat(codeScaleCols.join('  ').length))
-installHighlightjs()
+setDefaultConfig({ codeHighlighter: highlightjsHighlighter })
 const codeIters = Math.min(args.iters, 3)
 let prevCodeMs = 0
 const codeGrowth: number[] = []
@@ -472,7 +472,7 @@ for (const blocks of [10, 20, 40]) {
   )
   prevCodeMs = domMs
 }
-setCodeHighlighter(null)
+setDefaultConfig({ codeHighlighter: null })
 
 const meanCodeGrowth = codeGrowth.reduce((a, x) => a + x, 0) / codeGrowth.length
 console.log(

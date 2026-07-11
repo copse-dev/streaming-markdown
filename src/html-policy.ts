@@ -18,21 +18,9 @@
  */
 export type HtmlPolicy = 'passthrough' | 'escape'
 
-let currentHtmlPolicy: HtmlPolicy = 'passthrough'
+import { activeConfig } from './config.ts'
 
-/** The active raw-HTML policy (`'passthrough'` unless overridden). */
+/** The active raw-HTML policy for the current render (`'passthrough'` by default). */
 export function getHtmlPolicy(): HtmlPolicy {
-  return currentHtmlPolicy
-}
-
-/**
- * Set the process-wide raw-HTML policy and return the previous value, so callers
- * can restore it in a `finally` (the scoped-override pattern the entry points
- * use). Pass a per-render override at the call site instead of this for one-off
- * changes; use this to move the global default.
- */
-export function setHtmlPolicy(policy: HtmlPolicy): HtmlPolicy {
-  const previous = currentHtmlPolicy
-  currentHtmlPolicy = policy
-  return previous
+  return activeConfig().htmlPolicy ?? 'passthrough'
 }

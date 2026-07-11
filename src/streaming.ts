@@ -22,7 +22,9 @@ import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from '.
 import { IncrementalSourceScanner } from './incremental-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
-import { type RenderPolicyOptions, withRenderPolicies } from './render-policies.ts'
+import { type MarkdownConfig, withConfig } from './config.ts'
+import { hydratePendingMath, type HydrateMathOptions } from './math.ts'
+import { hydratePendingDiagrams, type HydrateDiagramsOptions } from './mermaid.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml } from './html-sink.ts'
 import {
@@ -587,7 +589,7 @@ function renderPendingTail(
  * process-wide default when omitted. For `StreamingMarkdownRenderer` the
  * overrides are captured at construction and re-applied around every `update()`.
  */
-export interface StreamingMarkdownOptions extends RenderPolicyOptions {}
+export interface StreamingMarkdownOptions extends MarkdownConfig {}
 
 /**
  * Render assistant text while it is still streaming.
@@ -605,7 +607,7 @@ export function renderStreamingMarkdown(
   content: string,
   options: StreamingMarkdownOptions = {},
 ): SanitizedHtml {
-  return withRenderPolicies(options, () => asSanitizedHtml(renderStreamingMarkdownCore(content)))
+  return withConfig(options, () => asSanitizedHtml(renderStreamingMarkdownCore(content)))
 }
 
 function renderStreamingMarkdownCore(content: string): string {
@@ -693,22 +695,61 @@ export class StreamingMarkdownRenderer {
   private readonly completeScanner = new IncrementalSourceScanner()
   private readonly host: HTMLElement
   /**
-   * Per-render policy overrides captured at construction (#137) and re-applied
-   * around every commit — so this instance renders under its own html/scheme/
-   * origin/sanitize policy regardless of the process-wide defaults.
+   * Full {@link MarkdownConfig} captured at construction and re-applied around
+   * every commit — so this instance renders under its own policy *and* grammar
+   * config (html/scheme/origin/sanitize, plus math syntax, link decorator, fence
+   * handlers) regardless of the process-wide defaults. Two renderers with
+   * different config coexist without an epoch or cache invalidation.
    */
-  private readonly policyOptions: RenderPolicyOptions
+  private readonly config: MarkdownConfig
 
   constructor(host: HTMLElement, options: StreamingMarkdownOptions = {}) {
     this.host = host
-    this.policyOptions = options
+    // Shallow snapshot so "captured at construction" holds: a host mutating its
+    // options object later must not silently change this instance's renders.
+    this.config = { ...options }
   }
 
   /** Render `content` (the full message text so far) into the host incrementally. */
   update(content: string): void {
-    withRenderPolicies(this.policyOptions, () => {
+    withConfig(this.config, () => {
       this.updateWithPolicy(content)
     })
+  }
+
+  /**
+   * Hydrate the pending math / diagram scaffolding this renderer has emitted into
+   * its host, using the `mathRenderer` / `diagramRenderer` from the config passed
+   * at construction. This is the config-injected replacement for the old global
+   * `setMathRenderer` / `setDiagramRenderer` + free-function `hydratePendingMath`
+   * dance: obtain the backends from `loadKatex()` / `loadMermaid()`, pass them in
+   * the constructor config, then call `hydrate()` after `update()`. A no-op for a
+   * tier whose renderer is not configured. Returns the counts rendered.
+   *
+   * `transformHtml` / `transformSvg` forward to the underlying hydrators (required
+   * under Trusted Types enforcement — see {@link HydrateMathOptions}).
+   */
+  async hydrate(
+    options: {
+      transformHtml?: HydrateMathOptions['transformHtml']
+      transformSvg?: HydrateDiagramsOptions['transformSvg']
+    } = {},
+  ): Promise<{ math: number; diagrams: number }> {
+    let math = 0
+    const mathRenderer = this.config.mathRenderer
+    if (mathRenderer) {
+      const mathOptions: HydrateMathOptions = { renderer: mathRenderer }
+      if (options.transformHtml) mathOptions.transformHtml = options.transformHtml
+      math = await hydratePendingMath(this.host, mathOptions)
+    }
+    let diagrams = 0
+    const diagramRenderer = this.config.diagramRenderer
+    if (diagramRenderer) {
+      const diagramOptions: HydrateDiagramsOptions = { renderer: diagramRenderer }
+      if (options.transformSvg) diagramOptions.transformSvg = options.transformSvg
+      diagrams = await hydratePendingDiagrams(this.host, diagramOptions)
+    }
+    return { math, diagrams }
   }
 
   private updateWithPolicy(content: string): void {

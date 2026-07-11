@@ -1,19 +1,21 @@
 import '../tests/setup-dom-jsdom.ts'
 import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { getMathRenderer, hydratePendingMath, setMathRenderer } from './math.ts'
-import {
-  __setKatexImporterForTests,
-  installKatex,
-  katexMathRenderer,
-  loadKatex,
-} from './math-katex.ts'
+import { hydratePendingMath } from './math.ts'
+import { __setKatexImporterForTests, katexMathRenderer, loadKatex } from './math-katex.ts'
+import { setDefaultConfig } from './config.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 
 // The KaTeX backend is a thin lazy adapter over the optional `katex` peer
-// dependency. Registration and the load-once path are exercised through the
+// dependency. `loadKatex` and the load-once path are exercised through the
 // test seam; unlike mermaid, katex renders fine under Node (renderToString
-// needs no DOM), so the real library is also driven end-to-end.
+// needs no DOM), so the real library is also driven end-to-end via the
+// hydrate `renderer` option.
+//
+// Math prose syntax is gated on renderer registration (#78) but there is no
+// global registry any more, so force it on for the whole file (node:test
+// isolates each file in its own process) to emit the `$$…$$` / `$…$` fixtures.
+setDefaultConfig({ mathSyntax: true })
 
 /** A fake `katex` module: records calls and returns deterministic HTML. */
 function fakeKatexModule() {
@@ -30,23 +32,13 @@ function fakeKatexModule() {
 describe('katex backend adapter', () => {
   afterEach(() => {
     __setKatexImporterForTests(null)
-    setMathRenderer(null)
   })
 
-  it('installKatex registers the katex-backed math renderer', () => {
-    setMathRenderer(null)
-    const renderer = installKatex()
-    assert.equal(renderer, katexMathRenderer)
-    assert.equal(getMathRenderer(), katexMathRenderer)
-  })
-
-  it('loadKatex resolves to the registered renderer (idempotent)', async () => {
-    setMathRenderer(null)
+  it('loadKatex resolves to the katex renderer value (idempotent)', async () => {
     const a = await loadKatex()
     const b = await loadKatex()
     assert.equal(a, katexMathRenderer)
     assert.equal(b, katexMathRenderer)
-    assert.equal(getMathRenderer(), katexMathRenderer)
   })
 
   it('render lazily loads katex once and threads displayMode + safety options', async () => {
@@ -76,15 +68,13 @@ describe('katex backend adapter', () => {
 describe('katex backend end-to-end (real library)', () => {
   afterEach(() => {
     __setKatexImporterForTests(null)
-    setMathRenderer(null)
   })
 
   it('hydrates generator scaffolding into real KaTeX HTML', async () => {
-    installKatex()
     const host = document.createElement('div')
     host.innerHTML = renderMarkdownUnsafe('$$\nE = mc^2\n$$\n\nInline $a_i$ here.')
 
-    const count = await hydratePendingMath(host)
+    const count = await hydratePendingMath(host, { renderer: katexMathRenderer })
 
     assert.equal(count, 2)
     const block = host.querySelector('.math-block--rendered')
@@ -96,10 +86,9 @@ describe('katex backend end-to-end (real library)', () => {
   })
 
   it('renders invalid TeX as a visible katex-error (throwOnError: false)', async () => {
-    installKatex()
     const host = document.createElement('div')
     host.innerHTML = renderMarkdownUnsafe('$$\n\\badcommand{\n$$')
-    const count = await hydratePendingMath(host)
+    const count = await hydratePendingMath(host, { renderer: katexMathRenderer })
     assert.equal(count, 1, 'still counts as rendered — katex degrades in place')
     assert.ok(host.querySelector('.katex-error'))
   })

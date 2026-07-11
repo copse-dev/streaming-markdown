@@ -8,10 +8,11 @@
  * this subpath and opt in explicitly:
  *
  * ```ts
- * import { setLinkDecorator } from '@copse/streaming-markdown'
+ * import { renderMarkdown } from '@copse/streaming-markdown'
  * import { appLinkDecorator } from '@copse/streaming-markdown/host/workspace'
  *
- * setLinkDecorator(appLinkDecorator)
+ * renderMarkdown(md, { linkDecorator: appLinkDecorator })
+ * // or once at setup: setDefaultConfig({ linkDecorator: appLinkDecorator })
  * ```
  *
  * - `appLinkDecorator` — the workspace/browser `LinkDecorator` (adds

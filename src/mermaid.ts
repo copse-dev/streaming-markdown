@@ -12,7 +12,7 @@ import { setHostTrustedHtml, type TrustedHTMLValue } from './html-sink.ts'
 //
 // This module is the core: it carries no mermaid code. The mermaid backend lives
 // in `mermaid-mermaidjs.ts` behind the `@copse/streaming-markdown/diagrams/mermaid`
-// entry (`mermaidDiagramRenderer`, `installMermaid`, `loadMermaid`), which
+// entry (`mermaidDiagramRenderer`, `loadMermaid`), which
 // dynamically imports `mermaid` — the "lazy load" fetched only when a host opts in.
 
 /** Result of rendering one diagram: the trusted SVG markup produced by the backend. */
@@ -26,8 +26,9 @@ export interface DiagramRenderResult {
  * retries with the aggressive source candidate before giving up. Rendering is async
  * because the mermaid library is (`mermaid.render` returns a promise).
  *
- * Register one with {@link setDiagramRenderer}, or lazily via `loadMermaid()` /
- * `installMermaid()` from `@copse/streaming-markdown/diagrams/mermaid`.
+ * Obtain one from `loadMermaid()` (`@copse/streaming-markdown/diagrams/mermaid`)
+ * and pass it via `MarkdownConfig.diagramRenderer` (streaming `hydrate()`) or the
+ * {@link HydrateDiagramsOptions.renderer} option.
  */
 export interface DiagramRenderer {
   render(source: string): Promise<DiagramRenderResult>
@@ -36,38 +37,14 @@ export interface DiagramRenderer {
 /** Container the generator emits for a diagram fence, awaiting hydration. */
 export const PENDING_DIAGRAM_SELECTOR = '.mermaid-diagram.mermaid-diagram--pending'
 
-let diagramRenderer: DiagramRenderer | null = null
-
-/**
- * Register the active {@link DiagramRenderer} (or `null` to disable hydration, so
- * pending diagrams keep showing their inert source `<pre>`). Set it once, before
- * the first {@link hydratePendingDiagrams} call — from
- * `@copse/streaming-markdown/diagrams/mermaid`:
- *
- * ```ts
- * import { setDiagramRenderer } from '@copse/streaming-markdown'
- * import { mermaidDiagramRenderer } from '@copse/streaming-markdown/diagrams/mermaid'
- * setDiagramRenderer(mermaidDiagramRenderer)
- * ```
- *
- * or lazily (the mermaid library is fetched as a separate chunk only then):
- *
- * ```ts
- * import { loadMermaid } from '@copse/streaming-markdown/diagrams/mermaid'
- * await loadMermaid() // internally calls setDiagramRenderer
- * ```
- */
-export function setDiagramRenderer(renderer: DiagramRenderer | null): void {
-  diagramRenderer = renderer
-}
-
-/** The active {@link DiagramRenderer}, or `null` when none has been registered. */
-export function getDiagramRenderer(): DiagramRenderer | null {
-  return diagramRenderer
-}
-
 /** Options for {@link hydratePendingDiagrams}. */
 export interface HydrateDiagramsOptions {
+  /**
+   * The {@link DiagramRenderer} to hydrate with — obtain one from `loadMermaid()`
+   * (`@copse/streaming-markdown/diagrams/mermaid`) and pass it per hydration call.
+   * When omitted (or `null`), hydration is a no-op returning 0.
+   */
+  renderer?: DiagramRenderer | null
   /**
    * Post-process the backend's SVG before it is injected. Mermaid SVG is produced
    * by the trusted library *after* sink sanitization and is not re-sanitized by
@@ -106,14 +83,15 @@ function markError(container: Element): void {
  * ({@link mermaidSourceCandidates}) are tried until one renders; the container is
  * flipped to `mermaid-diagram--rendered` with the SVG injected, or to
  * `mermaid-diagram--error` if every candidate throws. Returns the number of
- * diagrams successfully rendered. A no-op returning 0 when no backend is
- * registered — pending diagrams keep their inert source `<pre>`.
+ * diagrams successfully rendered. A no-op returning 0 when no
+ * {@link HydrateDiagramsOptions.renderer} is supplied — pending diagrams keep
+ * their inert source `<pre>`.
  */
 export async function hydratePendingDiagrams(
   root: Element,
   options: HydrateDiagramsOptions = {},
 ): Promise<number> {
-  const renderer = diagramRenderer
+  const renderer = options.renderer
   if (!renderer) return 0
 
   const containers: Element[] = []

@@ -3,11 +3,13 @@ import type { SanitizerBackend, SanitizerConfig } from './sanitize.ts'
 
 // DOMPurify sanitizer backend. This is the only module that imports `dompurify`,
 // so hosts that use the native Sanitizer API (or their own backend) never pull it
-// into their bundle. Register it in Node/jsdom or older browsers:
+// into their bundle. Install it in Node/jsdom or older browsers:
 //
-//   import { setSanitizerBackend } from '@copse/streaming-markdown'
+//   import { setDefaultConfig } from '@copse/streaming-markdown'
 //   import { dompurifyBackend } from '@copse/streaming-markdown/sanitizers/dompurify'
-//   setSanitizerBackend(dompurifyBackend)
+//   setDefaultConfig({ sanitizerBackend: dompurifyBackend })
+//
+// or per render via `MarkdownConfig.sanitizerBackend`.
 //
 // The backend deliberately uses a strict tag/attr allowlist (never a FORBID_TAGS
 // denylist) and string output (never RETURN_DOM) — see the advisory-posture tests

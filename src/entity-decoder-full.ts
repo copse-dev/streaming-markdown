@@ -9,12 +9,10 @@
  * `entities` is an optional peer dependency; install it alongside this import.
  */
 import { decodeHTMLStrict } from 'entities'
-import { setEntityDecoder } from './entity-decoder.ts'
+import type { EntityDecoder } from './entity-decoder.ts'
 
-/** The full HTML5 strict decoder (numeric + all named references, `;` required). */
-export const fullEntityDecoder = decodeHTMLStrict
-
-/** Register the full `entities`-backed decoder as the active reference decoder. */
-export function installFullEntityDecoder(): void {
-  setEntityDecoder(decodeHTMLStrict)
-}
+/**
+ * The full HTML5 strict decoder (numeric + all named references, `;` required).
+ * Pass it via `MarkdownConfig.entityDecoder` to use the full table for a render.
+ */
+export const fullEntityDecoder: EntityDecoder = decodeHTMLStrict

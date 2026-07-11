@@ -1,3 +1,4 @@
+import { activeConfig } from './config.ts'
 import { escapeHtml } from './escape.ts'
 
 // PROTOTYPE (#lazy-load): this module is the *core* of syntax highlighting and
@@ -8,7 +9,8 @@ import { escapeHtml } from './escape.ts'
 //
 // The heavy grammars now live behind a pluggable {@link CodeHighlighter} backend
 // (`highlight-hljs.ts`), mirroring the pluggable-sanitizer-backend split. Until a
-// backend is registered (`setCodeHighlighter`, or the lazy `loadHighlightjs()`),
+// backend is supplied (`MarkdownConfig.codeHighlighter`, from the lazy
+// `loadHighlightjs()` / `loadShiki()`),
 // fenced code renders as escaped plain text with the correct `hljs lang-*` class,
 // and upgrades to token spans once the backend arrives. Language *resolution*
 // (aliases + the known-language set) stays here because it is cheap string work
@@ -21,8 +23,9 @@ import { escapeHtml } from './escape.ts'
  * backend registered, and `highlightAuto` is called only for an empty fence info
  * string. Both return an HTML token string (highlight.js `.value`-shaped).
  *
- * Register one with {@link setCodeHighlighter}, or lazily via `loadHighlightjs()`
- * / `installHighlightjs()` from `@copse/streaming-markdown/highlighters/highlightjs`.
+ * Pass one via `MarkdownConfig.codeHighlighter` — obtained lazily from
+ * `loadHighlightjs()` / `installHighlightjs()` in
+ * `@copse/streaming-markdown/highlighters/highlightjs`.
  */
 export interface CodeHighlighter {
   /** Highlight `code` as `language` (a resolved id from {@link KNOWN_LANGUAGES}). */
@@ -83,33 +86,14 @@ function resolveLanguage(lang: string): string | null {
   return KNOWN_LANGUAGES.has(resolved) ? resolved : null
 }
 
-let codeHighlighter: CodeHighlighter | null = null
-
 /**
- * Register the active {@link CodeHighlighter} (or `null` to fall back to escaped
- * plain text). Set it once, before the first render that should show token spans —
- * synchronously from `@copse/streaming-markdown/highlighters/highlightjs`:
- *
- * ```ts
- * import { setCodeHighlighter } from '@copse/streaming-markdown'
- * import { highlightjsHighlighter } from '@copse/streaming-markdown/highlighters/highlightjs'
- * setCodeHighlighter(highlightjsHighlighter)
- * ```
- *
- * or lazily (highlight.js is fetched as a separate chunk only when this resolves):
- *
- * ```ts
- * import { loadHighlightjs } from '@copse/streaming-markdown/highlighters/highlightjs'
- * await loadHighlightjs() // internally calls setCodeHighlighter
- * ```
+ * The {@link CodeHighlighter} configured for the current render (`null` when none,
+ * i.e. escaped-plain-text fallback). Set it per render via
+ * `MarkdownConfig.codeHighlighter` — obtain a backend from its `load*` entry
+ * (`@copse/streaming-markdown/highlighters/highlightjs` or `.../shiki`).
  */
-export function setCodeHighlighter(highlighter: CodeHighlighter | null): void {
-  codeHighlighter = highlighter
-}
-
-/** The active {@link CodeHighlighter}, or `null` when none has been registered. */
 export function getCodeHighlighter(): CodeHighlighter | null {
-  return codeHighlighter
+  return activeConfig().codeHighlighter ?? null
 }
 
 /**
@@ -126,11 +110,11 @@ export function highlightFenceCode(code: string, lang: string): string {
   // fed to the highlighter, which would otherwise collapse or mis-detect them.
   if (code.trim() === '') return escapeHtml(code)
 
-  const highlighter = codeHighlighter
+  const highlighter = activeConfig().codeHighlighter
   const language = resolveLanguage(lang)
 
   // No backend yet: plain-text fallback. The `hljs lang-*` class is still applied
-  // by `fenceCodeClass`, so a later `setCodeHighlighter` + re-render upgrades the
+  // by `fenceCodeClass`, so a config with a highlighter + re-render upgrades the
   // interior to token spans without changing the surrounding element.
   if (!highlighter) return escapeHtml(code)
 

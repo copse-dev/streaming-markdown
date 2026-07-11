@@ -3,11 +3,12 @@
 // SANITIZED output, not of the raw renderer string (#600). See
 // docs/decisions/0002-raw-html-passthrough-default.md.
 import '../tests/setup-dom-jsdom.ts'
-import { describe, it, afterEach } from 'node:test'
+import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { renderStreamingMarkdown, StreamingMarkdownRenderer } from './streaming.ts'
-import { sanitizeRenderedMarkdown, setSanitizeExtension } from './sanitize.ts'
+import { sanitizeRenderedMarkdown } from './sanitize.ts'
+import { setDefaultConfig } from './config.ts'
 
 /** The default (passthrough) render, through the reference sink — the real path. */
 const sank = (md: string): string => sanitizeRenderedMarkdown(renderMarkdownUnsafe(md))
@@ -146,7 +147,13 @@ describe('raw-HTML passthrough while streaming (#600, #21/#29)', () => {
 // element (not spill out as visible siblings). Needs the host to allowlist
 // details/summary so they render as real elements.
 describe('raw-HTML passthrough: forming <details> (#600)', () => {
-  afterEach(() => setSanitizeExtension(null))
+  // The whole block renders with details/summary allowlisted; install it as the
+  // process default for the block and clear it after (the `setDefaultConfig`
+  // "install once" seam), so entry points and the low-level `sank` helper all see it.
+  beforeEach(() =>
+    setDefaultConfig({ sanitizeExtension: { allowedTags: ['details', 'summary'] } }),
+  )
+  afterEach(() => setDefaultConfig({ sanitizeExtension: null }))
 
   const DOC = [
     '<details>',
@@ -163,7 +170,6 @@ describe('raw-HTML passthrough: forming <details> (#600)', () => {
   ].join('\n')
 
   it('keeps committed children inside the collapsed <details>, byte-identical to at rest', () => {
-    setSanitizeExtension({ allowedTags: ['details', 'summary'] })
     const host = document.createElement('div')
     const r = new StreamingMarkdownRenderer(host)
     for (let i = 1; i <= DOC.length; i++) r.update(DOC.slice(0, i))
@@ -174,7 +180,6 @@ describe('raw-HTML passthrough: forming <details> (#600)', () => {
   })
 
   it('never flashes the collapsed body in the pending tail while the body streams', () => {
-    setSanitizeExtension({ allowedTags: ['details', 'summary'] })
     const host = document.createElement('div')
     const r = new StreamingMarkdownRenderer(host)
     // Cut mid-body: `secret two` is still forming and `</details>` has not arrived.
@@ -191,7 +196,6 @@ describe('raw-HTML passthrough: forming <details> (#600)', () => {
   })
 
   it('holds the pending tail in the string path too while <details> is open', () => {
-    setSanitizeExtension({ allowedTags: ['details', 'summary'] })
     const cut = '<details>\n<summary>Click to expand</summary>\n\nsecret one\n\nsecret tw'
     const out = renderStreamingMarkdown(cut)
     assert.doesNotMatch(out, /stream-pending/)
@@ -200,7 +204,6 @@ describe('raw-HTML passthrough: forming <details> (#600)', () => {
   })
 
   it('reveals the pending tail again once the <details> closes', () => {
-    setSanitizeExtension({ allowedTags: ['details', 'summary'] })
     const host = document.createElement('div')
     const r = new StreamingMarkdownRenderer(host)
     // Full details committed, then a new paragraph streams after it.
@@ -210,7 +213,6 @@ describe('raw-HTML passthrough: forming <details> (#600)', () => {
   })
 
   it('DOM emitter holds the tail when the open <details> is the unsettled tail (#138)', () => {
-    setSanitizeExtension({ allowedTags: ['details', 'summary'] })
     // The <details> is open and the whole run (soft-broken, single newlines) is
     // still the unsettled tail, so nothing has frozen and the incremental fast
     // path runs with an empty delta. It previously left the open-`<details>` flag

@@ -1,4 +1,5 @@
 import { decodeEscapedPunctuationRaw } from './backslash-escapes.ts'
+import { activeConfig } from './config.ts'
 import { decodeEscapedHref, escapeHtml } from './escape.ts'
 import { isWorkspaceMarkdownLinkHref } from './workspace-link-href.ts'
 import {
@@ -75,29 +76,26 @@ export const DEFAULT_SAFE_HREF_SCHEMES: readonly string[] = [
 
 const HREF_SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):/
 
-let activeSafeHrefSchemes: ReadonlySet<string> = new Set(DEFAULT_SAFE_HREF_SCHEMES)
+const DEFAULT_SAFE_HREF_SCHEMES_SET: ReadonlySet<string> = new Set(DEFAULT_SAFE_HREF_SCHEMES)
 
-/**
- * Override the scheme allowlist {@link safeLinkHref} enforces; pass `null` to
- * restore {@link DEFAULT_SAFE_HREF_SCHEMES}. Scheme names are matched
- * case-insensitively (normalized on the way in), so `['HTTPS']` allows
- * `https:`.
- *
- * This allowlist is the security gate against `javascript:`/`data:` XSS in link
- * destinations. Narrowing it (e.g. `['https', 'mailto']`) is always safe;
- * widening it re-opens that class of attack, so add only schemes that are inert
- * as an `href` — never `javascript`, `data`, `vbscript`, or `file`.
- */
-export function setSafeHrefSchemes(schemes: Iterable<string> | null): void {
-  activeSafeHrefSchemes =
-    schemes === null
-      ? new Set(DEFAULT_SAFE_HREF_SCHEMES)
-      : new Set(Array.from(schemes, (scheme) => scheme.toLowerCase()))
+// `config.safeHrefSchemes` is an arbitrary iterable of possibly-mixed-case scheme
+// names; resolve it to a lowercased Set once per distinct config value (the read
+// runs per link/image destination).
+let cachedSchemesSource: Iterable<string> | null | undefined
+let cachedSchemes: ReadonlySet<string> = DEFAULT_SAFE_HREF_SCHEMES_SET
+function activeSafeHrefSchemes(): ReadonlySet<string> {
+  const source = activeConfig().safeHrefSchemes
+  if (source == null) return DEFAULT_SAFE_HREF_SCHEMES_SET
+  if (source !== cachedSchemesSource) {
+    cachedSchemesSource = source
+    cachedSchemes = new Set(Array.from(source, (scheme) => scheme.toLowerCase()))
+  }
+  return cachedSchemes
 }
 
 /** The scheme allowlist currently enforced by {@link safeLinkHref}. */
 export function getSafeHrefSchemes(): string[] {
-  return [...activeSafeHrefSchemes]
+  return [...activeSafeHrefSchemes()]
 }
 
 /**
@@ -107,7 +105,7 @@ export function getSafeHrefSchemes(): string[] {
  */
 export function isAllowedHref(href: string): boolean {
   const scheme = HREF_SCHEME_RE.exec(href)?.[1]
-  return scheme === undefined || activeSafeHrefSchemes.has(scheme.toLowerCase())
+  return scheme === undefined || activeSafeHrefSchemes().has(scheme.toLowerCase())
 }
 
 /** Allowed link destinations: http(s), mailto, and relative/path forms. Rejects dangerous schemes. */
@@ -135,7 +133,7 @@ export interface LinkDecoration {
  * Host hook that returns the attribute string appended after `href` on a
  * rendered `<a>` (e.g. ` target="_blank" rel="…" data-browser-link="true"`).
  * Keeps app-specific link decoration out of the parser core so the package can
- * be hosted elsewhere (#601). Install with {@link setLinkDecorator}.
+ * be hosted elsewhere (#601). Supply per render via `MarkdownConfig.linkDecorator`.
  */
 export type LinkDecorator = (link: LinkDecoration) => string
 
@@ -144,7 +142,7 @@ export type LinkDecorator = (link: LinkDecoration) => string
  * only a `title` attribute when the link carries one and nothing else: no
  * `target`, no `rel`, no `class`, and no `data-*` routing hooks. A general
  * "just render this" consumer gets plain CommonMark-shaped anchors and opts into
- * host semantics explicitly via {@link setLinkDecorator}.
+ * host semantics explicitly via `MarkdownConfig.linkDecorator`.
  */
 export const neutralLinkDecorator: LinkDecorator = ({ title }) =>
   title ? ` title="${escapeHtml(title)}"` : ''
@@ -154,8 +152,8 @@ export const neutralLinkDecorator: LinkDecorator = ({ title }) =>
  * / `data-browser-link` flag links for `workspace-links.ts` / `browser-links.ts`
  * and external links open in a new context. This is host-specific and lives
  * behind the `@copse/streaming-markdown/host/workspace` entry; a host that wants
- * the pre-0.10 in-app behaviour restores it with a single call:
- * `setLinkDecorator(appLinkDecorator)`.
+ * the pre-0.10 in-app behaviour restores it per render with
+ * `{ linkDecorator: appLinkDecorator }`.
  */
 export const appLinkDecorator: LinkDecorator = ({ isWorkspace, title }) => {
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
@@ -164,23 +162,7 @@ export const appLinkDecorator: LinkDecorator = ({ isWorkspace, title }) => {
     : ` target="_blank" rel="noopener noreferrer" data-browser-link="true"${titleAttr}`
 }
 
-let activeLinkDecorator: LinkDecorator = neutralLinkDecorator
-
-/**
- * Inject a host {@link LinkDecorator}; pass `null` to restore the neutral
- * built-in default ({@link neutralLinkDecorator}).
- *
- * Note: rendered `<a>` output still passes the escape allowlist
- * (`SAFE_OUTER_TAG_RE` in `escape.ts`) and, at the host sink, DOMPurify
- * (`sanitize.ts`). A decorator that emits attribute *names* outside those
- * allowlists will have them stripped/escaped — widen both allowlists to match a
- * custom decorator's vocabulary (they are the security gate, by design).
- */
-export function setLinkDecorator(decorator: LinkDecorator | null): void {
-  activeLinkDecorator = decorator ?? neutralLinkDecorator
-}
-
-/** Render an `<a>` for a resolved link, applying the active {@link LinkDecorator}. */
+/** Render an `<a>` for a resolved link, applying the render's {@link LinkDecorator}. */
 export function renderAnchor(label: string, href: string, title?: string): string {
   // Compute `isWorkspace` lazily (#146): it is workspace-host-specific residue in
   // the neutral core — the built-in `neutralLinkDecorator` never reads it, so the
@@ -196,7 +178,8 @@ export function renderAnchor(label: string, href: string, title?: string): strin
     // `exactOptionalPropertyTypes`: omit `title` rather than pass an explicit undefined.
     ...(title === undefined ? {} : { title }),
   }
-  const attrs = activeLinkDecorator(decoration)
+  const decorator = activeConfig().linkDecorator ?? neutralLinkDecorator
+  const attrs = decorator(decoration)
   return `<a href="${escapeHtml(href)}"${attrs}>${label}</a>`
 }
 

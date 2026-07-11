@@ -100,6 +100,9 @@ export async function buildBrowserBundle(): Promise<string> {
         "export { sanitizeRenderedMarkdownInto } from './src/sanitize.ts'",
         "export { setPresanitizedHtml } from './src/html-sink.ts'",
         "export { dompurifyBackend } from './src/sanitize-dompurify.ts'",
+        // The TT e2e installs the DOMPurify backend process-wide via the public
+        // `setDefaultConfig` (the sink helper `setSanitizedHtml` reads the ambient
+        // config). Already re-exported by index.ts, but named here for clarity.
       ].join('\n'),
       resolveDir: pkgRoot,
       loader: 'ts',

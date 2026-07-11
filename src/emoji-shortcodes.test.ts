@@ -1,31 +1,30 @@
 import '../tests/setup-dom-jsdom.ts'
-import { afterEach, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { withConfig } from './config.ts'
 import {
   createEmojiInlinePass,
   emojiInlinePass,
   emojiShortcodes,
 } from './emoji-shortcodes.ts'
 import { pendingHoldIndex } from './inline-emphasis.ts'
-import { setInlinePasses } from './inline-passes.ts'
 import { renderPendingLine } from './render-pending-line.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
 
 // The optional emoji-shortcode pass (#86): `:smile:` → 😄, built on the public
-// `setInlinePasses` contract with code-span shielding, escape safety, and a
+// `inlinePasses` config contract with code-span shielding, escape safety, and a
 // streaming hold. The pass and its gemoji table live behind the
 // `@copse/streaming-markdown/inline/emoji` subpath, never the core bundle.
 
-afterEach(() => setInlinePasses(null))
+const emojiConfig = { inlinePasses: [emojiInlinePass] }
 
 describe('emoji shortcode pass', () => {
   it('renders known shortcodes to their gemoji glyphs', () => {
-    setInlinePasses([emojiInlinePass])
-    const html = renderMarkdownUnsafe(':smile: and :rocket: and :+1:')
+    const html = renderMarkdownUnsafe(':smile: and :rocket: and :+1:', emojiConfig)
     assert.match(html, /😄/)
     assert.match(html, /🚀/)
     assert.match(html, /👍/)
@@ -33,43 +32,37 @@ describe('emoji shortcode pass', () => {
   })
 
   it('leaves unknown shortcodes literal', () => {
-    setInlinePasses([emojiInlinePass])
-    const html = renderMarkdownUnsafe('a :notacode: and :also_missing: here')
+    const html = renderMarkdownUnsafe('a :notacode: and :also_missing: here', emojiConfig)
     assert.match(html, /:notacode:/)
     assert.match(html, /:also_missing:/)
   })
 
   it('keeps a shortcode inside a code span literal (shielded)', () => {
-    setInlinePasses([emojiInlinePass])
-    const html = renderMarkdownUnsafe('`:smile:` but :smile: outside')
+    const html = renderMarkdownUnsafe('`:smile:` but :smile: outside', emojiConfig)
     assert.match(html, /<code>:smile:<\/code>/)
     assert.match(html, /😄/)
   })
 
   it('respects backslash escapes', () => {
-    setInlinePasses([emojiInlinePass])
-    const html = renderMarkdownUnsafe('\\:smile: stays literal')
+    const html = renderMarkdownUnsafe('\\:smile: stays literal', emojiConfig)
     assert.match(html, /:smile:/)
     assert.doesNotMatch(html, /😄/)
   })
 
   it('renders emoji inside link labels (before-links stage)', () => {
-    setInlinePasses([emojiInlinePass])
-    const html = renderMarkdownUnsafe('[go :rocket:](https://example.com)')
+    const html = renderMarkdownUnsafe('[go :rocket:](https://example.com)', emojiConfig)
     assert.match(html, /<a[^>]*href="https:\/\/example\.com"[^>]*>go 🚀<\/a>/)
   })
 
   it('renders emoji inside GFM table cells', () => {
-    setInlinePasses([emojiInlinePass])
-    const html = renderMarkdownUnsafe('| mood |\n| --- |\n| :smile: |')
+    const html = renderMarkdownUnsafe('| mood |\n| --- |\n| :smile: |', emojiConfig)
     assert.match(html, /<td>😄<\/td>/)
   })
 
   it('is not fooled by inherited object keys (prototype safety)', () => {
-    setInlinePasses([emojiInlinePass])
     // `:constructor:` / `:tostring:` match the shortcode shape but are not gemoji
     // names; a plain-object lookup would resolve them to Object.prototype members.
-    const html = renderMarkdownUnsafe(':constructor: :tostring: :hasownproperty:')
+    const html = renderMarkdownUnsafe(':constructor: :tostring: :hasownproperty:', emojiConfig)
     assert.match(html, /:constructor:/)
     assert.match(html, /:tostring:/)
     assert.match(html, /:hasownproperty:/)
@@ -79,8 +72,9 @@ describe('emoji shortcode pass', () => {
 
 describe('createEmojiInlinePass (host extension)', () => {
   it('maps a custom shortcode table', () => {
-    setInlinePasses([createEmojiInlinePass({ shipit: '🚢' })])
-    const html = renderMarkdownUnsafe(':shipit: now, not :smile:')
+    const html = renderMarkdownUnsafe(':shipit: now, not :smile:', {
+      inlinePasses: [createEmojiInlinePass({ shipit: '🚢' })],
+    })
     assert.match(html, /🚢/)
     // A name outside the custom map (even a real gemoji name) stays literal.
     assert.match(html, /:smile:/)
@@ -95,59 +89,55 @@ describe('createEmojiInlinePass (host extension)', () => {
 describe('emoji pass is inert when unregistered', () => {
   it('leaves shortcodes byte-identical with no pass registered', () => {
     const source = 'ship :smile: :rocket: :+1: today'
-    const withPass = (() => {
-      setInlinePasses(null)
-      return renderMarkdownUnsafe(source)
-    })()
-    setInlinePasses(null)
-    assert.match(withPass, /:smile:/)
-    assert.match(withPass, /:rocket:/)
-    assert.match(withPass, /:\+1:/)
-    assert.doesNotMatch(withPass, /😄|🚀|👍/)
+    const html = renderMarkdownUnsafe(source)
+    assert.match(html, /:smile:/)
+    assert.match(html, /:rocket:/)
+    assert.match(html, /:\+1:/)
+    assert.doesNotMatch(html, /😄|🚀|👍/)
   })
 })
 
 describe('emoji pass streaming hold', () => {
   it('holds a half-open shortcode in the pending tail', () => {
-    setInlinePasses([emojiInlinePass])
-    assert.equal(pendingHoldIndex('great :smi'), 'great '.length)
-    assert.equal(pendingHoldIndex('great :'), 'great :'.length) // bare colon: not held
-    // A completed shortcode holds nothing.
-    const done = 'great :smile: work'
-    assert.equal(pendingHoldIndex(done), done.length)
-    // A bare trailing colon (prose "Steps:") is never truncated.
-    const prose = 'Steps:'
-    assert.equal(pendingHoldIndex(prose), prose.length)
-    // A colon whose run is broken by a non-shortcode char was never an opener.
-    const broken = 'ratio :sm ok'
-    assert.equal(pendingHoldIndex(broken), broken.length)
+    withConfig(emojiConfig, () => {
+      assert.equal(pendingHoldIndex('great :smi'), 'great '.length)
+      assert.equal(pendingHoldIndex('great :'), 'great :'.length) // bare colon: not held
+      // A completed shortcode holds nothing.
+      const done = 'great :smile: work'
+      assert.equal(pendingHoldIndex(done), done.length)
+      // A bare trailing colon (prose "Steps:") is never truncated.
+      const prose = 'Steps:'
+      assert.equal(pendingHoldIndex(prose), prose.length)
+      // A colon whose run is broken by a non-shortcode char was never an opener.
+      const broken = 'ratio :sm ok'
+      assert.equal(pendingHoldIndex(broken), broken.length)
+    })
   })
 
   it('renderPendingLine suppresses the half-open tail', () => {
-    setInlinePasses([emojiInlinePass])
-    const html = renderPendingLine('progress :sm')
+    const html = withConfig(emojiConfig, () => renderPendingLine('progress :sm'))
     assert.match(html, /progress/)
     assert.doesNotMatch(html, /:sm/)
   })
 
   it('does not hold inside code spans', () => {
-    setInlinePasses([emojiInlinePass])
-    const line = 'x `:sm` y'
-    assert.equal(pendingHoldIndex(line), line.length)
+    withConfig(emojiConfig, () => {
+      const line = 'x `:sm` y'
+      assert.equal(pendingHoldIndex(line), line.length)
+    })
   })
 })
 
 describe('emoji pass streaming convergence', () => {
   it('char-by-char streaming converges to the sanitized at-rest render', () => {
-    setInlinePasses([emojiInlinePass])
     const source =
       'Great work :tada: on the :rocket: launch (see `:smile:` and [docs :+1:](https://example.com)).\n\n- item :fire:\n'
     const host = document.createElement('div')
-    const renderer = new StreamingMarkdownRenderer(host)
+    const renderer = new StreamingMarkdownRenderer(host, emojiConfig)
     for (let i = 1; i <= source.length; i++) renderer.update(source.slice(0, i))
     renderer.update(source)
     const expected = document.createElement('div')
-    expected.innerHTML = sanitizeRenderedMarkdown(renderMarkdownUnsafe(source))
+    expected.innerHTML = sanitizeRenderedMarkdown(renderMarkdownUnsafe(source, emojiConfig))
     assert.equal(host.querySelector('p')?.innerHTML, expected.querySelector('p')?.innerHTML)
     assert.equal(host.querySelector('ul')?.outerHTML, expected.querySelector('ul')?.outerHTML)
     // The code span is preserved literally through streaming.

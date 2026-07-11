@@ -25,8 +25,6 @@
  * host's CSS to own, not the renderer's — see `styles/cjk.css` and the CJK
  * section of `docs/EXTENDING.md`.
  */
-import { setFlankingPunctuationExclusion } from './inline-emphasis.ts'
-import { setBareUrlCjkBoundary } from './inline-spans.ts'
 
 /**
  * Full-width / ideographic punctuation, i.e. the East-Asian-width punctuation
@@ -46,13 +44,23 @@ export function isCjkPunctuation(ch: string): boolean {
 }
 
 /**
- * Enable (default) or disable CJK-friendly emphasis and autolink boundaries.
- * Set once, before the first render — the registries it flips are shared by the
- * at-rest and streaming emitters, like the other opt-in backends. Pass `false`
- * to restore stock CommonMark flanking (also the right teardown for tests).
+ * The CJK-friendly preset as a `MarkdownConfig` fragment — spread it into a
+ * render config to enable markdown-cjk-friendly emphasis + autolink boundaries
+ * without a process-wide setter:
+ *
+ * ```ts
+ * import { cjkFriendlyConfig } from '@copse/streaming-markdown/cjk'
+ * renderMarkdown(md, { ...cjkFriendlyConfig })
+ * ```
+ *
+ * Both hooks point at the built-in {@link isCjkPunctuation} predicate. The range
+ * table lives in this opt-in entry, so the core bundle stays byte-identical for
+ * Latin-only hosts (see the module note).
  */
-export function setCjkFriendly(enabled = true): void {
-  const fn = enabled ? isCjkPunctuation : null
-  setFlankingPunctuationExclusion(fn)
-  setBareUrlCjkBoundary(fn)
+export const cjkFriendlyConfig: {
+  flankingPunctuationExclusion: (ch: string) => boolean
+  bareUrlCjkBoundary: (ch: string) => boolean
+} = {
+  flankingPunctuationExclusion: isCjkPunctuation,
+  bareUrlCjkBoundary: isCjkPunctuation,
 }
