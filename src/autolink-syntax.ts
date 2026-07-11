@@ -7,17 +7,19 @@
 //
 // On by default (GFM superset). Kept as a dependency-free leaf so the inline
 // pipeline can read the flag without an import cycle, mirroring math-syntax.ts.
+import { bumpConfigEpoch } from './config-epoch.ts'
 
 let emailAutolinksEnabled = true
 
 /**
- * Enable (default) or disable bare `user@host` → `mailto:` autolinking. Set it
- * once before the first render — the flag is read by the shared inline
- * pipeline, so a mid-stream flip only affects regions (re)rendered afterwards;
- * re-render at rest (or recreate the streaming renderer) for a clean switch.
+ * Enable (default) or disable bare `user@host` → `mailto:` autolinking. Best set
+ * once before the first render; a mid-stream flip bumps the config epoch, so the
+ * stateful streaming renderer re-renders its committed prefix under the new
+ * setting on the next update (#145) rather than leaving it stale.
  */
 export function setEmailAutolinks(enabled: boolean): void {
   emailAutolinksEnabled = enabled
+  bumpConfigEpoch()
 }
 
 /** Whether bare email addresses are linkified as `mailto:` (see module note). */

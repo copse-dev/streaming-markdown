@@ -2,6 +2,7 @@
  * CommonMark-style inline emphasis via a delimiter stack (cmark architecture).
  * Shared by the at-rest renderer and the streaming hold logic.
  */
+import { bumpConfigEpoch } from './config-epoch.ts'
 import { trailingEntityHoldStart } from './backslash-escapes.ts'
 import { rawHtmlTagHoldStart } from './escape.ts'
 import { footnoteHoldStart } from './footnotes.ts'
@@ -31,6 +32,7 @@ let flankingPunctuationExclusion: ((ch: string) => boolean) | null = null
 /** Inject (or clear with `null`) the flanking-punctuation exclusion. */
 export function setFlankingPunctuationExclusion(fn: ((ch: string) => boolean) | null): void {
   flankingPunctuationExclusion = fn
+  bumpConfigEpoch()
 }
 
 function isFlankingWhitespace(ch: string): boolean {

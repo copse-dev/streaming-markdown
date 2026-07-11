@@ -27,6 +27,7 @@
  * tokenizer, and the link/fence helpers can all share one decoder without import
  * cycles or pulling `entities` into the default bundle.
  */
+import { bumpConfigEpoch } from './config-epoch.ts'
 
 /** Decodes HTML character references in `text` (strict: a trailing `;` is required). */
 export type EntityDecoder = (text: string) => string
@@ -392,6 +393,7 @@ export function decodeHtmlEntities(text: string): string {
  */
 export function setEntityDecoder(decoder: EntityDecoder | null): void {
   customDecoder = decoder
+  bumpConfigEpoch()
 }
 
 /** The decoder registered with {@link setEntityDecoder}, or `null` when using the built-in. */
@@ -408,12 +410,14 @@ export function getEntityDecoder(): EntityDecoder | null {
 export function setNamedEntities(named: Record<string, string>): void {
   userNamed = { ...named }
   rebuildEffective()
+  bumpConfigEpoch()
 }
 
 /** Merge additional named references into the user layer (see {@link setNamedEntities}). */
 export function addNamedEntities(named: Record<string, string>): void {
   userNamed = { ...userNamed, ...named }
   rebuildEffective()
+  bumpConfigEpoch()
 }
 
 /** The effective named set the built-in decoder uses (built-in ⊕ user entries). */

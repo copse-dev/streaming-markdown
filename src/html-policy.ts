@@ -16,6 +16,8 @@
  * deep inline call stack (`escapeHtmlTextNodes`, `pendingHoldIndex`) reads it
  * without new parameters.
  */
+import { bumpConfigEpoch } from './config-epoch.ts'
+
 export type HtmlPolicy = 'passthrough' | 'escape'
 
 let currentHtmlPolicy: HtmlPolicy = 'passthrough'
@@ -34,5 +36,10 @@ export function getHtmlPolicy(): HtmlPolicy {
 export function setHtmlPolicy(policy: HtmlPolicy): HtmlPolicy {
   const previous = currentHtmlPolicy
   currentHtmlPolicy = policy
+  // The stateful streaming renderer re-renders its committed prefix when the
+  // config epoch moves (#145); the per-render scoped seam (withRenderPolicies)
+  // neutralizes these transient apply/restore bumps, so only a real default flip
+  // is observed.
+  bumpConfigEpoch()
   return previous
 }

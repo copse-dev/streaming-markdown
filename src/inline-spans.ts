@@ -14,6 +14,7 @@ import {
   restoreInlinePassHtml,
 } from './inline-passes.ts'
 import { renderStrikethrough } from './inline-strikethrough.ts'
+import { bumpConfigEpoch } from './config-epoch.ts'
 import { getActiveFootnoteContext, renderFootnoteRefs } from './footnotes.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 
@@ -146,6 +147,7 @@ let bareUrlCjkBoundary: ((ch: string) => boolean) | null = null
 /** Inject (or clear with `null`) the bare-autolink CJK-punctuation boundary. */
 export function setBareUrlCjkBoundary(fn: ((ch: string) => boolean) | null): void {
   bareUrlCjkBoundary = fn
+  bumpConfigEpoch()
 }
 
 /** Split a captured bare URL at the first CJK-punctuation boundary, if any. */

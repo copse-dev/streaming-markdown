@@ -1,3 +1,4 @@
+import { bumpConfigEpoch } from './config-epoch.ts'
 import { mermaidSourceCandidates } from './mermaid-source.ts'
 import { setHostTrustedHtml, type TrustedHTMLValue } from './html-sink.ts'
 
@@ -59,6 +60,7 @@ let diagramRenderer: DiagramRenderer | null = null
  */
 export function setDiagramRenderer(renderer: DiagramRenderer | null): void {
   diagramRenderer = renderer
+  bumpConfigEpoch()
 }
 
 /** The active {@link DiagramRenderer}, or `null` when none has been registered. */

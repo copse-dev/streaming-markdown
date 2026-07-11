@@ -21,9 +21,10 @@
 //    construct (`[@doe`, `==foo`) holds instead of flashing raw mid-stream —
 //    exactly how the built-in strikethrough hold composes.
 //
-// This module is a leaf on purpose (no project imports): the pipeline
-// (`inline-spans.ts`) and the hold walker (`inline-emphasis.ts`) both consume it
-// without creating an import cycle.
+// This module is a leaf on purpose (imports only the dependency-free config-epoch
+// leaf): the pipeline (`inline-spans.ts`) and the hold walker (`inline-emphasis.ts`)
+// both consume it without creating an import cycle.
+import { bumpConfigEpoch } from './config-epoch.ts'
 
 /** Where in the inline pipeline a pass runs. */
 export type InlinePassStage = 'before-links' | 'after-links'
@@ -78,6 +79,7 @@ let inlinePasses: readonly InlinePass[] = []
 export function setInlinePasses(passes: readonly InlinePass[] | null): void {
   inlinePasses = passes ? [...passes] : []
   emitted.clear()
+  bumpConfigEpoch()
 }
 
 /** The registered passes, optionally filtered to one pipeline stage. */

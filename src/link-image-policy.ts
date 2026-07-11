@@ -16,6 +16,7 @@
 //
 // Off by default: with no policy installed the gate is a no-op and output is
 // byte-identical to today (the package invariant).
+import { bumpConfigEpoch } from './config-epoch.ts'
 
 /**
  * Origin allowlist for rendered links and images. Install with
@@ -111,6 +112,7 @@ let activePolicy: ResolvedPolicy | null = null
  * ```
  */
 export function setLinkImagePolicy(policy: LinkImagePolicy | null): void {
+  bumpConfigEpoch()
   if (policy === null) {
     activePolicy = null
     return

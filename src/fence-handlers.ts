@@ -1,3 +1,4 @@
+import { bumpConfigEpoch } from './config-epoch.ts'
 import { escapeMermaidHtml } from './escape.ts'
 import { mathBlockHtml, syncFormingMathBlockDom } from './math-block.ts'
 
@@ -139,6 +140,7 @@ export function setFenceHandler(lang: string, handler: FenceHandler | null): voi
   const key = normalizeFenceLang(lang)
   if (handler) fenceHandlers.set(key, handler)
   else fenceHandlers.delete(key)
+  bumpConfigEpoch()
 }
 
 /** The registered {@link FenceHandler} for a fence language, or `null`. */

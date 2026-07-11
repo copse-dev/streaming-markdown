@@ -191,6 +191,15 @@ export class IncrementalSourceScanner {
   }
 
   /**
+   * Discard the cached tokens and safe boundary so the next `tokenize` re-scans
+   * from the start. Used when tokenization-affecting config changed mid-stream
+   * (#145) and the byte-prefix cache validation can no longer be trusted.
+   */
+  reset(): void {
+    this.resetCache()
+  }
+
+  /**
    * Tokenize `source`, reusing every token before the safe boundary. The
    * result is byte-identical to `tokenizeBlocks(source)`.
    */

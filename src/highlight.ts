@@ -1,3 +1,4 @@
+import { bumpConfigEpoch } from './config-epoch.ts'
 import { escapeHtml } from './escape.ts'
 
 // PROTOTYPE (#lazy-load): this module is the *core* of syntax highlighting and
@@ -105,6 +106,7 @@ let codeHighlighter: CodeHighlighter | null = null
  */
 export function setCodeHighlighter(highlighter: CodeHighlighter | null): void {
   codeHighlighter = highlighter
+  bumpConfigEpoch()
 }
 
 /** The active {@link CodeHighlighter}, or `null` when none has been registered. */

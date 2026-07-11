@@ -1,3 +1,4 @@
+import { bumpConfigEpoch } from './config-epoch.ts'
 import { decodeEscapedPunctuationRaw } from './backslash-escapes.ts'
 import { decodeEscapedHref, escapeHtml } from './escape.ts'
 import { isWorkspaceMarkdownLinkHref } from './workspace-link-href.ts'
@@ -93,6 +94,7 @@ export function setSafeHrefSchemes(schemes: Iterable<string> | null): void {
     schemes === null
       ? new Set(DEFAULT_SAFE_HREF_SCHEMES)
       : new Set(Array.from(schemes, (scheme) => scheme.toLowerCase()))
+  bumpConfigEpoch()
 }
 
 /** The scheme allowlist currently enforced by {@link safeLinkHref}. */
@@ -178,6 +180,7 @@ let activeLinkDecorator: LinkDecorator = neutralLinkDecorator
  */
 export function setLinkDecorator(decorator: LinkDecorator | null): void {
   activeLinkDecorator = decorator ?? neutralLinkDecorator
+  bumpConfigEpoch()
 }
 
 /** Render an `<a>` for a resolved link, applying the active {@link LinkDecorator}. */

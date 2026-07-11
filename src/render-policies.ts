@@ -14,6 +14,7 @@
 // (recursive) synchronous renders compose correctly because each level saves and
 // restores its own previous value. Async hydration runs *after* the scoped block
 // and reads only the global backend registries, so it is unaffected.
+import { configEpoch, restoreConfigEpoch } from './config-epoch.ts'
 import { type HtmlPolicy, setHtmlPolicy } from './html-policy.ts'
 import { getSafeHrefSchemes, setSafeHrefSchemes } from './inline-links.ts'
 import { type SanitizeExtension, setSanitizeExtension } from './sanitize.ts'
@@ -67,6 +68,11 @@ export interface RenderPolicyOptions {
  */
 export function withRenderPolicies<T>(options: RenderPolicyOptions, fn: () => T): T {
   const restores: Array<() => void> = []
+  // Scoping a policy calls the same bumping config setters to apply and restore
+  // the override — a net-zero change that must not read as a real mid-stream
+  // config flip to the stateful renderer's config-epoch guard (#145). Snapshot
+  // the epoch and cancel those transient bumps around the whole scoped block.
+  const epochSnapshot = configEpoch()
 
   if (options.htmlPolicy !== undefined) {
     const previous = setHtmlPolicy(options.htmlPolicy)
@@ -103,9 +109,13 @@ export function withRenderPolicies<T>(options: RenderPolicyOptions, fn: () => T)
   }
 
   if (restores.length === 0) return fn()
+  // Cancel the apply bumps so `fn` (which reads the epoch) sees the entry value.
+  restoreConfigEpoch(epochSnapshot)
   try {
     return fn()
   } finally {
     for (let i = restores.length - 1; i >= 0; i--) restores[i]!()
+    // …and cancel the restore bumps so the next update doesn't over-invalidate.
+    restoreConfigEpoch(epochSnapshot)
   }
 }

@@ -1,3 +1,4 @@
+import { bumpConfigEpoch } from './config-epoch.ts'
 import { decodeEscapedHref } from './escape.ts'
 
 /** A raw `<img>` tag the renderer found in prose, with its parsed attributes. */
@@ -24,6 +25,7 @@ let activeRawImageRenderer: RawImageRenderer | null = null
 /** Inject a host {@link RawImageRenderer}; pass `null` to restore the default (escape all images). */
 export function setRawImageRenderer(renderer: RawImageRenderer | null): void {
   activeRawImageRenderer = renderer
+  bumpConfigEpoch()
 }
 
 function parseHtmlAttributes(tag: string): Record<string, string> {

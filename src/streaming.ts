@@ -23,6 +23,7 @@ import { IncrementalSourceScanner } from './incremental-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
 import { type RenderPolicyOptions, withRenderPolicies } from './render-policies.ts'
+import { configEpoch } from './config-epoch.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml } from './html-sink.ts'
 import {
@@ -698,6 +699,14 @@ export class StreamingMarkdownRenderer {
    * origin/sanitize policy regardless of the process-wide defaults.
    */
   private readonly policyOptions: RenderPolicyOptions
+  /**
+   * The config epoch this instance last rendered under (#145). A process-wide
+   * config setter flipped between `update()` calls advances the global epoch;
+   * when it no longer matches, the byte-prefix cache validation can't be trusted
+   * (tokenization / rendering config changed underneath the frozen prefix), so
+   * the caches are dropped and the committed prefix is re-rendered fresh.
+   */
+  private lastConfigEpoch = configEpoch()
 
   constructor(host: HTMLElement, options: StreamingMarkdownOptions = {}) {
     this.host = host
@@ -712,6 +721,22 @@ export class StreamingMarkdownRenderer {
   }
 
   private updateWithPolicy(content: string): void {
+    // A process-wide config setter flipped since the last commit poisons the
+    // byte-prefix-validated caches (tokenization depends on math syntax; frozen
+    // DOM depends on the html policy / decorators / handlers / backend). Drop the
+    // caches so the committed prefix is re-tokenized and re-rendered under the new
+    // config — fail-safe, at worst a redundant full re-render (#145).
+    const epoch = configEpoch()
+    if (epoch !== this.lastConfigEpoch) {
+      this.lastConfigEpoch = epoch
+      this.contentScanner.reset()
+      this.completeScanner.reset()
+      this.frozenTail.reset()
+      this.lastComplete = ''
+      this.committedTokens = []
+      this.committedHasPipe = false
+    }
+
     const split = splitForStreamingFrom(content, this.contentScanner.tokenize(content))
     const { complete, pending, openListItemFirstLine, blocks } = split
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()

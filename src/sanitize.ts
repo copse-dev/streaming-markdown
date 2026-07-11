@@ -1,3 +1,4 @@
+import { bumpConfigEpoch } from './config-epoch.ts'
 import { applyLinkImagePolicy } from './link-image-policy.ts'
 import { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize-browser.ts'
 
@@ -175,6 +176,7 @@ let sanitizerBackend: SanitizerBackend | null = null
  */
 export function setSanitizerBackend(backend: SanitizerBackend | null): void {
   sanitizerBackend = backend
+  bumpConfigEpoch()
 }
 
 /**
@@ -204,6 +206,7 @@ export function setSanitizeExtension(
 ): SanitizeExtension | null {
   const previous = sanitizeExtension
   sanitizeExtension = extension
+  bumpConfigEpoch()
   return previous
 }
 

@@ -3,6 +3,7 @@ import {
   sanitizeRenderedMarkdownInto,
   type SanitizedHtml,
 } from './sanitize.ts'
+import { bumpConfigEpoch } from './config-epoch.ts'
 
 // The single `innerHTML` chokepoint. Every DOM write of rendered-markdown HTML
 // in this package goes through this module (enforced by html-sink.test.ts), so
@@ -81,6 +82,7 @@ let defaultPolicyFactory: TrustedTypesFactory | undefined
  */
 export function setTrustedTypesPolicy(policy: TrustedTypesPolicy | null): void {
   hostPolicy = policy
+  bumpConfigEpoch()
   // Allow a failed probe to retry on the next sink write (tests and hosts that
   // install a `trustedTypes` shim late). A *successfully created* default
   // policy is deliberately NOT discarded: `createPolicy('streaming-markdown')`
