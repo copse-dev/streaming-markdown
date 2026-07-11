@@ -7,7 +7,7 @@ import { type LinkDecorator } from './inline-links.ts'
 import { getFenceHandler, type FenceHandler } from './fence-handlers.ts'
 import { getCodeHighlighter, type CodeHighlighter } from './highlight.ts'
 import { getMathSyntax } from './math-syntax.ts'
-import { withConfig, type MarkdownConfig } from './config.ts'
+import { setDefaultConfig, withConfig, type MarkdownConfig } from './config.ts'
 import { isEmailAutolinksEnabled } from './autolink-syntax.ts'
 import { getEntityDecoder, getNamedEntities } from './entity-decoder.ts'
 import { getInlinePasses } from './inline-passes.ts'
@@ -154,7 +154,8 @@ describe('withConfig scopes and restores every synchronous field', () => {
     assert.equal(getMathSyntax(), before.math)
     assert.equal(isEmailAutolinksEnabled(), before.email)
     assert.equal(getCodeHighlighter(), before.highlighter)
-    // setInlinePasses copies its input, so compare by content not reference.
+    // getInlinePasses returns the active config's array, whose identity differs
+    // across scopes — compare by content not reference.
     assert.deepEqual(getInlinePasses(), before.passes)
     assert.equal(getEntityDecoder(), before.decoder)
     assert.equal(getNamedEntities()['spikeent'], before.named)
@@ -167,6 +168,57 @@ describe('withConfig scopes and restores every synchronous field', () => {
       withConfig({}, () => 7),
       7,
     )
+  })
+})
+
+describe('setDefaultConfig', () => {
+  // The only process-wide mutation point left. Every branch restores the
+  // touched field to its built-in default (`null`) before returning, so these
+  // cannot bleed into other suites in this file.
+  it('merges into the process defaults, visible outside any scope', () => {
+    try {
+      setDefaultConfig({ mathSyntax: true })
+      assert.equal(getMathSyntax(), true)
+      // A later call merges rather than replaces: an unrelated field survives.
+      setDefaultConfig({ emailAutolinks: false })
+      assert.equal(getMathSyntax(), true)
+      assert.equal(isEmailAutolinksEnabled(), false)
+    } finally {
+      setDefaultConfig({ mathSyntax: null, emailAutolinks: true })
+    }
+  })
+
+  it('is overridden per render and null-cleared back to the built-in default', () => {
+    try {
+      setDefaultConfig({ mathSyntax: true })
+      // Per-render config wins over the process default...
+      assert.equal(
+        withConfig({ mathSyntax: false }, () => getMathSyntax()),
+        false,
+      )
+      // ...and a render that sets nothing inherits the default.
+      assert.equal(
+        withConfig({}, () => getMathSyntax()),
+        true,
+      )
+      // `null` clears the field back to the built-in default.
+      setDefaultConfig({ mathSyntax: null })
+      assert.equal(getMathSyntax(), null)
+    } finally {
+      setDefaultConfig({ mathSyntax: null })
+    }
+  })
+
+  it('throws when called inside an active withConfig scope', () => {
+    assert.throws(
+      () =>
+        withConfig({}, () => {
+          setDefaultConfig({ mathSyntax: true })
+        }),
+      /cannot be called during a render/,
+    )
+    // The failed call mutated nothing.
+    assert.equal(getMathSyntax(), null)
   })
 })
 

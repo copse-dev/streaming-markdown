@@ -53,7 +53,11 @@ export interface MarkdownConfig {
   htmlPolicy?: HtmlPolicy
   /**
    * Scheme allowlist enforced on link/image destinations — the gate against
-   * `javascript:`/`data:` XSS. `null` restores the built-in default set. See inline-links.ts.
+   * `javascript:`/`data:` XSS. `null` restores the built-in default set. Pass a
+   * materialized collection (array/`Set`), not a one-shot iterator: the value is
+   * resolved to a `Set` lazily and may be resolved again later, and a consumed
+   * iterator then yields an empty allowlist (every scheme-bearing URL rejected).
+   * See inline-links.ts.
    */
   safeHrefSchemes?: Iterable<string> | null
   /** Host sanitizer allowlist extension; `null` uses the core allowlist only. See sanitize.ts. */
@@ -147,6 +151,11 @@ export interface MarkdownConfig {
 // duration of its synchronous pass and restores it.
 let baseDefaults: MarkdownConfig = {}
 let active: MarkdownConfig = baseDefaults
+// Depth of nested `withConfig` scopes. Guards `setDefaultConfig`: mutating the
+// process defaults mid-render would clobber the running render's merged config,
+// and the scope's `finally` would then restore a stale snapshot — silently
+// losing the new defaults.
+let scopeDepth = 0
 
 /**
  * The configuration for the current synchronous render — the process defaults
@@ -165,11 +174,20 @@ export function activeConfig(): MarkdownConfig {
  * the built-in default. Every `renderMarkdown`/streaming call still overrides
  * these per render via its own `MarkdownConfig`.
  *
- * Call it before rendering (setup time), not inside a render — it assumes no
- * `withConfig` scope is active. Most browser apps never need it (the native
- * Sanitizer is the default and everything else is per-render config).
+ * Call it before rendering (setup time), not inside a render — it throws when a
+ * `withConfig` scope is active (from a fence handler, inline pass, or link
+ * decorator), because the mutation would be lost when the scope restores. Most
+ * browser apps never need it (the native Sanitizer is the default and everything
+ * else is per-render config).
  */
 export function setDefaultConfig(config: MarkdownConfig): void {
+  if (scopeDepth > 0) {
+    throw new Error(
+      'setDefaultConfig cannot be called during a render (inside a withConfig scope): ' +
+        'the running render would be clobbered and the new defaults lost when its scope ' +
+        'restores. Call it at setup time, or pass per-render config to the entry point.',
+    )
+  }
   baseDefaults = { ...baseDefaults, ...config }
   active = baseDefaults
 }
@@ -188,9 +206,11 @@ export function setDefaultConfig(config: MarkdownConfig): void {
 export function withConfig<T>(config: MarkdownConfig, fn: () => T): T {
   const previous = active
   active = { ...previous, ...config }
+  scopeDepth++
   try {
     return fn()
   } finally {
+    scopeDepth--
     active = previous
   }
 }

@@ -705,7 +705,9 @@ export class StreamingMarkdownRenderer {
 
   constructor(host: HTMLElement, options: StreamingMarkdownOptions = {}) {
     this.host = host
-    this.config = options
+    // Shallow snapshot so "captured at construction" holds: a host mutating its
+    // options object later must not silently change this instance's renders.
+    this.config = { ...options }
   }
 
   /** Render `content` (the full message text so far) into the host incrementally. */
