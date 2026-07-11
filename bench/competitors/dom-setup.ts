@@ -69,7 +69,9 @@ if (typeof win.matchMedia !== 'function') {
 // sanitize semantics.
 const { dompurifyBackend } = await import('../../src/sanitize-dompurify.ts')
 const scratch = win.document.createElement('div')
-setSanitizerBackend({
+
+/** The backend every contestant runs under unless it opts out (see below). */
+export const benchSanitizerBackend: import('../../src/sanitize.ts').SanitizerBackend = {
   ...dompurifyBackend,
   sanitize(html, config): string {
     dompurifyBackend.sanitizeInto?.(scratch, html, config)
@@ -77,4 +79,16 @@ setSanitizerBackend({
     scratch.replaceChildren()
     return out
   },
-})
+}
+setSanitizerBackend(benchSanitizerBackend)
+
+/**
+ * Identity backend for the "unsafe" contestant: sanitization off, so our
+ * renderer runs in an smd-comparable configuration (smd has no sanitizer).
+ * Sinks fall back to the string path (`sanitize` → innerHTML) — the cost a
+ * consumer who trusts their input actually pays. Only ever registered inside
+ * a per-cell child process, so it cannot leak into other contestants' cells.
+ */
+export const passthroughSanitizerBackend: import('../../src/sanitize.ts').SanitizerBackend = {
+  sanitize: (html: string): string => html,
+}

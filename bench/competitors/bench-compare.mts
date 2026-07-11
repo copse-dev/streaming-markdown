@@ -306,6 +306,46 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
     },
   })
 
+  // smd-comparable configuration (sanitizer off — smd has none; highlighter
+  // already unregistered; math/mermaid/emoji already not loaded). Two shapes:
+  // the incremental DOM path under a passthrough backend, and the unsafe
+  // string export swapped in via innerHTML.
+  const { setSanitizerBackend } = await import('../../src/sanitize.ts')
+  const { benchSanitizerBackend, passthroughSanitizerBackend } = await import('./dom-setup.ts')
+  contestants.push({
+    name: 'ours DOM incremental (unsafe)',
+    tier: 'dom',
+    version: ourVersion,
+    note: 'StreamingMarkdownRenderer.update with sanitization disabled (passthrough backend) — the smd-comparable config',
+    setup: () => {
+      setSanitizerBackend(passthroughSanitizerBackend)
+      const { host, teardown } = domHost()
+      const renderer = new ours.StreamingMarkdownRenderer(host)
+      return {
+        feed: (_c, acc) => renderer.update(acc),
+        teardown: () => {
+          setSanitizerBackend(benchSanitizerBackend)
+          teardown()
+        },
+      }
+    },
+  })
+  contestants.push({
+    name: 'ours unsafe→innerHTML',
+    tier: 'dom',
+    version: ourVersion,
+    note: 'renderMarkdownUnsafe full re-render + innerHTML swap per chunk (no sanitizer)',
+    setup: () => {
+      const { host, teardown } = domHost()
+      return {
+        feed: (_c, acc) => {
+          host.innerHTML = ours.renderMarkdownUnsafe(acc)
+        },
+        teardown,
+      }
+    },
+  })
+
   try {
     const smd = await import('streaming-markdown')
     contestants.push({

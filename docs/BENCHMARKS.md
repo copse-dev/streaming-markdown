@@ -86,6 +86,14 @@ repository plus the code-block-heavy case from #155:
   nodes with no sanitizer; React-based renderers rely on React's escaping;
   Streamdown additionally hardens URLs and repairs incomplete markdown;
   Incremark's core builds an AST and renders nothing at all.
+- **Like-for-like vs smd:** the DOM tier includes two *unsafe* variants of
+  ours with sanitization disabled (`ours DOM incremental (unsafe)` via a
+  passthrough backend, and the `renderMarkdownUnsafe` string export swapped
+  in with `innerHTML`) — smd's configuration, since it has no sanitizer and
+  our highlighter/math/mermaid/emoji are likewise not loaded here. The
+  remaining gap to smd is architectural: smd appends tokens and never
+  revisits committed output, while our renderer re-tokenizes the stream and
+  morphs the pending tail (what buys mid-stream GFM correctness).
 - **Highlighting:** no highlighter is registered for our renderer,
   react-markdown and smd render code as plain text, so those compare
   markdown work. Streamdown's and Incremark-react's built-in highlighting is
