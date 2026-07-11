@@ -125,38 +125,39 @@ _Last run: 2026-07-11 — node v22.22.2, Intel(R) Xeon(R) Processor @ 2.80GHz, c
 
 | fixture | chars | updates | ours DOM incremental | ours string→innerHTML | smd (streaming-markdown) | react-markdown | react-markdown + memo blocks | streamdown | incremark react |
 | :-- | --: | --: | --: | --: | --: | --: | --: | --: | --: |
-| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 9338 | 199 | 457 ms | 4281 ms | 21.0 ms | 1273 ms | 359 ms | 360 ms | 2044 ms |
-| incremark/test-md.md | 18091 | 199 | 730 ms | 11866 ms | 29.2 ms | 4409 ms | 847 ms | 1331 ms | 3973 ms |
-| README.md | 8521 | 199 | 466 ms | 3429 ms | 14.9 ms | 1157 ms | 513 ms | 469 ms | 999 ms |
-| CHANGELOG.md | 12270 | 198 | 585 ms | 7501 ms | 19.5 ms | 2559 ms | 660 ms | 812 ms | 1639 ms |
-| docs/ARCHITECTURE.md | 48098 | 200 | 1941 ms | 22409 ms | 47.5 ms | 6184 ms | 3137 ms | 3479 ms | 5090 ms |
-| tests/fixtures/terms-of-service-streaming.md | 5220 | 194 | 475 ms | 3069 ms | 10.3 ms | 1092 ms | 321 ms | 315 ms | 686 ms |
-| synthetic/code-heavy (#155) | 12285 | 199 | 406 ms | 1770 ms | 8.90 ms | 434 ms | 304 ms | 181 ms | 430 ms |
-| synthetic/long-transcript | 113865 | 200 | 3617 ms | skipped | 97.0 ms | 24236 ms | 4328 ms | 15733 ms | 19907 ms |
+| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 9338 | 199 | 453 ms | 4155 ms | 17.7 ms | 1296 ms | 348 ms | 353 ms | 2178 ms |
+| incremark/test-md.md | 18091 | 199 | 681 ms | 11874 ms | 28.0 ms | 4647 ms | 848 ms | 1332 ms | 4029 ms |
+| README.md | 8521 | 199 | 466 ms | 3173 ms | 15.8 ms | 1142 ms | 503 ms | 462 ms | 990 ms |
+| CHANGELOG.md | 12270 | 198 | 573 ms | 7163 ms | 23.9 ms | 2543 ms | 602 ms | 795 ms | 1641 ms |
+| docs/ARCHITECTURE.md | 48098 | 200 | 1890 ms | 22423 ms | 50.7 ms | 6448 ms | 3094 ms | 3483 ms | 5084 ms |
+| tests/fixtures/terms-of-service-streaming.md | 5220 | 194 | 415 ms | 2950 ms | 10.3 ms | 879 ms | 336 ms | 302 ms | 603 ms |
+| synthetic/code-heavy (#155) | 12285 | 199 | 417 ms | 1767 ms | 9.61 ms | 414 ms | 284 ms | 171 ms | 351 ms |
+| synthetic/long-transcript | 113865 | 200 | 3933 ms | 99558 ms | 86.4 ms | 24216 ms | 4299 ms | 15899 ms | 19978 ms |
 
 ### Per-update latency on the long transcript (DOM tier)
 
 | library | mean/update | p50 | p95 | max |
 | :-- | --: | --: | --: | --: |
-| ours DOM incremental | 18.1 ms | 13.0 ms | 22.2 ms | 517 ms |
-| smd (streaming-markdown) | 0.48 ms | 0.37 ms | 0.82 ms | 7.52 ms |
-| react-markdown | 121 ms | 126 ms | 210 ms | 345 ms |
-| react-markdown + memo blocks | 21.6 ms | 19.4 ms | 44.5 ms | 60.9 ms |
-| streamdown | 78.7 ms | 67.5 ms | 163 ms | 197 ms |
-| incremark react | 99.0 ms | 90.0 ms | 230 ms | 359 ms |
+| ours DOM incremental | 19.7 ms | 14.1 ms | 25.9 ms | 507 ms |
+| ours string→innerHTML | 498 ms | 507 ms | 913 ms | 2223 ms |
+| smd (streaming-markdown) | 0.43 ms | 0.35 ms | 0.70 ms | 5.45 ms |
+| react-markdown | 121 ms | 137 ms | 216 ms | 259 ms |
+| react-markdown + memo blocks | 21.5 ms | 20.1 ms | 48.2 ms | 94.0 ms |
+| streamdown | 79.5 ms | 67.9 ms | 166 ms | 205 ms |
+| incremark react | 99.4 ms | 92.2 ms | 220 ms | 296 ms |
 
 ### Pipeline only: per-chunk parse/render work, no DOM (Incremark’s published methodology)
 
 | fixture | chars | updates | ours renderMarkdownUnsafe | ours renderStreamingMarkdown | incremark core.append | streamdown parseMarkdownIntoBlocks | marked full re-parse |
 | :-- | --: | --: | --: | --: | --: | --: | --: |
-| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 9338 | 199 | 240 ms | 2812 ms | 19.7 ms | 45.1 ms | 50.2 ms |
-| incremark/test-md.md | 18091 | 199 | 1011 ms | 8051 ms | 30.5 ms | 251 ms | 219 ms |
-| README.md | 8521 | 199 | 365 ms | 2114 ms | 40.1 ms | 10.1 ms | 85.4 ms |
-| CHANGELOG.md | 12270 | 198 | 676 ms | 5121 ms | 23.9 ms | 196 ms | 170 ms |
-| docs/ARCHITECTURE.md | 48098 | 200 | 1998 ms | 14268 ms | 1060 ms | 77.4 ms | 650 ms |
-| tests/fixtures/terms-of-service-streaming.md | 5220 | 194 | 314 ms | 2180 ms | 15.6 ms | 59.0 ms | 58.9 ms |
-| synthetic/code-heavy (#155) | 12285 | 199 | 29.2 ms | 1061 ms | 15.5 ms | 8.94 ms | 15.3 ms |
-| synthetic/long-transcript | 113865 | 200 | 6983 ms | skipped | 901 ms | 118 ms | 1447 ms |
+| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 9338 | 199 | 247 ms | 2818 ms | 14.4 ms | 49.8 ms | 48.6 ms |
+| incremark/test-md.md | 18091 | 199 | 895 ms | 7947 ms | 31.1 ms | 244 ms | 225 ms |
+| README.md | 8521 | 199 | 369 ms | 2195 ms | 41.8 ms | 8.17 ms | 92.5 ms |
+| CHANGELOG.md | 12270 | 198 | 657 ms | 4747 ms | 25.0 ms | 194 ms | 168 ms |
+| docs/ARCHITECTURE.md | 48098 | 200 | 2026 ms | 14124 ms | 1081 ms | 76.4 ms | 665 ms |
+| tests/fixtures/terms-of-service-streaming.md | 5220 | 194 | 337 ms | 2051 ms | 15.9 ms | 60.0 ms | 58.7 ms |
+| synthetic/code-heavy (#155) | 12285 | 199 | 28.6 ms | 1054 ms | 14.4 ms | 11.1 ms | 14.6 ms |
+| synthetic/long-transcript | 113865 | 200 | 6644 ms | 77318 ms | 905 ms | 119 ms | 1536 ms |
 
 ### Bundle size (esbuild, minified, browser, es2022)
 
@@ -168,9 +169,5 @@ _Last run: 2026-07-11 — node v22.22.2, Intel(R) Xeon(R) Processor @ 2.80GHz, c
 | streamdown | 488.3 kB | 145.4 kB | 488.3 kB | 145.4 kB | React runtime external (peer); lazy chunks = mermaid etc. |
 | incremark (@incremark/core) | 72.3 kB | 21.1 kB | 72.3 kB | 21.1 kB | parser only — no renderer |
 | incremark (@incremark/react) | 9545.0 kB | 1837.3 kB | 9545.0 kB | 1837.3 kB | React runtime + katex/mermaid peers external; shiki bundles |
-
-Skipped in this run:
-- ours renderStreamingMarkdown on synthetic/long-transcript: child process exited 134 (crash/OOM)
-- ours string→innerHTML on synthetic/long-transcript: child process exited 134 (crash/OOM)
 
 <!-- bench-results:end -->
