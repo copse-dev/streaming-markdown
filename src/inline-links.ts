@@ -178,10 +178,20 @@ export function setLinkDecorator(decorator: LinkDecorator | null): void {
 
 /** Render an `<a>` for a resolved link, applying the active {@link LinkDecorator}. */
 export function renderAnchor(label: string, href: string, title?: string): string {
-  const isWorkspace = isWorkspaceMarkdownLinkHref(href)
-  // `exactOptionalPropertyTypes`: omit `title` rather than pass an explicit undefined.
-  const decoration: LinkDecoration =
-    title === undefined ? { href, isWorkspace } : { href, isWorkspace, title }
+  // Compute `isWorkspace` lazily (#146): it is workspace-host-specific residue in
+  // the neutral core — the built-in `neutralLinkDecorator` never reads it, so the
+  // per-anchor `isWorkspaceMarkdownLinkHref` URL scan runs only when a host
+  // decorator (e.g. `appLinkDecorator`) actually consults it. Memoized so a
+  // decorator reading it twice still scans once.
+  let workspace: boolean | undefined
+  const decoration: LinkDecoration = {
+    href,
+    get isWorkspace(): boolean {
+      return (workspace ??= isWorkspaceMarkdownLinkHref(href))
+    },
+    // `exactOptionalPropertyTypes`: omit `title` rather than pass an explicit undefined.
+    ...(title === undefined ? {} : { title }),
+  }
   const attrs = activeLinkDecorator(decoration)
   return `<a href="${escapeHtml(href)}"${attrs}>${label}</a>`
 }
