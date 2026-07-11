@@ -100,8 +100,12 @@ export function getSafeHrefSchemes(): string[] {
   return [...activeSafeHrefSchemes]
 }
 
-/** True when `href` is a relative destination or carries an allowlisted scheme. */
-function isAllowedHref(href: string): boolean {
+/**
+ * True when `href` is a relative destination or carries an allowlisted scheme.
+ * Exported so angle autolinks share the exact allowlist markdown links use
+ * (#139) — autolink destinations are verbatim (no escapes to decode first).
+ */
+export function isAllowedHref(href: string): boolean {
   const scheme = HREF_SCHEME_RE.exec(href)?.[1]
   return scheme === undefined || activeSafeHrefSchemes.has(scheme.toLowerCase())
 }

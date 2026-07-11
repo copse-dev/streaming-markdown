@@ -471,10 +471,20 @@ attribute-less inline allowlist** (`b i u s del ins sub sup kbd mark br`,
 Everything with attributes, and all block/structural raw HTML, stays escaped.
 
 So the realistic ceiling excludes those **64 HTML examples**: **588 in-scope
-examples**, of which the renderer currently satisfies **573 (~97%)**. Counting all
-652 examples the baseline is **583 (~89%)**. Both numbers move as non-HTML
+examples**, of which the renderer currently satisfies **569 (~97%)**. Counting all
+652 examples the baseline is **579 (~89%)**. Both numbers move as non-HTML
 conformance grows — `summaryBySection` in the baseline JSON carries the live
 per-section counts; treat the two headline figures here as approximate.
+
+**Deliberate autolink-scheme divergence (#139).** Angle autolinks (`<scheme:…>`)
+route through the same scheme allowlist as markdown links (`safeLinkHref` /
+`setSafeHrefSchemes`) rather than a `javascript:`/`data:`/`vbscript:` deny-list,
+so an unlisted scheme fails **closed** (stays literal) instead of rendering a
+live `<a href>`. This is the security posture — a deny-list is the only fail-open
+link path — at the cost of **4 CommonMark autolink examples** (`<irc://…>`,
+`<a+b+c:d>`, `<made-up-scheme://…>`, `<localhost:5001/…>`) that the spec links but
+carry non-allowlisted schemes. `http(s)`/`mailto`/`ftp(s)`/`tel`/`sms` autolinks
+are unaffected; a host widens the set with `setSafeHrefSchemes`.
 
 **Passthrough is now the runtime default** (`htmlPolicy: 'passthrough'`,
 `html-policy.ts`): the renderer emits well-formed raw HTML and the sink sanitizer

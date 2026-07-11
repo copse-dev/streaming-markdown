@@ -1,5 +1,6 @@
 import { escapeHtml } from './escape.ts'
 import { INLINE_HTML_SHIELD_RE } from './inline-emphasis.ts'
+import { isAllowedHref } from './inline-links.ts'
 import { encodeHrefForOutput } from './link-references.ts'
 
 /**
@@ -19,9 +20,17 @@ const URI_AUTOLINK_RE = /^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*)>/
 const EMAIL_AUTOLINK_RE =
   /^<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)>/
 
-/** Percent-encode an autolink destination, rejecting dangerous schemes. */
+/**
+ * Percent-encode an autolink destination, or return `null` to leave the autolink
+ * literal. Angle autolinks route through the same scheme allowlist as markdown
+ * links (#139), so an unlisted scheme (`file:`, `chrome:`, arbitrary handlers)
+ * fails closed rather than becoming a live `<a href>` — the denylist that only
+ * caught `javascript:`/`data:`/`vbscript:` was the sole fail-open link path.
+ * Autolink destinations are verbatim (no backslash escapes, spec 603), so the
+ * raw scheme is checked directly.
+ */
 function autolinkHref(raw: string): string | null {
-  if (/^(?:javascript|data|vbscript):/i.test(raw)) return null
+  if (!isAllowedHref(raw)) return null
   return encodeHrefForOutput(raw)
 }
 
