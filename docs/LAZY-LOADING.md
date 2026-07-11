@@ -65,9 +65,9 @@ config field + the `@copse/streaming-markdown/sanitizers/dompurify` subpath):
   `withConfig`. With no highlighter configured, `highlightFenceCode` returns
   **escaped plain text**.
 - **`highlight-hljs.ts` (backend)** is the only module that imports highlight.js.
-  It registers the grammars and exports `highlightjsHighlighter`,
-  `installHighlightjs()`, and `loadHighlightjs()` — the `load*`/`install*` helpers
-  return the `CodeHighlighter` to pass via config. It lives behind the
+  It registers the grammars and exports `highlightjsHighlighter` (the value) and
+  `loadHighlightjs()` (which returns that `CodeHighlighter`), to pass via
+  `MarkdownConfig.codeHighlighter`. It lives behind the
   `@copse/streaming-markdown/highlighters/highlightjs` subpath, so a bundler drops
   it unless the host references that entry.
 

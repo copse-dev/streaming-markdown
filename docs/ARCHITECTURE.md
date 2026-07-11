@@ -36,9 +36,9 @@ When extending the renderer or its CSS, preserve these rules:
   (the `codeHighlighter` field, applied by `withConfig`); it imports no highlight.js.
   The highlight.js grammars live in `highlight-hljs.ts`, imported only via the
   `@copse/streaming-markdown/highlighters/highlightjs` entry (`highlightjsHighlighter`,
-  `installHighlightjs`, `loadHighlightjs` — the `load*`/`install*` helpers return the
-  backend to pass via config), so they stay out of bundles that don't opt in — the same
-  split as the sanitizer backend. With no highlighter configured, `highlightFenceCode`
+  `loadHighlightjs` — the value, and the `load*` helper returning it to pass via
+  config), so they stay out of bundles that don't opt in — the same split as the
+  sanitizer backend. With no highlighter configured, `highlightFenceCode`
   returns escaped plain text; a later render with a `codeHighlighter` set upgrades fence
   interiors to token spans while `fenceCodeClass` keeps the element's class stable across
   the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the backend

@@ -12,19 +12,30 @@ Status: accepted, then superseded in part · Relates to [#137](https://github.co
 > configuration mechanism: pass it as the 2nd argument to `renderMarkdown` /
 > `renderMarkdownUnsafe` / `renderStreamingMarkdown`, or capture it on
 > `new StreamingMarkdownRenderer(host, config)` (applied around every `update()`).
-> The synchronous **save-set-restore** seam this ADR designed is retained and is
-> the whole implementation — the helper is now `withConfig` (`config.ts`),
-> generalized from the old `withRenderPolicies` (`render-policies.ts`) to cover the
-> full synchronous config tier, not just the four security slots.
+> The synchronous **save-set-restore** seam this ADR designed is retained, but
+> simplified past what the ADR imagined: rather than N per-module slots each moved
+> and restored, the entire config is **one ambient object**. `withConfig`
+> (`config.ts`) swaps that single object for the render and restores it (merging
+> over the parent so nested renders inherit); every read site reads its setting
+> through `activeConfig()`. The old per-module `set*`/`get*` writers and the
+> `withRenderPolicies` helper (`render-policies.ts`) are deleted outright.
 >
-> The one distinction this ADR drew that **still holds** is the async split: the
-> `mathRenderer` and `diagramRenderer` backends run *asynchronously, after* the
-> synchronous render (during hydration), so they cannot be scoped by a synchronous
-> save-set-restore block at all. They are **not** part of the `withConfig` scope;
-> instead they flow through `hydrate()` / the `hydratePending*` `renderer` option.
-> Everything read during the synchronous render — including `sanitizerBackend`,
-> `codeHighlighter`, `entityDecoder`, `fenceHandlers`, `inlinePasses`, and the
-> whole policy tier — is a `MarkdownConfig` field applied via `withConfig`.
+> This ADR's split of the 22 slots into "per-render policies" and "install-once
+> backends" proved prescient in **both** directions:
+>
+> - The async backends — `mathRenderer` / `diagramRenderer`, read *after* the
+>   synchronous render during hydration — genuinely cannot ride a synchronous
+>   scope, exactly as argued. They are **not** in the `withConfig` scope; they flow
+>   through `hydrate()` / the `hydratePending*` `renderer` option.
+> - The "install-once" insight is realized as **`setDefaultConfig(config)`**: a
+>   single process-wide default a Node/SSR host or a test harness sets once (its
+>   `sanitizerBackend`, a `codeHighlighter`) that every per-render `MarkdownConfig`
+>   overrides. It is the *only* remaining mutable-global entry point, and it sets
+>   defaults for the one ambient object rather than reintroducing per-knob setters.
+>
+> Everything else read during the synchronous render — `sanitizeExtension`,
+> `fenceHandlers`, `inlinePasses`, `entityDecoder`, `mathSyntax`, and the whole
+> policy tier — is a plain `MarkdownConfig` field, no setter.
 >
 > The analysis below is preserved as the historical record; read "the global
 > `set*` remain as default movers" as the intermediate step that the setter

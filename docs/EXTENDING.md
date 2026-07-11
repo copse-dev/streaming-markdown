@@ -588,9 +588,9 @@ renderMarkdown(md, { entityDecoder: fullEntityDecoder })
 ```
 
 Both are strict (a trailing `;` is required, per CommonMark) and decode any name
-in the built-in set byte-identically to the full table. (The `entities/full`
-entry also exports `installFullEntityDecoder()` if you have a legacy call site,
-but the config field is the recommended path.)
+in the built-in set byte-identically to the full table. (Pass `fullEntityDecoder`
+from the `entities/full` entry as `{ entityDecoder: fullEntityDecoder }`, or a
+`setDefaultConfig({ entityDecoder: fullEntityDecoder })` once at startup.)
 
 Just need a handful of extra names? Add them for a render with the
 `namedEntities` config field instead of shipping the whole table:
