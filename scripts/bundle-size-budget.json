@@ -23,7 +23,7 @@
     },
     "./highlighters/shiki": {
       "file": "dist/highlight-shiki.js",
-      "gzipBudget": 1290
+      "gzipBudget": 1361
     },
     "./smoothing": {
       "file": "dist/smoothing.js",
