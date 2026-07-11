@@ -1,0 +1,23 @@
+{
+  "name": "@copse/streaming-markdown-bench-competitors",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Non-gating cross-library streaming benchmark harness (#157). Competitor deps are isolated here so their install flakiness and version drift never touch the main package.",
+  "type": "module",
+  "scripts": {
+    "fetch-corpus": "tsx fetch-corpus.mts",
+    "bench": "tsx fetch-corpus.mts && tsx bench-compare.mts"
+  },
+  "dependencies": {
+    "@incremark/core": "^1.0.2",
+    "@incremark/react": "^1.0.2",
+    "jsdom": "^29.1.1",
+    "marked": "^16.4.1",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
+    "streamdown": "^2.5.0",
+    "streaming-markdown": "^0.2.15",
+    "tsx": "^4.23.0"
+  }
+}
