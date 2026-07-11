@@ -130,7 +130,8 @@ For a chat UI that streams, swap the re-render-per-token `<ReactMarkdown>` for
 gymnastics — the incremental renderer is the memoization.
 
 Component-level overrides (react-markdown's `components` prop) map to the
-library's extension seams — [`setLinkDecorator`, `setFenceHandler`,
-`setCodeHighlighter`, inline passes](EXTENDING.md) — configured once rather than
-per-render. The planned first-party wrapper ([#156](https://github.com/copse-dev/streaming-markdown/issues/156))
+library's extension seams — the [`linkDecorator`, `fenceHandlers`,
+`codeHighlighter`, `inlinePasses`](EXTENDING.md) `MarkdownConfig` fields — passed
+per render (to the render call or captured on the `StreamingMarkdownRenderer`).
+The planned first-party wrapper ([#156](https://github.com/copse-dev/streaming-markdown/issues/156))
 will expose these as props.

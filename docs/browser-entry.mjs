@@ -25,24 +25,29 @@ export function loadHighlightBackend() {
   return import('../dist/highlight-hljs.js').then((m) => m.loadHighlightjs())
 }
 
-// Registers the diagram backend; the mermaid library itself is resolved via the
-// page's import map (it is an optional peer, never bundled) on first render.
+// Returns the mermaid `DiagramRenderer` (the demo passes it as
+// `MarkdownConfig.diagramRenderer` to `hydrate()` / `hydratePendingDiagrams()`);
+// the mermaid library itself is resolved via the page's import map (it is an
+// optional peer, never bundled) on first render.
 export function loadMermaidBackend() {
   return import('../dist/mermaid-mermaidjs.js').then((m) => m.loadMermaid())
 }
 
-// Registers the KaTeX math backend; katex itself is resolved via the page's
+// Returns the KaTeX `MathRenderer`; katex itself is resolved via the page's
 // import map (optional peer, never bundled) the first time an expression
-// renders. `loadKatex()` calls `setMathRenderer(katexMathRenderer)`, so this
-// also flips the prose `$…$` / `$$…$$` math syntax fully on.
+// renders. The demo captures the returned renderer and passes it as
+// `MarkdownConfig.mathRenderer` to `hydrate()` / `hydratePendingMath()`. Turning
+// the prose `$…$` grammar on is the separate, explicit `{ mathSyntax: true }`
+// config knob (the demo sets it when it detects math).
 export function loadKatexBackend() {
   return import('../dist/math-katex.js').then((m) => m.loadKatex())
 }
 
-// The Shiki backend is a second CodeHighlighter over the same setCodeHighlighter
-// registry as highlight.js. shiki's core/engine/theme/lang modules are resolved
-// via the import map (optional peer, never bundled). We keep the module handle
-// so shikiThemeCss() can read the loaded theme palette after the load resolves.
+// Returns a second `CodeHighlighter` (Shiki) the demo passes as
+// `MarkdownConfig.codeHighlighter`, alongside the highlight.js backend. shiki's
+// core/engine/theme/lang modules are resolved via the import map (optional peer,
+// never bundled). We keep the module handle so shikiThemeCss() can read the
+// loaded theme palette after the load resolves.
 let shikiModule = null
 export function loadShikiBackend(options) {
   return import('../dist/highlight-shiki.js').then((m) => {
@@ -57,9 +62,10 @@ export function shikiThemeCss() {
   return shikiModule ? shikiModule.shikiThemeCss() : ''
 }
 
-// Re-register the highlight.js backend as the active CodeHighlighter (used when
-// toggling back from Shiki). Idempotent — the grammar chunk is fetched once;
-// later calls just flip the registry pointer back to highlight.js.
+// Resolve the highlight.js `CodeHighlighter` again (used when toggling back from
+// Shiki). Idempotent — the grammar chunk is fetched once; later calls just
+// return the same backend, which the demo threads back into
+// `MarkdownConfig.codeHighlighter`.
 export function useHighlightjs() {
   return loadHighlightBackend()
 }

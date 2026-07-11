@@ -57,18 +57,18 @@ for await (const chunk of stream) {
 - **First-class math.** ```` ```math ```` fences, `$$…$$` and `\[…\]` display
   blocks (the OpenAI delimiter style), and `$…$` / `\(…\)` inline math with
   currency guards (`$20 and $30` stays prose) — rendered lazily via KaTeX,
-  streamed without delimiter flash. The prose delimiters activate when you
-  register a math renderer (`loadKatex()` is enough); until then output stays
-  byte-identical to a math-free build (`setMathSyntax` overrides either way).
+  streamed without delimiter flash. The prose delimiters are opt-in per render
+  via `{ mathSyntax: true }`; until then output stays byte-identical to a
+  math-free build (the ```` ```math ```` fence renders regardless).
   See [Math in `docs/EXTENDING.md`](docs/EXTENDING.md#math-katex).
 - **Sanitize at the sink.** Rendered HTML is treated as untrusted and links are
   scheme-validated; the sink sanitizer is the security gate. Raw HTML is
   **passed through by default** (`htmlPolicy: 'passthrough'`) and the sink
   sanitizer is the sole arbiter — allowlisted tags render as elements, everything
   else (including `<script>`) is stripped/unwrapped; pass `htmlPolicy: 'escape'`
-  (or `setHtmlPolicy('escape')`) to literalize raw HTML instead, e.g. if you write
+  in the render config to literalize raw HTML instead, e.g. if you write
   the renderer string to a sink without sanitizing. An opt-in
-  **link/image origin allowlist** (`setLinkImagePolicy`) layers on top —
+  **link/image origin allowlist** (`linkImagePolicy`) layers on top —
   restrict which origins links/images may point at, rewrite/neutralize the rest,
   and strip base64 `data:` images — off by default, byte-identical until you set
   it. See [Link/image origin policy in `docs/EXTENDING.md`](docs/EXTENDING.md#linkimage-origin-policy).
@@ -104,19 +104,21 @@ backend once and it stays out of your bundle until you do. The full guide, with
 code for each, is in **[`docs/EXTENDING.md`](docs/EXTENDING.md)**:
 
 ```ts
-import { setSanitizerBackend } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 import { dompurifyBackend } from '@copse/streaming-markdown/sanitizers/dompurify'
 
-setSanitizerBackend(dompurifyBackend) // e.g. for Node/jsdom/SSR
+// Pass the backend in the per-render config — e.g. for Node/jsdom/SSR.
+renderMarkdown(md, { sanitizerBackend: dompurifyBackend })
 ```
 
 Pages that enforce [Trusted Types](https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API)
 (`require-trusted-types-for 'script'`) are supported out of the box with any
 backend — see [Trusted Types in `docs/EXTENDING.md`](docs/EXTENDING.md#trusted-types)
-for the CSP policy names and the `setTrustedTypesPolicy` hook.
+for the CSP policy names and the `trustedTypesPolicy` config field.
 
-Chinese / Japanese / Korean output has an opt-in entry too: `setCjkFriendly(true)`
-from `@copse/streaming-markdown/cjk` makes emphasis and bare autolinks behave
+Chinese / Japanese / Korean output has an opt-in entry too: spread
+`cjkFriendlyConfig` from `@copse/streaming-markdown/cjk` into the render config to
+make emphasis and bare autolinks behave
 around full-width punctuation (`**「強調」**`, `https://example.com。`), and the
 optional `styles/cjk.css` carries the line-break / spacing CSS the host owns —
 see [CJK / East-Asian text](docs/EXTENDING.md#cjk--east-asian-text). Both are

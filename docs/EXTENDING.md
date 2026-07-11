@@ -1,25 +1,48 @@
 # Extending the renderer
 
 The core ships **zero backend code** and stays app-independent. Every heavy or
-host-specific capability is a *plug point*: a setter in the core that you
-register, with any heavy backend behind its own subpath entry so bundlers drop
-it unless you import it. Register each once, before your first render.
+host-specific capability is a *plug point*: a field on the `MarkdownConfig`
+object you inject **per render**, with any heavy backend behind its own subpath
+entry so bundlers drop it unless you import it. Pass the config as the second
+argument to `renderMarkdown` / `renderMarkdownUnsafe` / `renderStreamingMarkdown`,
+or to the `StreamingMarkdownRenderer` constructor — where it is captured once and
+re-applied around every `update()`:
 
-| Plug point | Register with | Optional backend entry |
+```ts
+import { renderMarkdown, StreamingMarkdownRenderer } from '@copse/streaming-markdown'
+
+renderMarkdown(md, { htmlPolicy: 'escape', linkDecorator: myDecorator })
+const renderer = new StreamingMarkdownRenderer(el, { mathSyntax: true })
+```
+
+Every field is optional; omitting one uses the built-in default, and passing
+`null` scopes a field back to that default for that render. Two renderers with
+different config coexist with no process-wide state to reset.
+
+| Plug point | Config field | Optional backend entry |
 | --- | --- | --- |
-| HTML sanitizer | `setSanitizerBackend` | `…/sanitizers/dompurify` |
-| Syntax highlighter | `setCodeHighlighter` | `…/highlighters/highlightjs`, `…/highlighters/shiki` |
-| Diagram renderer | `setDiagramRenderer` | `…/diagrams/mermaid` |
-| Math renderer | `setMathRenderer` | `…/math/katex` |
-| Math prose syntax (override) | `setMathSyntax` | — |
-| Custom fenced blocks | `setFenceHandler` | — (you supply the handler) |
-| Custom inline syntax | `setInlinePasses` | — (you supply the pass) |
-| CJK-friendly emphasis / autolinks | `setCjkFriendly` | `…/cjk` |
-| `<a>` routing | `setLinkDecorator` | — |
-| Raw `<img>` handling | `setRawImageRenderer` | — |
-| Sanitizer allowlist | `setSanitizeExtension` | — |
-| Link scheme allowlist | `setSafeHrefSchemes` | — |
-| Link/image origin policy | `setLinkImagePolicy` | — |
+| HTML sanitizer | `sanitizerBackend` | `…/sanitizers/dompurify` |
+| Syntax highlighter | `codeHighlighter` | `…/highlighters/highlightjs`, `…/highlighters/shiki` |
+| Diagram renderer | `diagramRenderer` (async — via `hydrate()`) | `…/diagrams/mermaid` |
+| Math renderer | `mathRenderer` (async — via `hydrate()`) | `…/math/katex` |
+| Math prose syntax | `mathSyntax` | — |
+| Custom fenced blocks | `fenceHandlers` | — (you supply the handler) |
+| Custom inline syntax | `inlinePasses` | — (you supply the pass) |
+| CJK-friendly emphasis / autolinks | `cjkFriendlyConfig` (spread) | `…/cjk` |
+| `<a>` routing | `linkDecorator` | — |
+| Raw `<img>` handling | `rawImageRenderer` | — |
+| Sanitizer allowlist | `sanitizeExtension` | — |
+| Link scheme allowlist | `safeHrefSchemes` | — |
+| Link/image origin policy | `linkImagePolicy` | — |
+| Trusted Types policy | `trustedTypesPolicy` | — |
+| Full HTML5 entity decoder | `entityDecoder` | `…/entities/full` |
+| Extra named entities | `namedEntities` | — |
+
+The `mathRenderer` and `diagramRenderer` backends are asynchronous, so they do
+not run during the synchronous render — they flow through `hydrate()` (or the
+`hydratePending*` free functions) after the pending scaffolding is on the page;
+see [Math](#math-katex) and [`LAZY-LOADING.md`](LAZY-LOADING.md). Everything else
+applies during the render itself.
 
 The whole public surface is in [`src/index.ts`](../src/index.ts).
 
@@ -36,15 +59,17 @@ install). Because it lives behind its own entry point, bundlers drop DOMPurify
 entirely unless you import it:
 
 ```ts
-import { setSanitizerBackend } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 import { dompurifyBackend } from '@copse/streaming-markdown/sanitizers/dompurify'
 
-setSanitizerBackend(dompurifyBackend) // once, before the first render
+renderMarkdown(md, { sanitizerBackend: dompurifyBackend })
 ```
 
-You can also supply your own `SanitizerBackend`. If no backend is set and the
-native API is unavailable, `sanitizeRenderedMarkdown` throws rather than emit
-unsanitized HTML.
+You can also supply your own `SanitizerBackend`. If no backend is configured and
+the native API is unavailable, `sanitizeRenderedMarkdown` throws rather than emit
+unsanitized HTML. (`sanitizeRenderedMarkdown` itself takes no config; to run it
+under a specific backend, render through `renderMarkdown` with `sanitizerBackend`
+set, or wrap the call — the streaming/at-rest entries thread the config for you.)
 
 Backends may implement an optional **node path** (`SanitizerBackend.sanitizeInto`):
 the sanitized nodes are placed into the target element directly — one parse per
@@ -73,11 +98,14 @@ If your CSP restricts policy names (`trusted-types` directive), either
 allowlist `streaming-markdown` or inject your own policy:
 
 ```ts
-import { setTrustedTypesPolicy } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 
-setTrustedTypesPolicy(
-  window.trustedTypes.createPolicy('my-app#markdown', { createHTML: (s) => s }),
-)
+renderMarkdown(md, {
+  trustedTypesPolicy: window.trustedTypes.createPolicy(
+    'my-app#markdown',
+    { createHTML: (s) => s },
+  ),
+})
 ```
 
 The injected policy always receives markup that has already been through
@@ -116,18 +144,20 @@ plain text (with the correct `hljs lang-*` class) until you register one — so
 highlight.js is only in your bundle if you ask for it:
 
 ```ts
-import { setCodeHighlighter } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 import { highlightjsHighlighter } from '@copse/streaming-markdown/highlighters/highlightjs'
 
-setCodeHighlighter(highlightjsHighlighter) // once, before the first render
+renderMarkdown(md, { codeHighlighter: highlightjsHighlighter })
 ```
 
-Or lazily — the grammars load as a separate chunk only when first needed, and a
-re-render upgrades already-rendered fences from plain to highlighted:
+Or lazily — the grammars load as a separate chunk only when first needed;
+`loadHighlightjs()` **returns** the highlighter, and a re-render with it in the
+config upgrades already-rendered fences from plain to highlighted:
 
 ```ts
 const { loadHighlightjs } = await import('@copse/streaming-markdown/highlighters/highlightjs')
-await loadHighlightjs()
+const codeHighlighter = await loadHighlightjs()
+// re-render with { codeHighlighter } in the config
 ```
 
 See [`LAZY-LOADING.md`](LAZY-LOADING.md) for the bundle-size rationale and how the
@@ -144,14 +174,14 @@ re-render upgrades them in place — the same UX as lazy highlight.js:
 
 ```ts
 const { loadShiki, shikiThemeCss } = await import('@copse/streaming-markdown/highlighters/shiki')
-await loadShiki() // loads shiki/core + grammars + theme, registers the backend
+const codeHighlighter = await loadShiki() // loads shiki/core + grammars + theme
 document.head.insertAdjacentHTML('beforeend', `<style>${shikiThemeCss()}</style>`)
-rerender() // already-rendered fences upgrade from plain → highlighted
+rerender({ codeHighlighter }) // already-rendered fences upgrade from plain → highlighted
 ```
 
-`installShiki()` is the eager form: it registers the backend synchronously and
-starts the library load in the background (`await loadShiki()` to observe
-completion or a missing-peer failure).
+`loadShiki()` resolves to the `CodeHighlighter` backend; pass it as
+`codeHighlighter` in the render config. It rejects if the optional `shiki` peer
+isn't installed, so `await` it to observe completion or a missing-peer failure.
 
 **Styling.** Shiki's stock output colors tokens with inline `style` attributes,
 which the sink sanitizer strips (`style` stays off the allowlist — it would hand
@@ -178,26 +208,32 @@ though the core still resolves their ids.
 
 ## Custom fenced blocks (fence handlers)
 
-Mermaid and math support are built on a general **fence-handler registry**:
-which HTML a fenced code block emits is looked up by the fence's language
-(case-insensitive), and `mermaid` / `math` are simply the built-in entries.
-Register your own to add mermaid-style blocks — graphviz, vega, and friends:
+Mermaid and math support are built on a general **fence-handler map**: which HTML
+a fenced code block emits is looked up by the fence's language (case-insensitive),
+and `mermaid` / `math` are simply the built-in entries. Add your own via the
+`fenceHandlers` config field — a `Record<string, FenceHandler | null>` — to add
+mermaid-style blocks (graphviz, vega, and friends):
 
 ```ts
-import { setFenceHandler, escapeHtml, FORMING_FENCE_PRE_CLASS } from '@copse/streaming-markdown'
+import { renderMarkdown, escapeHtml, FORMING_FENCE_PRE_CLASS } from '@copse/streaming-markdown'
 
-setFenceHandler('graphviz', {
-  // At-rest HTML for a completed ```graphviz fence. Emitted before the sanitizer
-  // sink: stay inside the allowlist (or widen it via setSanitizeExtension).
-  render: (code) =>
-    `<div class="dot-graph dot-graph--pending"><pre class="dot">${escapeHtml(code.trimEnd())}</pre></div>`,
-  // Optional: what the fence shows while still streaming (both emitters).
-  forming: {
-    html: (code) =>
-      `<div class="dot-graph dot-graph--pending ${FORMING_FENCE_PRE_CLASS}"><pre class="dot">${escapeHtml(code)}</pre></div>`,
-    // Optional incremental DOM update; default = sanitized innerHTML replace.
-    sync: (container, code) => {
-      /* patch container in place */
+renderMarkdown(md, {
+  fenceHandlers: {
+    graphviz: {
+      // At-rest HTML for a completed ```graphviz fence. Emitted before the
+      // sanitizer sink: stay inside the allowlist (or widen it via
+      // `sanitizeExtension`).
+      render: (code) =>
+        `<div class="dot-graph dot-graph--pending"><pre class="dot">${escapeHtml(code.trimEnd())}</pre></div>`,
+      // Optional: what the fence shows while still streaming (both emitters).
+      forming: {
+        html: (code) =>
+          `<div class="dot-graph dot-graph--pending ${FORMING_FENCE_PRE_CLASS}"><pre class="dot">${escapeHtml(code)}</pre></div>`,
+        // Optional incremental DOM update; default = sanitized innerHTML replace.
+        sync: (container, code) => {
+          /* patch container in place */
+        },
+      },
     },
   },
 })
@@ -207,9 +243,9 @@ The pattern is two-phase, like mermaid: the handler emits inert, escaped
 *scaffolding* at render time, and your app hydrates it into rich output (SVG,
 KaTeX, …) **after** the HTML is sanitized at the sink — mermaid's hydrator is
 `hydratePendingDiagrams`, math's is `hydratePendingMath`. Fences are opaque to
-the parser, so handlers change emission only. `setFenceHandler('mermaid', null)`
-(or `'math'`) removes a built-in and renders those fences as ordinary code
-blocks.
+the parser, so handlers change emission only. `{ fenceHandlers: { mermaid: null } }`
+(or `{ math: null }`) removes a built-in for that render and renders those fences
+as ordinary code blocks.
 
 ## Math (KaTeX)
 
@@ -222,20 +258,24 @@ scaffolding:
 - `$x$` / `$$x$$` / `\(x\)` inline math →
   `<span class="math-inline math-inline--pending">…escaped TeX…</span>`
 
-**The prose grammar is off until you register a renderer (#78).** `$…$`-style
-delimiters in ordinary prose have realistic non-math readings (`set $PATH$
-properly`, prices), so by default they stay literal text and output is
-byte-identical to a math-free build — no pending scaffolding that nothing will
-hydrate. `setMathRenderer(backend)` (which `installKatex()` / `loadKatex()`
-call for you) turns the prose grammar on; `setMathRenderer(null)` restores the
-literal reading. `setMathSyntax(true | false | null)` is the explicit override:
-`true` forces the grammar on without a renderer (scaffolding-only hosts that
-hydrate elsewhere), `false` forces it off even with a renderer (KaTeX for
-fences only), `null` — the default — defers to renderer registration. Set it
-once, before the first render; a mid-stream flip only affects regions rendered
-afterwards, so recreate the streaming renderer for a clean switch. The
-explicitly labeled ```` ```math ```` **fence is never gated** — like a
-```` ```mermaid ```` fence, it is unambiguous author intent.
+**The prose grammar is opt-in via `mathSyntax` (#78).** `$…$`-style delimiters in
+ordinary prose have realistic non-math readings (`set $PATH$ properly`, prices),
+so by default they stay literal text and output is byte-identical to a math-free
+build — no pending scaffolding that nothing will hydrate. Turn the prose grammar
+on **explicitly** with the `mathSyntax` config field:
+
+- `{ mathSyntax: true }` — force the grammar on (the whole opt-in; a scaffolding-
+  only host can render `$…$` even before a renderer exists and hydrate later).
+- `{ mathSyntax: false }` — force it off (KaTeX for fences only).
+- `{ mathSyntax: null }` — the default, equivalent to `false`: the prose grammar
+  stays off. Providing a math renderer no longer flips it on implicitly, so a host
+  that wants prose math sets `{ mathSyntax: true }` explicitly.
+
+The setting is read by the shared tokenizer, so a mid-stream flip only affects
+regions (re)rendered afterwards — recreate the streaming renderer (its config is
+captured at construction) for a clean switch. The explicitly labeled
+```` ```math ```` **fence is never gated** — like a ```` ```mermaid ```` fence,
+it is unambiguous author intent.
 
 With the grammar on: single-dollar math carries remark-math's currency
 guards — no whitespace just inside the delimiters and no digit right after the
@@ -248,16 +288,34 @@ models emit bracket delimiters — gated to non-empty bodies so the spec suites
 still pass.)
 
 The core ships **zero KaTeX code**: without a backend, pending math shows its
-escaped TeX source. Register the KaTeX backend (an optional peer dependency you
-install) and hydrate after the sink, exactly like mermaid — one call activates
-the grammar and the renderer together:
+escaped TeX source. The KaTeX backend (an optional peer dependency you install)
+is *asynchronous*, so it does not run during the synchronous render — it flows in
+via `hydrate()` after the pending scaffolding is on the page. `loadKatex()`
+**returns** the `MathRenderer`; turn the prose grammar on with `mathSyntax: true`
+and pass the renderer as `mathRenderer`:
+
+```ts
+import { StreamingMarkdownRenderer } from '@copse/streaming-markdown'
+
+const { loadKatex } = await import('@copse/streaming-markdown/math/katex')
+const mathRenderer = await loadKatex() // returns the backend; library loads lazily
+
+const renderer = new StreamingMarkdownRenderer(el, { mathSyntax: true, mathRenderer })
+renderer.update(text)
+await renderer.hydrate() // pending → rendered KaTeX HTML; returns { math, diagrams } counts
+```
+
+For at-rest / non-`StreamingMarkdownRenderer` flows, render with
+`{ mathSyntax: true }` and hydrate the settled DOM with the standalone free
+function, passing the renderer via options:
 
 ```ts
 import { hydratePendingMath } from '@copse/streaming-markdown'
 
 const { loadKatex } = await import('@copse/streaming-markdown/math/katex')
-await loadKatex()                  // registers the backend; library loads lazily
-await hydratePendingMath(messageEl) // pending → rendered KaTeX HTML
+const renderer = await loadKatex()
+// …render with { mathSyntax: true }, then after the scaffolding is in the DOM:
+await hydratePendingMath(messageEl, { renderer }) // pending → rendered KaTeX HTML
 ```
 
 Don't forget KaTeX's **stylesheet and fonts** (`katex/dist/katex.min.css`) —
@@ -275,26 +333,29 @@ like mermaid's `transformSvg`.
 
 Fence handlers extend *block* syntax; **inline passes** extend *inline* syntax —
 Pandoc-style citations `[@key]`, `==highlights==`, emoji shortcodes — without
-forking the fixed inline pipeline. Register ordered passes with `setInlinePasses`:
+forking the fixed inline pipeline. Supply ordered passes with the `inlinePasses`
+config field:
 
 ```ts
-import { setInlinePasses, escapeHtml } from '@copse/streaming-markdown'
+import { renderMarkdown, escapeHtml } from '@copse/streaming-markdown'
 
-setInlinePasses([
-  {
-    name: 'citations',
-    stage: 'before-links', // consume [@key] before it parses as a link label (Pandoc order)
-    apply: (text, ctx) =>
-      text.replace(/\[@([\w.-]+)\]/g, (_m, key) =>
-        // ctx.emit shields trusted HTML from later passes and the escape step.
-        ctx.emit(`<cite class="citation">@${escapeHtml(key)}</cite>`)),
-    // Optional streaming hold: don't flash a half-open `[@doe` mid-stream.
-    holdStart: (line) => {
-      const i = line.lastIndexOf('[@')
-      return i === -1 ? line.length : i
+renderMarkdown(md, {
+  inlinePasses: [
+    {
+      name: 'citations',
+      stage: 'before-links', // consume [@key] before it parses as a link label (Pandoc order)
+      apply: (text, ctx) =>
+        text.replace(/\[@([\w.-]+)\]/g, (_m, key) =>
+          // ctx.emit shields trusted HTML from later passes and the escape step.
+          ctx.emit(`<cite class="citation">@${escapeHtml(key)}</cite>`)),
+      // Optional streaming hold: don't flash a half-open `[@doe` mid-stream.
+      holdStart: (line) => {
+        const i = line.lastIndexOf('[@')
+        return i === -1 ? line.length : i
+      },
     },
-  },
-])
+  ],
+})
 ```
 
 - **Stage.** `before-links` (default) runs after emphasis/strikethrough and before
@@ -309,7 +370,7 @@ setInlinePasses([
   `==foo`) from flashing raw mid-stream — the same mechanism as the built-in
   strikethrough hold.
 - **The sanitizer is still the gate.** Emitted tags/attributes outside the core
-  allowlist need `setSanitizeExtension` (below).
+  allowlist need `sanitizeExtension` (below).
 
 With no passes registered the pipeline is unchanged and output is byte-identical.
 
@@ -320,10 +381,10 @@ unless imported) and ships a GitHub/gemoji-aligned table so `:shortcode:`s an LL
 emits resolve to the glyph GitHub would render:
 
 ```ts
-import { setInlinePasses } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 import { emojiInlinePass } from '@copse/streaming-markdown/inline/emoji'
 
-setInlinePasses([emojiInlinePass]) // once, before the first render
+renderMarkdown(md, { inlinePasses: [emojiInlinePass] })
 ```
 
 It obeys the full contract for free: `` `:smile:` `` and `\:smile:` stay literal,
@@ -346,19 +407,24 @@ limitation, not a bug in this renderer (the reference implementation produces th
 same literal output), so it is an **extension**, off by default. A post-process
 inline pass cannot fix it — by the time passes run, the `**` have already been
 left as text — so it is a default-off hook in the flanking classifier instead.
-Turn it on (once, before the first render) and it also stops a run-together bare
-autolink at the first full-width mark (`https://example.com。次` → link + prose):
+Turn it on by spreading the exported `cjkFriendlyConfig` fragment into the render
+config; it also stops a run-together bare autolink at the first full-width mark
+(`https://example.com。次` → link + prose):
 
 ```ts
-import { setCjkFriendly } from '@copse/streaming-markdown/cjk'
+import { renderMarkdown } from '@copse/streaming-markdown'
+import { cjkFriendlyConfig } from '@copse/streaming-markdown/cjk'
 
-setCjkFriendly(true) // markdown-cjk-friendly emphasis + autolink boundaries
+renderMarkdown(md, { ...cjkFriendlyConfig }) // cjk-friendly emphasis + autolink boundaries
 ```
 
-Like the other optional backends, the range table lives behind its own entry —
-nothing is pulled into your bundle unless you import `…/cjk`. With it off (the
-default), Latin output and the CommonMark/GFM conformance suites are
-byte-identical. `setCjkFriendly(false)` restores stock flanking.
+`cjkFriendlyConfig` is a small object of two config fields
+(`flankingPunctuationExclusion`, `bareUrlCjkBoundary`) both pointing at the
+built-in CJK-punctuation predicate — spread it alongside your other config, or
+set those fields yourself for a custom range. Like the other optional backends,
+the range table lives behind its own entry — nothing is pulled into your bundle
+unless you import `…/cjk`. Omit it (the default) and Latin output and the
+CommonMark/GFM conformance suites are byte-identical.
 
 **Host layer — CSS.** Line breaking (ideographs wrap between any two characters,
 Kinsoku start/end constraints), inter-script spacing (the gap between CJK and
@@ -386,15 +452,16 @@ navigation, `rel` policy) without hard-coding it into the parser.
 
 The built-in default is **neutral** (#112): rendered anchors carry only
 `href`/`title` and no `target`, `rel`, `class`, or `data-*` attributes, so the
-"just render this" path stays host-agnostic. Install your own decorator to add
-routing:
+"just render this" path stays host-agnostic. Pass your own decorator as the
+`linkDecorator` config field to add routing:
 
 ```ts
-import { setLinkDecorator } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 
-setLinkDecorator(({ href, isWorkspace, title }) =>
-  isWorkspace ? ` data-nav="${href}"` : ` target="_blank" rel="noopener noreferrer"`,
-)
+renderMarkdown(md, {
+  linkDecorator: ({ href, isWorkspace, title }) =>
+    isWorkspace ? ` data-nav="${href}"` : ` target="_blank" rel="noopener noreferrer"`,
+})
 ```
 
 The Copse workspace/browser decorator ships behind a host-only subpath. Hosts that
@@ -402,10 +469,10 @@ want the pre-0.10 in-app behaviour (`data-workspace-link` / `data-browser-link`,
 `target="_blank"`) restore it with a single call:
 
 ```ts
-import { setLinkDecorator } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 import { appLinkDecorator } from '@copse/streaming-markdown/host/workspace'
 
-setLinkDecorator(appLinkDecorator)
+renderMarkdown(md, { linkDecorator: appLinkDecorator })
 ```
 
 Attribute *names* a decorator emits must be in the escape and sink allowlists, or
@@ -415,8 +482,9 @@ they are stripped — widen both to match a custom decorator's vocabulary.
 
 The core is image-agnostic: every raw `<img>` is escaped by default. A host that
 wants to allow specific images (e.g. resolving an app artifact URL to an inert
-placeholder) injects a `RawImageRenderer` with `setRawImageRenderer`; return the
-replacement HTML, or `null` to leave the tag escaped. `normalizeHostImagePath`
+placeholder) supplies a `RawImageRenderer` via the `rawImageRenderer` config
+field; return the replacement HTML, or `null` to leave the tag escaped.
+`normalizeHostImagePath`
 is a companion that reduces a volatile `src` (absolute container paths, per-session
 download URLs) to a stable relative path so rendered output stays deterministic
 across machines.
@@ -426,10 +494,11 @@ across machines.
 Link destinations are validated against a scheme allowlist
 (`DEFAULT_SAFE_HREF_SCHEMES`: `http`, `https`, `mailto`, `tel`, `sms`, `ftp`,
 `ftps`, plus scheme-less relative/fragment/path forms); any other scheme —
-including `javascript:` and `data:` — is dropped. Override it with
-`setSafeHrefSchemes([...])` (case-insensitive; pass `null` to restore the
-default). Narrowing the list is always safe; only widen it with schemes that are
-inert as an `href`, never `javascript`/`data`/`vbscript`/`file`.
+including `javascript:` and `data:` — is dropped. Override it with the
+`safeHrefSchemes` config field (`{ safeHrefSchemes: [...] }`, case-insensitive;
+`null` restores the default). Narrowing the list is always safe; only widen it
+with schemes that are inert as an `href`, never
+`javascript`/`data`/`vbscript`/`file`.
 
 ## Link/image origin policy
 
@@ -440,14 +509,16 @@ sink. It is **off by default**: with no policy installed, output is
 byte-identical to today.
 
 ```ts
-import { setLinkImagePolicy } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 
-setLinkImagePolicy({
-  allowedLinkPrefixes: ['https://docs.example.com/', 'https://github.com/acme/'],
-  allowedImagePrefixes: ['https://cdn.example.com/'],
-  defaultOrigin: 'https://app.example.com',
-  allowDataImages: false, // default true — set false to strip base64 data: images
-  // blockedLinkClass / blockedImageClass — optional, default `blocked-link` / `blocked-image`
+renderMarkdown(md, {
+  linkImagePolicy: {
+    allowedLinkPrefixes: ['https://docs.example.com/', 'https://github.com/acme/'],
+    allowedImagePrefixes: ['https://cdn.example.com/'],
+    defaultOrigin: 'https://app.example.com',
+    allowDataImages: false, // default true — set false to strip base64 data: images
+    // blockedLinkClass / blockedImageClass — optional, default `blocked-link` / `blocked-image`
+  },
 })
 ```
 
@@ -467,13 +538,13 @@ backends and under Trusted Types):
   blocked.
 - **`data:` images** are governed solely by `allowDataImages` (default `true`),
   independent of the prefix list; `false` strips them.
-- Pass `null` to remove the policy.
+- Pass `{ linkImagePolicy: null }` to render without the policy.
 
 **Interaction with the scheme allowlist.** These are complementary, not
-redundant: `setSafeHrefSchemes` is the scheme gate (it drops `javascript:`/`data:`
-links *before* an `<a>` is built), and `setLinkImagePolicy` is the origin gate
+redundant: `safeHrefSchemes` is the scheme gate (it drops `javascript:`/`data:`
+links *before* an `<a>` is built), and `linkImagePolicy` is the origin gate
 over the schemes that survive. The origin policy does **not** re-check schemes —
-keep scheme filtering in `setSafeHrefSchemes`.
+keep scheme filtering in `safeHrefSchemes`.
 
 **Bypass hardening.** Prefixes and each candidate URL are compared on their
 WHATWG-canonical serialization (`new URL(...)` with credentials stripped), which
@@ -486,7 +557,7 @@ to punycode). No new runtime dependency is pulled in — the platform URL parser
 does the canonicalization.
 
 The classes it adds (`class` values) are already inside the sink allowlist, so no
-`setSanitizeExtension` widening is needed for the policy itself. For images to
+`sanitizeExtension` widening is needed for the policy itself. For images to
 reach the policy at all, a host must first allow `<img>` through the sink (image
 handling is host-injected — see [Raw images](#raw-images)).
 ## Entity decoding
@@ -500,46 +571,47 @@ classic HTML4 named references plus *all* numeric references (which need no tabl
 exactly **one** example (#25, which packs HTML5-only names like `&Dcaron;` and
 `&HilbertSpace;`).
 
-Need the full HTML5 set? Register a decoder — no change to how you call the
-renderer, decoding routes through it automatically:
+Need the full HTML5 set? Pass a decoder as the `entityDecoder` config field —
+decoding routes through it automatically:
 
 ```ts
-import { setEntityDecoder, browserEntityDecoder } from '@copse/streaming-markdown'
+import { renderMarkdown, browserEntityDecoder } from '@copse/streaming-markdown'
+import { fullEntityDecoder } from '@copse/streaming-markdown/entities/full'
 
 // Option A — the browser's own parser table, via a detached <textarea>.
 // Full HTML5 coverage at ZERO bundle cost. DOM only.
-setEntityDecoder(browserEntityDecoder)
+renderMarkdown(md, { entityDecoder: browserEntityDecoder })
 
 // Option B — the `entities` package (install it as a peer dep). Works anywhere,
 // adds the ~23 KB table to your bundle. Best for Node/SSR without a DOM.
-import { installFullEntityDecoder } from '@copse/streaming-markdown/entities/full'
-installFullEntityDecoder()
+renderMarkdown(md, { entityDecoder: fullEntityDecoder })
 ```
 
 Both are strict (a trailing `;` is required, per CommonMark) and decode any name
-in the built-in set byte-identically to the full table.
+in the built-in set byte-identically to the full table. (The `entities/full`
+entry also exports `installFullEntityDecoder()` if you have a legacy call site,
+but the config field is the recommended path.)
 
-Just need a handful of extra names? Extend the built-in set instead of shipping
-the whole table:
+Just need a handful of extra names? Add them for a render with the
+`namedEntities` config field instead of shipping the whole table:
 
 ```ts
-import { addNamedEntities } from '@copse/streaming-markdown'
+import { renderMarkdown } from '@copse/streaming-markdown'
 
-addNamedEntities({ checkmark: '✓', myco: '🌱' }) // keys are bare names, no &/;
+renderMarkdown(md, { namedEntities: { checkmark: '✓', myco: '🌱' } }) // bare names, no &/;
 ```
 
-`addNamedEntities` merges (user entries win on collision), `setNamedEntities`
-replaces the user layer, `getNamedEntities` returns the effective set, and
-`resetEntityDecoder` restores the default decoder and clears user names. These
-affect the built-in decoder only — a `setEntityDecoder` decoder owns its own set.
+`namedEntities` supplies the user layer for that render (its entries win over the
+252 built-ins on collision). It affects the built-in decoder only — an
+`entityDecoder` you pass owns its own set.
 
 ## Widening the sanitizer allowlist
 
 The sink allowlist in `sanitize.ts` mirrors exactly what the renderer emits and
 is the security gate. If a host plug-in emits tags/attributes outside it (a custom
 fence handler's scaffolding, a decorator's attribute, an artifact `<img>`), widen
-the sink with `setSanitizeExtension` — and keep the additions as narrow as the
-injected output. `onElement` runs for every kept element so a host can lock down
+the sink with the `sanitizeExtension` config field — and keep the additions as
+narrow as the injected output. `onElement` runs for every kept element so a host can lock down
 its own tags. Note the core gate strips any `id` outside the renderer's own
 footnote shape (`fn-…`/`fnref-…`); a host that injects other ids must re-set
 them from its `onElement` hook (which runs after the strip).

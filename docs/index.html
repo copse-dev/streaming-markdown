@@ -968,9 +968,9 @@
     .compare-panel-body .shiki-strikethrough { text-decoration: line-through; }
 
     /* ── Highlighter toggle (hljs ↔ Shiki) ───────────────────
-       A segmented control demonstrating the pluggable setCodeHighlighter
-       registry: flipping it re-registers the backend and re-renders so fences
-       upgrade in place. */
+       A segmented control demonstrating the pluggable `codeHighlighter` config:
+       flipping it points the render config at the other backend and re-renders
+       so fences upgrade in place. */
     .hl-toggle {
       display: inline-flex;
       align-items: center;
@@ -1268,13 +1268,13 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
         <div class="snippet-card-header">
           <span>Sanitizer backend</span> — swap in DOMPurify for Node/jsdom
         </div>
-        <pre><code><span class="kw">import</span> { <span class="fn">setSanitizerBackend</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown'</span>
+        <pre><code><span class="kw">import</span> { <span class="fn">renderMarkdown</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown'</span>
 <span class="kw">import</span> { <span class="fn">dompurifyBackend</span> }
   <span class="kw">from</span> <span class="str">'@copse/streaming-markdown/sanitizers/dompurify'</span>
 
-<span class="cmt">// Register once before the first render.</span>
+<span class="cmt">// Name the backend in the per-render config.</span>
 <span class="cmt">// Default is the native Sanitizer API (zero-dependency).</span>
-<span class="fn">setSanitizerBackend</span>(dompurifyBackend)</code></pre>
+<span class="fn">renderMarkdown</span>(md, { <span class="prop">sanitizerBackend</span>: dompurifyBackend })</code></pre>
       </div>
     </div>
   </div>
@@ -1309,10 +1309,11 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
 <span class="kw">const</span> { <span class="fn">loadHighlightjs</span> } = <span class="kw">await</span> <span class="fn">import</span>(
   <span class="str">'@copse/streaming-markdown/highlighters/highlightjs'</span>
 )
-<span class="kw">await</span> <span class="fn">loadHighlightjs</span>() <span class="cmt">// registers the backend</span>
+<span class="kw">const</span> highlighter = <span class="kw">await</span> <span class="fn">loadHighlightjs</span>()
 
-<span class="cmt">// re-render: plain fences upgrade to token spans</span>
-<span class="fn">rerender</span>()</code></pre>
+<span class="cmt">// re-render with the backend in config: plain</span>
+<span class="cmt">// fences upgrade to token spans</span>
+<span class="fn">rerender</span>({ <span class="prop">codeHighlighter</span>: highlighter })</code></pre>
     </div>
 
     <div class="snippet-card">
@@ -1324,10 +1325,10 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
 <span class="kw">const</span> { <span class="fn">loadMermaid</span> } = <span class="kw">await</span> <span class="fn">import</span>(
   <span class="str">'@copse/streaming-markdown/diagrams/mermaid'</span>
 )
-<span class="kw">await</span> <span class="fn">loadMermaid</span>() <span class="cmt">// mermaid itself loads on first render</span>
+<span class="kw">const</span> renderer = <span class="kw">await</span> <span class="fn">loadMermaid</span>() <span class="cmt">// mermaid loads on first render</span>
 
 <span class="cmt">// pending &lt;pre class="mermaid"&gt; scaffolding → SVG</span>
-<span class="kw">await</span> <span class="fn">hydratePendingDiagrams</span>(messageEl)</code></pre>
+<span class="kw">await</span> <span class="fn">hydratePendingDiagrams</span>(messageEl, { renderer })</code></pre>
     </div>
 
     <div class="snippet-card">
@@ -1339,10 +1340,11 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
 <span class="kw">const</span> { <span class="fn">loadKatex</span> } = <span class="kw">await</span> <span class="fn">import</span>(
   <span class="str">'@copse/streaming-markdown/math/katex'</span>
 )
-<span class="kw">await</span> <span class="fn">loadKatex</span>() <span class="cmt">// registers the math renderer</span>
+<span class="kw">const</span> renderer = <span class="kw">await</span> <span class="fn">loadKatex</span>()
 
 <span class="cmt">// pending $$…$$ / \\[…\\] scaffolding → rendered KaTeX</span>
-<span class="kw">await</span> <span class="fn">hydratePendingMath</span>(messageEl)</code></pre>
+<span class="cmt">// (prose $…$ needs { mathSyntax: true } at render time)</span>
+<span class="kw">await</span> <span class="fn">hydratePendingMath</span>(messageEl, { renderer })</code></pre>
     </div>
 
     <div class="snippet-card">
@@ -1352,11 +1354,12 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
       <pre><code><span class="kw">const</span> { <span class="fn">loadShiki</span>, <span class="fn">shikiThemeCss</span> } = <span class="kw">await</span> <span class="fn">import</span>(
   <span class="str">'@copse/streaming-markdown/highlighters/shiki'</span>
 )
-<span class="kw">await</span> <span class="fn">loadShiki</span>() <span class="cmt">// registers over setCodeHighlighter</span>
+<span class="kw">const</span> highlighter = <span class="kw">await</span> <span class="fn">loadShiki</span>()
 
 <span class="cmt">// inject the theme palette once (class-based tokens)</span>
 <span class="fn">injectCss</span>(<span class="fn">shikiThemeCss</span>())
-<span class="fn">rerender</span>() <span class="cmt">// fences upgrade in place</span></code></pre>
+<span class="cmt">// re-render with Shiki in config; fences upgrade in place</span>
+<span class="fn">rerender</span>({ <span class="prop">codeHighlighter</span>: highlighter })</code></pre>
     </div>
   </div>
 </div>
@@ -1373,7 +1376,6 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
 import {
   renderStreamingMarkdown,
   StreamingMarkdownRenderer,
-  setSanitizerBackend,
   isBrowserSanitizerSupported,
   dompurifyBackend,
   hydratePendingDiagrams,
@@ -1387,9 +1389,35 @@ import {
   createInputSmoother,
 } from './streaming-markdown.browser.mjs';
 
-// Firefox and older browsers lack the native Sanitizer API (Element.setHTML).
+// The single MarkdownConfig object every render/renderer in this demo is passed
+// (the process-wide `set*` setters are gone — config is injected per render).
+// Fields are filled in below as backends load; the same object reference flows
+// to `renderStreamingMarkdown(partial, renderConfig)` and
+// `new StreamingMarkdownRenderer(host, renderConfig)`, so a later mutation (a
+// highlighter loading, the math grammar switching on) is picked up on the next
+// render without re-plumbing.
+const renderConfig = {};
+
+// Firefox and older browsers lack the native Sanitizer API (Element.setHTML);
+// route those through DOMPurify by naming it as the config's sanitizer backend.
 if (!isBrowserSanitizerSupported()) {
-  setSanitizerBackend(dompurifyBackend);
+  renderConfig.sanitizerBackend = dompurifyBackend;
+}
+
+// Backends captured as they load, then injected via config: the math/diagram
+// renderers flow to hydrate() calls, the highlighters to renderConfig.
+let katexRenderer = null;
+let mermaidRenderer = null;
+let hljsHighlighter = null;
+let shikiHighlighter = null;
+
+// Point renderConfig.codeHighlighter at whichever backend the toggle currently
+// selects, once that backend has loaded. `activeHighlighter` is the single
+// source of truth; both backends also register process-wide when loaded, so a
+// render is highlighted either way — this makes the config path explicit.
+function syncHighlighterConfig() {
+  const hl = activeHighlighter === 'shiki' ? shikiHighlighter : hljsHighlighter;
+  if (hl) renderConfig.codeHighlighter = hl;
 }
 
 // ── Lazy extras: highlight.js + mermaid ────────────────────────────────────
@@ -1427,7 +1455,9 @@ function ensureHighlight() {
   setChips('hljs', 'loading', 'loading grammar chunk…');
   const t0 = performance.now();
   extras.hljs.promise = loadHighlightBackend()
-    .then(() => {
+    .then((highlighter) => {
+      hljsHighlighter = highlighter;
+      syncHighlighterConfig();
       extras.hljs.loaded = true;
       setChips('hljs', 'loaded', `loaded in ${Math.round(performance.now() - t0)} ms`);
       // Upgrade fences that already committed as plain escaped text. The
@@ -1446,10 +1476,14 @@ function ensureMermaid() {
   setChips('mermaid', 'loading', 'loading from CDN…');
   const t0 = performance.now();
   extras.mermaid.promise = loadMermaidBackend()
-    // Warm the actual library now (the backend would otherwise defer the
-    // import-map fetch to the first render) so the chip times the real
-    // network cost and hydration at stream end is instant.
-    .then(() => import('mermaid'))
+    // Capture the DiagramRenderer to pass via config, then warm the actual
+    // library now (the backend would otherwise defer the import-map fetch to the
+    // first render) so the chip times the real network cost and hydration at
+    // stream end is instant.
+    .then((renderer) => {
+      mermaidRenderer = renderer;
+      return import('mermaid');
+    })
     .then(() => {
       extras.mermaid.loaded = true;
       setChips('mermaid', 'loaded', `loaded in ${Math.round(performance.now() - t0)} ms`);
@@ -1468,16 +1502,20 @@ function ensureMermaid() {
   return extras.mermaid.promise;
 }
 
-// Register the KaTeX backend on the first math the stream mentions. loadKatex()
-// also installs the renderer (setMathRenderer), so this flips the `$…$`/`$$…$$`
-// math syntax fully on; katex itself (import-map/CDN) is warmed here so the chip
-// times the real network cost and hydration at stream end is instant.
+// Load the KaTeX backend on the first math the stream mentions and capture the
+// MathRenderer to pass via config to hydrate. Prose `$…$` grammar is turned on
+// separately and explicitly through `renderConfig.mathSyntax` (set in
+// detectExtras); katex itself (import-map/CDN) is warmed here so the chip times
+// the real network cost and hydration at stream end is instant.
 function ensureKatex() {
   if (extras.katex.promise) return extras.katex.promise;
   setChips('katex', 'loading', 'loading from CDN…');
   const t0 = performance.now();
   extras.katex.promise = loadKatexBackend()
-    .then(() => import('katex'))
+    .then((renderer) => {
+      katexRenderer = renderer;
+      return import('katex');
+    })
     .then(() => {
       extras.katex.loaded = true;
       setChips('katex', 'loaded', `loaded in ${Math.round(performance.now() - t0)} ms`);
@@ -1505,7 +1543,9 @@ function ensureShiki() {
   setChips('shiki', 'loading', 'loading from CDN…');
   const t0 = performance.now();
   extras.shiki.promise = loadShikiBackend({ langs: SHIKI_LANGS })
-    .then(() => {
+    .then((highlighter) => {
+      shikiHighlighter = highlighter;
+      syncHighlighterConfig();
       extras.shiki.loaded = true;
       injectShikiThemeCss();
       setChips('shiki', 'loaded', `loaded in ${Math.round(performance.now() - t0)} ms`);
@@ -1541,16 +1581,20 @@ function detectExtras(partial) {
   if (activeHighlighter === 'shiki' && !extras.shiki.promise
       && /```(?!mermaid\b)[a-z0-9]/i.test(partial)) ensureShiki();
   // Any of the four math forms: $$…$$, \[…\], inline $…$ / \(…\), or a ```math
-  // fence. Registering the backend early flips prose math on before it settles.
-  if (!extras.katex.promise
-      && /\$\$|\\\[|\\\(|```math|\$[^$\n]+\$/.test(partial)) ensureKatex();
+  // fence. Turn the prose `$…$` grammar on via config the moment math appears
+  // (explicit `{ mathSyntax: true }` — the ```math fence renders regardless) and
+  // kick off the backend load so hydration is ready when the stream settles.
+  if (/\$\$|\\\[|\\\(|```math|\$[^$\n]+\$/.test(partial)) {
+    renderConfig.mathSyntax = true;
+    if (!extras.katex.promise) ensureKatex();
+  }
 }
 
 // Hydrate settled pending math under `root` into KaTeX. No-op until the backend
 // is registered; safe to call repeatedly. Only called on a settled stream.
 function hydrateMath(root) {
   if (!extras.katex.loaded || !root) return;
-  hydratePendingMath(root).catch(() => {});
+  hydratePendingMath(root, { renderer: katexRenderer }).catch(() => {});
 }
 
 // Hydrate settled ```mermaid scaffolding under `root` into SVG. No-op until
@@ -1558,7 +1602,7 @@ function hydrateMath(root) {
 // root whose stream has ended, so no container is still forming.
 function hydrateDiagrams(root) {
   if (!extras.mermaid.loaded || !root) return;
-  hydratePendingDiagrams(root).catch(() => {});
+  hydratePendingDiagrams(root, { renderer: mermaidRenderer }).catch(() => {});
 }
 
 // ── Install badge: click to select the command (and copy it) ────────────────
@@ -1990,7 +2034,7 @@ function heroReset() {
   heroOutput.innerHTML = '';
   heroOutput.classList.remove('no-settle');
   heroOutput.classList.add('is-streaming');
-  heroRenderer = new StreamingMarkdownRenderer(heroOutput);
+  heroRenderer = new StreamingMarkdownRenderer(heroOutput, renderConfig);
   heroPos = 0;
   heroUpdates = 0;
   heroStart = performance.now();
@@ -2093,7 +2137,7 @@ function startCompare() {
   stringOutput.classList.add('is-streaming');
   domOutput.classList.add('is-streaming');
   fidelityBadge.style.visibility = 'hidden';
-  domRenderer = new StreamingMarkdownRenderer(domOutput);
+  domRenderer = new StreamingMarkdownRenderer(domOutput, renderConfig);
 
   compareText = text;
   compareStreaming = true;
@@ -2131,7 +2175,7 @@ function startCompare() {
     detectExtras(partial);
 
     const t0 = performance.now();
-    const html = renderStreamingMarkdown(partial);
+    const html = renderStreamingMarkdown(partial, renderConfig);
     const stringMs = performance.now() - t0;
     stringOutput.innerHTML = html;
 
@@ -2167,17 +2211,17 @@ function rerenderAfterHighlight() {
     // this stream skip their settle fade too; next loop restores it.)
     heroOutput.classList.add('no-settle');
     heroOutput.innerHTML = '';
-    heroRenderer = new StreamingMarkdownRenderer(heroOutput);
+    heroRenderer = new StreamingMarkdownRenderer(heroOutput, renderConfig);
     heroRenderer.update(heroText.slice(0, heroPos));
     heroOutput.scrollTop = heroOutput.scrollHeight;
     if (!heroStreaming) { hydrateDiagrams(heroOutput); hydrateMath(heroOutput); }
   }
   if (compareText && comparePos > 0) {
     const partial = compareText.slice(0, comparePos);
-    stringOutput.innerHTML = renderStreamingMarkdown(partial);
+    stringOutput.innerHTML = renderStreamingMarkdown(partial, renderConfig);
     domOutput.classList.add('no-settle');
     domOutput.innerHTML = '';
-    domRenderer = new StreamingMarkdownRenderer(domOutput);
+    domRenderer = new StreamingMarkdownRenderer(domOutput, renderConfig);
     domRenderer.update(partial);
     stringOutput.scrollTop = stringOutput.scrollHeight;
     domOutput.scrollTop = domOutput.scrollHeight;
@@ -2191,9 +2235,10 @@ function rerenderAfterHighlight() {
 }
 
 // ── Highlighter toggle (hljs ↔ Shiki) ───────────────────────────────────────
-// Demonstrates the pluggable setCodeHighlighter registry. Selecting a backend
-// registers it (loading it lazily the first time), then re-renders both the
-// hero and comparison panes so already-committed fences upgrade in place —
+// Demonstrates the pluggable `codeHighlighter` config. Selecting a backend
+// loads it lazily the first time and points renderConfig.codeHighlighter at it,
+// then re-renders both the hero and comparison panes so committed fences upgrade
+// in place —
 // exactly the LAZY-LOADING.md rerender() step, reused across highlighters.
 const hlToggleGroup = document.getElementById('hl-toggle-group');
 hlToggleGroup.addEventListener('click', (e) => {
@@ -2204,7 +2249,14 @@ hlToggleGroup.addEventListener('click', (e) => {
   hlToggleGroup.querySelectorAll('button').forEach((b) =>
     b.classList.toggle('active', b.dataset.hl === which));
   const ready = which === 'shiki' ? ensureShiki() : useHighlightjs();
-  ready.then(() => rerenderAfterHighlight());
+  ready.then((highlighter) => {
+    // useHighlightjs() resolves to the hljs backend; ensureShiki() resolves once
+    // shikiHighlighter is captured. Point the config at the now-active backend,
+    // then re-render so committed fences upgrade in place.
+    if (which === 'hljs' && highlighter) hljsHighlighter = highlighter;
+    syncHighlighterConfig();
+    rerenderAfterHighlight();
+  });
 });
 
 // The DOM emitter wraps committed blocks in structural containers
@@ -2326,8 +2378,8 @@ function startSmoothDemo() {
   smoothOutput.classList.add('is-streaming');
   smoothFidelityBadge.style.visibility = 'hidden';
 
-  rawRenderer = new StreamingMarkdownRenderer(rawOutput);
-  smoothRenderer = new StreamingMarkdownRenderer(smoothOutput);
+  rawRenderer = new StreamingMarkdownRenderer(rawOutput, renderConfig);
+  smoothRenderer = new StreamingMarkdownRenderer(smoothOutput, renderConfig);
 
   let smoothFrames = 0;
   activeSmoother = createInputSmoother({

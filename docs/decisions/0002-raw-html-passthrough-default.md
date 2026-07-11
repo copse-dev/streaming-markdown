@@ -159,8 +159,8 @@ before the body streams) still streams normally.
 
 `details`/`summary` are **not on the sink allowlist**, so a host that has not
 widened it sees them unwrapped to text either way; the hold and guard matter for a
-host that allowlists them (via `setSanitizeExtension`) to get real collapsible
-sections. No sub-case required a feature-wide fallback to escaping.
+host that allowlists them (via the `sanitizeExtension` config field) to get real
+collapsible sections. No sub-case required a feature-wide fallback to escaping.
 
 ## Security argument
 
@@ -190,9 +190,10 @@ add a sink.
   path, or who call `sanitizeRenderedMarkdown` on `renderMarkdown` output (the
   documented contract), need **no change** and simply gain correct rendering of
   embedded HTML.
-- **Opt back into escaping** with `htmlPolicy: 'escape'` on `renderMarkdown` /
-  the streaming entry points, or the process-wide `setHtmlPolicy('escape')`.
-  Escape mode is guaranteed to reproduce today's output byte-for-byte (the
+- **Opt back into escaping** with `htmlPolicy: 'escape'` in the render config on
+  `renderMarkdown` / the streaming entry points (or captured on a
+  `StreamingMarkdownRenderer`). Escape mode is guaranteed to reproduce today's
+  output byte-for-byte (the
   CommonMark + GFM conformance harnesses and the raw-HTML boundary suite are
   pinned to `'escape'` as executable proof).
 - **A host writing unsanitized `renderMarkdown` strings to a sink must either
