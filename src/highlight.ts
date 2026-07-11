@@ -1,3 +1,4 @@
+import { activeConfig } from './config.ts'
 import { escapeHtml } from './escape.ts'
 
 // PROTOTYPE (#lazy-load): this module is the *core* of syntax highlighting and
@@ -83,33 +84,14 @@ function resolveLanguage(lang: string): string | null {
   return KNOWN_LANGUAGES.has(resolved) ? resolved : null
 }
 
-let codeHighlighter: CodeHighlighter | null = null
-
 /**
- * Register the active {@link CodeHighlighter} (or `null` to fall back to escaped
- * plain text). Set it once, before the first render that should show token spans —
- * synchronously from `@copse/streaming-markdown/highlighters/highlightjs`:
- *
- * ```ts
- * import { setCodeHighlighter } from '@copse/streaming-markdown'
- * import { highlightjsHighlighter } from '@copse/streaming-markdown/highlighters/highlightjs'
- * setCodeHighlighter(highlightjsHighlighter)
- * ```
- *
- * or lazily (highlight.js is fetched as a separate chunk only when this resolves):
- *
- * ```ts
- * import { loadHighlightjs } from '@copse/streaming-markdown/highlighters/highlightjs'
- * await loadHighlightjs() // internally calls setCodeHighlighter
- * ```
+ * The {@link CodeHighlighter} configured for the current render (`null` when none,
+ * i.e. escaped-plain-text fallback). Set it per render via
+ * `MarkdownConfig.codeHighlighter` — obtain a backend from its `load*` entry
+ * (`@copse/streaming-markdown/highlighters/highlightjs` or `.../shiki`).
  */
-export function setCodeHighlighter(highlighter: CodeHighlighter | null): void {
-  codeHighlighter = highlighter
-}
-
-/** The active {@link CodeHighlighter}, or `null` when none has been registered. */
 export function getCodeHighlighter(): CodeHighlighter | null {
-  return codeHighlighter
+  return activeConfig().codeHighlighter ?? null
 }
 
 /**
@@ -126,7 +108,7 @@ export function highlightFenceCode(code: string, lang: string): string {
   // fed to the highlighter, which would otherwise collapse or mis-detect them.
   if (code.trim() === '') return escapeHtml(code)
 
-  const highlighter = codeHighlighter
+  const highlighter = activeConfig().codeHighlighter
   const language = resolveLanguage(lang)
 
   // No backend yet: plain-text fallback. The `hljs lang-*` class is still applied

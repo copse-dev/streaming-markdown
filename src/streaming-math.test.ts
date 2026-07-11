@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { hydratePendingMath } from './math.ts'
 import type { MathRenderer } from './math.ts'
-import { setMathSyntax } from './math-syntax.ts'
+import { setDefaultConfig } from './config.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import {
@@ -16,11 +16,11 @@ import {
 // forming pending-math state instead of raw delimiters; half-open inline `$x+`
 // holds via pendingHoldIndex; and both emitters converge on the at-rest render.
 //
-// Math prose syntax is gated on `setMathSyntax` (#78); this file tests
-// streaming behaviour with the grammar active, so force it on for the whole
-// file. The gate itself (holds off, byte-identical output) is covered by
+// Math prose syntax is gated via `MarkdownConfig.mathSyntax` (#78); this file
+// tests streaming behaviour with the grammar active, so force it on for the
+// whole file. The gate itself (holds off, byte-identical output) is covered by
 // math-syntax.test.ts.
-setMathSyntax(true)
+setDefaultConfig({ mathSyntax: true })
 
 /** Visible streaming HTML (committed + forming + live tail), as the fuzz test extracts it. */
 function extractStreamingDisplay(host: HTMLElement): string {

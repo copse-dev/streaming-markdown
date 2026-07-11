@@ -20,8 +20,7 @@ export { renderMarkdown, renderMarkdownUnsafe, type RenderMarkdownOptions } from
 // *backend* tier (sanitizer/highlighter/math/diagram/entity/inline-pass) still
 // registers globally via its `set*`/`install*`/`load*` seam so async hydration
 // can read it after the render.
-export { type MarkdownConfig } from './config.ts'
-export { type RenderPolicyOptions } from './render-policies.ts'
+export { type MarkdownConfig, setDefaultConfig } from './config.ts'
 // Raw-HTML policy (#600). `'passthrough'` (default) emits well-formed raw HTML
 // for the sink sanitizer to arbitrate; `'escape'` literalizes it. Scope it with
 // `renderMarkdown`/streaming `htmlPolicy`. See
@@ -33,9 +32,11 @@ export {
   StreamingMarkdownRenderer,
   type StreamingMarkdownOptions,
 } from './streaming.ts'
-// The sanitizer backend is scoped per render via `MarkdownConfig.sanitizerBackend`
-// (native browser Sanitizer by default, or the DOMPurify entry's `dompurifyBackend`),
-// as is the allowlist extension via `MarkdownConfig.sanitizeExtension`.
+// The sanitizer backend is a runtime *capability* (native browser Sanitizer by
+// default; the DOMPurify entry's `dompurifyBackend` for Node/jsdom/SSR). A
+// non-browser host installs it once with `setDefaultConfig({ sanitizerBackend })`;
+// a render's `MarkdownConfig.sanitizerBackend` overrides it, as does the allowlist
+// extension via `sanitizeExtension`.
 export {
   sanitizeRenderedMarkdown,
   type SanitizedHtml,
@@ -101,7 +102,6 @@ export {
   type EntityDecoder,
   getEntityDecoder,
   getNamedEntities,
-  resetEntityDecoder,
 } from './entity-decoder.ts'
 // Syntax highlighting is a pluggable backend. The core (`highlight.ts`) carries
 // no highlight.js code and renders escaped plain text until a highlighter is

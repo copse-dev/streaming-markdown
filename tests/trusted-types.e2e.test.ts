@@ -37,9 +37,6 @@ type SMApi = typeof import('../src/index.ts') & {
   sanitizeRenderedMarkdownInto: (typeof import('../src/sanitize.ts'))['sanitizeRenderedMarkdownInto']
   setPresanitizedHtml: (typeof import('../src/html-sink.ts'))['setPresanitizedHtml']
   dompurifyBackend: (typeof import('../src/sanitize-dompurify.ts'))['dompurifyBackend']
-  // Internal sanitizer registration exposed by the harness bundle (no longer on
-  // the public API — the sink helper reads the process-wide backend).
-  setSanitizerBackend: (typeof import('../src/sanitize.ts'))['setSanitizerBackend']
 }
 declare const SM: SMApi
 
@@ -87,7 +84,7 @@ describe('Trusted Types enforcement e2e (real Chromium)', { skip }, () => {
 
   it('streaming DOM emitter renders and converges under enforcement', async () => {
     const result = await page.evaluate(() => {
-      SM.setSanitizerBackend(SM.dompurifyBackend)
+      SM.setDefaultConfig({ sanitizerBackend: SM.dompurifyBackend })
       const md =
         '# Title\n\nsome **bold** text with `code`\n\n- item one\n- item two\n\n' +
         '| a | b |\n|---|---|\n| **1** | 2 |\n\n```ts\nconst x = 1\n```\n'
@@ -116,15 +113,17 @@ describe('Trusted Types enforcement e2e (real Chromium)', { skip }, () => {
   it('string innerHTML path (backend without sanitizeInto) works via the default policy', async () => {
     const result = await page.evaluate(() => {
       const inner = SM.dompurifyBackend
-      SM.setSanitizerBackend({
-        sanitize: (h: string, c: Parameters<SMApi['dompurifyBackend']['sanitize']>[1]) =>
-          inner.sanitize(h, c),
+      SM.setDefaultConfig({
+        sanitizerBackend: {
+          sanitize: (h: string, c: Parameters<SMApi['dompurifyBackend']['sanitize']>[1]) =>
+            inner.sanitize(h, c),
+        },
       })
       const el = document.createElement('div')
       document.body.append(el)
       SM.setSanitizedHtml(el, '<p>string path <strong>under TT</strong></p><script>x()<\/script>')
       const html = el.innerHTML
-      SM.setSanitizerBackend(SM.dompurifyBackend)
+      SM.setDefaultConfig({ sanitizerBackend: SM.dompurifyBackend })
       return html
     }, null)
     assert.equal(result, '<p>string path <strong>under TT</strong></p>')
@@ -132,7 +131,7 @@ describe('Trusted Types enforcement e2e (real Chromium)', { skip }, () => {
 
   it('mermaid hydration accepts host TrustedHTML and fails closed on plain strings', async () => {
     const result = await page.evaluate(async () => {
-      SM.setSanitizerBackend(SM.dompurifyBackend)
+      SM.setDefaultConfig({ sanitizerBackend: SM.dompurifyBackend })
       const diagramRenderer = {
         render: () => Promise.resolve({ svg: '<svg data-diagram="ok"><g></g></svg>' }),
       }
@@ -178,7 +177,7 @@ describe('Trusted Types enforcement e2e (real Chromium)', { skip }, () => {
   it('CSP without the dompurify policy degrades to empty output, not a crash', async () => {
     const strictPage = await browser.newBundlePage(ttCspMeta('streaming-markdown'))
     const result = await strictPage.evaluate(() => {
-      SM.setSanitizerBackend(SM.dompurifyBackend)
+      SM.setDefaultConfig({ sanitizerBackend: SM.dompurifyBackend })
       const el = document.createElement('div')
       el.append(document.createElement('p'))
       document.body.append(el)

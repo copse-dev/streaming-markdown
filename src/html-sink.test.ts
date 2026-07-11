@@ -12,19 +12,20 @@ import {
   setHostTrustedHtml,
   setPresanitizedHtml,
   setSanitizedHtml,
-  setTrustedTypesPolicy,
   type TrustedTypesPolicy,
 } from './html-sink.ts'
-import { asSanitizedHtml, sanitizeRenderedMarkdown, setSanitizerBackend } from './sanitize.ts'
+import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizerBackend } from './sanitize.ts'
 import { dompurifyBackend } from './sanitize-dompurify.ts'
+import { withConfig } from './config.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
 
 // The jsdom setup registers the DOMPurify backend, whose `sanitizeInto` node
 // path bypasses `innerHTML` (and therefore the Trusted Types policy) entirely.
-// Tests that exercise the policy string path pin a string-only backend — the
-// same shape as a custom host backend without a node path.
-function forceStringSanitizePath(): void {
-  setSanitizerBackend({ sanitize: (html, config) => dompurifyBackend.sanitize(html, config) })
+// Tests that exercise the policy string path scope in a string-only backend — the
+// same shape as a custom host backend without a node path. It deliberately omits
+// `sanitizeInto`, so sinks fall back to the sanitize → bless → `innerHTML` path.
+const stringSanitizerBackend: SanitizerBackend = {
+  sanitize: (html, config) => dompurifyBackend.sanitize(html, config),
 }
 
 interface StubPolicy extends TrustedTypesPolicy {
@@ -61,11 +62,11 @@ function installStubTrustedTypes(): { created: StubPolicy[] } {
 }
 
 afterEach(() => {
+  // Removing the `trustedTypes` global changes the factory identity, which
+  // re-arms the module's default-policy probe for the next test. Backend and
+  // Trusted Types policy are per-render config (via `withConfig`), so nothing
+  // else needs restoring here.
   delete (globalThis as Record<string, unknown>)['trustedTypes']
-  // Also re-arms the default-policy probe for the next test.
-  setTrustedTypesPolicy(null)
-  // Restore the backend the jsdom setup registered.
-  setSanitizerBackend(dompurifyBackend)
 })
 
 describe('setSanitizedHtml', () => {
@@ -84,12 +85,12 @@ describe('setSanitizedHtml', () => {
   })
 
   it('lazily creates the default streaming-markdown policy and routes writes through it', () => {
-    forceStringSanitizePath()
-    const { created } = installStubTrustedTypes()
-    setTrustedTypesPolicy(null) // re-probe now that the shim exists
+    const { created } = installStubTrustedTypes() // fresh factory re-arms the probe
     const el = document.createElement('div')
-    setSanitizedHtml(el, '<p>one</p>')
-    setSanitizedHtml(el, '<p>two</p>')
+    withConfig({ sanitizerBackend: stringSanitizerBackend }, () => {
+      setSanitizedHtml(el, '<p>one</p>')
+      setSanitizedHtml(el, '<p>two</p>')
+    })
     assert.equal(created.length, 1, 'policy is created once and reused')
     const policy = created[0]
     assert.ok(policy)
@@ -99,29 +100,30 @@ describe('setSanitizedHtml', () => {
   })
 
   it('prefers a host-injected policy and hands it pre-sanitized markup', () => {
-    forceStringSanitizePath()
     const { created } = installStubTrustedTypes()
     const hostPolicy = makeStubPolicy('my-app#markdown', (s) => s)
-    setTrustedTypesPolicy(hostPolicy)
     const el = document.createElement('div')
-    setSanitizedHtml(el, '<p>keep</p><script>bad()</script>')
+    withConfig(
+      { sanitizerBackend: stringSanitizerBackend, trustedTypesPolicy: hostPolicy },
+      () => setSanitizedHtml(el, '<p>keep</p><script>bad()</script>'),
+    )
     assert.equal(created.length, 0, 'default policy is never created')
     assert.deepEqual(hostPolicy.calls, ['<p>keep</p>'], 'policy input is already sanitized')
     assert.equal(el.innerHTML, '<p>keep</p>')
   })
 
   it('works with a host policy even when no trustedTypes global exists', () => {
-    forceStringSanitizePath()
     const hostPolicy = makeStubPolicy('my-app#markdown', (s) => s)
-    setTrustedTypesPolicy(hostPolicy)
     const el = document.createElement('div')
-    setSanitizedHtml(el, '**not markdown-rendered** <em>em</em>')
+    withConfig(
+      { sanitizerBackend: stringSanitizerBackend, trustedTypesPolicy: hostPolicy },
+      () => setSanitizedHtml(el, '**not markdown-rendered** <em>em</em>'),
+    )
     assert.equal(hostPolicy.calls.length, 1)
     assert.equal(el.innerHTML, '**not markdown-rendered** <em>em</em>')
   })
 
   it('reuses the created default policy after a host set/unset cycle', () => {
-    forceStringSanitizePath()
     // Strict-CSP factory: re-creating a policy name throws (no 'allow-duplicates').
     const created: StubPolicy[] = []
     ;(globalThis as Record<string, unknown>)['trustedTypes'] = {
@@ -134,28 +136,31 @@ describe('setSanitizedHtml', () => {
         return policy
       },
     }
-    setTrustedTypesPolicy(null)
     const el = document.createElement('div')
-    setSanitizedHtml(el, '<p>one</p>') // lazily creates the default policy
-    setTrustedTypesPolicy(makeStubPolicy('my-app#markdown', (s) => s))
-    setSanitizedHtml(el, '<p>two</p>') // host policy takes over
-    setTrustedTypesPolicy(null) // restore the default — must reuse, not re-create
-    setSanitizedHtml(el, '<p>three</p>')
+    // The factory identity stays fixed across the three writes; only the ambient
+    // Trusted Types policy toggles null → host → null, exercising the cache.
+    withConfig({ sanitizerBackend: stringSanitizerBackend }, () => {
+      setSanitizedHtml(el, '<p>one</p>') // lazily creates the default policy
+      withConfig({ trustedTypesPolicy: makeStubPolicy('my-app#markdown', (s) => s) }, () =>
+        setSanitizedHtml(el, '<p>two</p>'), // host policy takes over
+      )
+      setSanitizedHtml(el, '<p>three</p>') // default restored — must reuse, not re-create
+    })
     assert.equal(created.length, 1, 'default policy created exactly once')
     assert.deepEqual(created[0]?.calls, ['<p>one</p>', '<p>three</p>'])
     assert.equal(el.innerHTML, '<p>three</p>')
   })
 
   it('falls back to plain strings when createPolicy is rejected by CSP', () => {
-    forceStringSanitizePath()
     ;(globalThis as Record<string, unknown>)['trustedTypes'] = {
       createPolicy(): never {
         throw new TypeError('Policy "streaming-markdown" disallowed')
       },
     }
-    setTrustedTypesPolicy(null)
     const el = document.createElement('div')
-    setSanitizedHtml(el, '<p>still works</p>')
+    withConfig({ sanitizerBackend: stringSanitizerBackend }, () =>
+      setSanitizedHtml(el, '<p>still works</p>'),
+    )
     assert.equal(el.innerHTML, '<p>still works</p>')
   })
 })
@@ -163,9 +168,10 @@ describe('setSanitizedHtml', () => {
 describe('setSanitizedHtml node path (backend sanitizeInto)', () => {
   it('bypasses innerHTML and the Trusted Types policy entirely', () => {
     const hostPolicy = makeStubPolicy('my-app#markdown', (s) => s)
-    setTrustedTypesPolicy(hostPolicy)
     const el = document.createElement('div')
-    setSanitizedHtml(el, '<p>keep</p><script>bad()</script>')
+    withConfig({ trustedTypesPolicy: hostPolicy }, () =>
+      setSanitizedHtml(el, '<p>keep</p><script>bad()</script>'),
+    )
     assert.equal(hostPolicy.calls.length, 0, 'no policy needed on the node path')
     assert.equal(el.innerHTML, '<p>keep</p>')
   })
@@ -210,9 +216,10 @@ describe('setSanitizedHtml node path (backend sanitizeInto)', () => {
 describe('setPresanitizedHtml', () => {
   it('assigns without re-sanitizing but still blesses through the active policy', () => {
     const hostPolicy = makeStubPolicy('my-app#markdown', (s) => s)
-    setTrustedTypesPolicy(hostPolicy)
     const el = document.createElement('div')
-    setPresanitizedHtml(el, asSanitizedHtml('<p>already sanitized</p>'))
+    withConfig({ trustedTypesPolicy: hostPolicy }, () =>
+      setPresanitizedHtml(el, asSanitizedHtml('<p>already sanitized</p>')),
+    )
     assert.deepEqual(hostPolicy.calls, ['<p>already sanitized</p>'])
     assert.equal(el.innerHTML, '<p>already sanitized</p>')
   })
@@ -250,9 +257,10 @@ describe('setHostTrustedHtml', () => {
 
   it('assigns a TrustedHTML-like value without touching the markdown policy', () => {
     const hostPolicy = makeStubPolicy('my-app#markdown', (s) => s)
-    setTrustedTypesPolicy(hostPolicy)
     const el = document.createElement('div')
-    setHostTrustedHtml(el, { toString: () => '<svg><title>diagram</title></svg>' })
+    withConfig({ trustedTypesPolicy: hostPolicy }, () =>
+      setHostTrustedHtml(el, { toString: () => '<svg><title>diagram</title></svg>' }),
+    )
     assert.equal(hostPolicy.calls.length, 0, 'markdown policy never blesses host markup')
     assert.equal(el.innerHTML, '<svg><title>diagram</title></svg>')
   })
@@ -260,8 +268,7 @@ describe('setHostTrustedHtml', () => {
 
 describe('streaming DOM emitter under Trusted Types', () => {
   it('renders through the default policy end-to-end', () => {
-    const { created } = installStubTrustedTypes()
-    setTrustedTypesPolicy(null)
+    const { created } = installStubTrustedTypes() // fresh factory re-arms the probe
     const host = document.createElement('div')
     const r = new StreamingMarkdownRenderer(host)
     r.update('# Title\n\nsome **bold**')

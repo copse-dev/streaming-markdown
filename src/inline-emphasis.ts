@@ -3,6 +3,7 @@
  * Shared by the at-rest renderer and the streaming hold logic.
  */
 import { trailingEntityHoldStart } from './backslash-escapes.ts'
+import { activeConfig } from './config.ts'
 import { rawHtmlTagHoldStart } from './escape.ts'
 import { footnoteHoldStart } from './footnotes.ts'
 import { getHtmlPolicy } from './html-policy.ts'
@@ -26,25 +27,14 @@ const UNICODE_PUNCTUATION_RE = /[\p{P}\p{S}]/u
  * output and the CommonMark/GFM conformance suites are byte-identical — the
  * predicate below short-circuits before ever calling it.
  */
-let flankingPunctuationExclusion: ((ch: string) => boolean) | null = null
-
-/** Inject (or clear with `null`) the flanking-punctuation exclusion. */
-export function setFlankingPunctuationExclusion(fn: ((ch: string) => boolean) | null): void {
-  flankingPunctuationExclusion = fn
-}
-
-/** The active flanking-punctuation exclusion, or `null`. Snapshot for `withConfig`. */
-export function getFlankingPunctuationExclusion(): ((ch: string) => boolean) | null {
-  return flankingPunctuationExclusion
-}
-
 function isFlankingWhitespace(ch: string): boolean {
   return ch === '' || /\s/.test(ch)
 }
 
 function isFlankingPunctuation(ch: string): boolean {
   if (ch === '' || !UNICODE_PUNCTUATION_RE.test(ch)) return false
-  if (flankingPunctuationExclusion !== null && flankingPunctuationExclusion(ch)) return false
+  const exclusion = activeConfig().flankingPunctuationExclusion
+  if (exclusion != null && exclusion(ch)) return false
   return true
 }
 

@@ -1,7 +1,7 @@
 import '../tests/setup-dom-jsdom.ts'
-import { afterEach, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { type FenceHandler, getFenceHandler, setFenceHandler } from './fence-handlers.ts'
+import type { FenceHandler } from './fence-handlers.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 
 // #144: renderMarkdownCore installs a document-scoped footnote context in a
@@ -21,13 +21,8 @@ const recursiveFootnoteHandler: FenceHandler = {
   },
 }
 
-const BUILTIN_RECURSE = getFenceHandler('recurse')
-
-afterEach(() => setFenceHandler('recurse', BUILTIN_RECURSE))
-
 describe('footnote-context reentrancy (#144)', () => {
   it('a recursive footnote render does not strand the outer context', () => {
-    setFenceHandler('recurse', recursiveFootnoteHandler)
     const md = [
       'Before[^a].',
       '',
@@ -43,7 +38,7 @@ describe('footnote-context reentrancy (#144)', () => {
       '[^b]: note b.',
     ].join('\n')
 
-    const html = renderMarkdownUnsafe(md)
+    const html = renderMarkdownUnsafe(md, { fenceHandlers: { recurse: recursiveFootnoteHandler } })
 
     // The ref BEFORE the nested render links (never in question)…
     assert.match(html, /Before<sup class="footnote-ref"><a href="#fn-a"/)
@@ -66,7 +61,6 @@ describe('footnote-context reentrancy (#144)', () => {
   it('a ref after the nested render resolves even when the outer has no earlier ref', () => {
     // Guards the pure-stranding case: nothing advances the outer context before
     // the nested render, so a null-restore would leave the sole outer ref literal.
-    setFenceHandler('recurse', recursiveFootnoteHandler)
     const md = [
       '```recurse',
       'inner[^x]',
@@ -79,7 +73,7 @@ describe('footnote-context reentrancy (#144)', () => {
       '[^a]: note a.',
     ].join('\n')
 
-    const html = renderMarkdownUnsafe(md)
+    const html = renderMarkdownUnsafe(md, { fenceHandlers: { recurse: recursiveFootnoteHandler } })
     assert.match(html, /After<sup class="footnote-ref"><a href="#fn-a"/)
     assert.doesNotMatch(html, /After\[\^a\]/)
     assert.match(html, /<li id="fn-a">/)

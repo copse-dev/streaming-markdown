@@ -1,3 +1,4 @@
+import { activeConfig } from './config.ts'
 import { decodeEscapedHref } from './escape.ts'
 
 /** A raw `<img>` tag the renderer found in prose, with its parsed attributes. */
@@ -18,18 +19,6 @@ export interface RawImageTag {
  * `sanitizeRenderedMarkdown` — widen its allowlist via `setSanitizeExtension`.
  */
 export type RawImageRenderer = (img: RawImageTag) => string | null
-
-let activeRawImageRenderer: RawImageRenderer | null = null
-
-/** Inject a host {@link RawImageRenderer}; pass `null` to restore the default (escape all images). */
-export function setRawImageRenderer(renderer: RawImageRenderer | null): void {
-  activeRawImageRenderer = renderer
-}
-
-/** The active {@link RawImageRenderer}, or `null`. Snapshot for `withConfig`. */
-export function getRawImageRenderer(): RawImageRenderer | null {
-  return activeRawImageRenderer
-}
 
 function parseHtmlAttributes(tag: string): Record<string, string> {
   const attrs: Record<string, string> = {}
@@ -68,7 +57,7 @@ export interface ExtractedRawImages {
  * through to the renderer's normal raw-HTML escaping.
  */
 export function extractRawImages(text: string): ExtractedRawImages {
-  const renderer = activeRawImageRenderer
+  const renderer = activeConfig().rawImageRenderer
   if (!renderer) return { text, images: [] }
   const images: string[] = []
   const out = text.replace(RAW_IMAGE_RE, (tag) => {

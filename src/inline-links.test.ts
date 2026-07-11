@@ -1,13 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseLinkReferenceDefinitions } from './link-references.ts'
-import {
-  getSafeHrefSchemes,
-  renderInlineLinks,
-  safeLinkHref,
-  setSafeHrefSchemes,
-} from './inline-links.ts'
+import { getSafeHrefSchemes, renderInlineLinks, safeLinkHref } from './inline-links.ts'
 import { renderInlineSpans } from './inline-spans.ts'
+import { withConfig } from './config.ts'
 
 describe('renderInlineLinks', () => {
   it('renders relative inline links with optional titles (#483, #482)', () => {
@@ -116,10 +112,9 @@ describe('safeLinkHref scheme validation', () => {
   })
 })
 
-describe('setSafeHrefSchemes', () => {
-  it('narrows the allowlist and restores it with null', () => {
-    try {
-      setSafeHrefSchemes(['https', 'mailto'])
+describe('safeHrefSchemes config', () => {
+  it('narrows the allowlist for the scope and restores it afterwards', () => {
+    withConfig({ safeHrefSchemes: ['https', 'mailto'] }, () => {
       assert.equal(safeLinkHref('https://example.com'), 'https://example.com')
       assert.equal(safeLinkHref('mailto:a@b.com'), 'mailto:a@b.com')
       // Now outside the narrowed set:
@@ -127,32 +122,25 @@ describe('setSafeHrefSchemes', () => {
       assert.equal(safeLinkHref('tel:+15551234'), null)
       // Relative destinations remain allowed regardless of the scheme set.
       assert.equal(safeLinkHref('/some/path.ts'), '/some/path.ts')
-    } finally {
-      setSafeHrefSchemes(null)
-    }
+    })
+    // Outside the scope the built-in default set is restored.
     assert.equal(safeLinkHref('http://example.com'), 'http://example.com')
     assert.equal(safeLinkHref('tel:+15551234'), 'tel:+15551234')
   })
 
   it('matches configured scheme names case-insensitively', () => {
-    try {
-      setSafeHrefSchemes(['HTTPS'])
+    withConfig({ safeHrefSchemes: ['HTTPS'] }, () => {
       assert.equal(safeLinkHref('https://example.com'), 'https://example.com')
       assert.deepEqual(getSafeHrefSchemes(), ['https'])
-    } finally {
-      setSafeHrefSchemes(null)
-    }
+    })
   })
 
   it('cannot be widened to smuggle a dangerous scheme past decoding (#SECURITY)', () => {
-    try {
-      // Even a caller that (unwisely) allows `javascript` only enables the
-      // literal scheme; an entity-encoded destination still resolves and is
-      // checked against the decoded scheme, so nothing bypasses validation.
-      setSafeHrefSchemes(['https'])
+    // Even a caller that (unwisely) allows `javascript` only enables the
+    // literal scheme; an entity-encoded destination still resolves and is
+    // checked against the decoded scheme, so nothing bypasses validation.
+    withConfig({ safeHrefSchemes: ['https'] }, () => {
       assert.equal(safeLinkHref('&#x6a;avascript:alert(1)'), null)
-    } finally {
-      setSafeHrefSchemes(null)
-    }
+    })
   })
 })

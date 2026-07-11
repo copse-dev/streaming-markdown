@@ -1,80 +1,74 @@
-// Config-injected renderer API (#145/#137/#147).
+// Config-injected renderer API (#145/#137/#147) — the ambient render context.
 //
-// This is the replacement for the config-epoch mechanism. Instead of the
-// process-wide `set*` functions plus a global epoch counter that streaming
-// caches watched for changes, a host passes a `MarkdownConfig` object to the
-// entry point (`renderMarkdown(raw, config)`, `new StreamingMarkdownRenderer(
-// host, config)`). The config is applied to the module-global slots for the
-// duration of one *synchronous* render via the same save-set-restore seam that
-// `withRenderPolicies` (#137, ADR 0003) already uses for the security/behavioural
-// policy tier — then every touched slot is restored. Two renderers with
-// different config therefore coexist in one process with no epoch, no cache
-// invalidation, and no bleed: each render reads the slots while they hold its
-// own values, and restores them before yielding.
+// A host passes a `MarkdownConfig` object to a render entry point; that object
+// IS the configuration for the render. There are no `set*` singletons: instead
+// of ~20 per-module mutable slots, the whole config lives in one ambient slot
+// (`active`) that every read site reads through {@link activeConfig}. `withConfig`
+// swaps that slot for the duration of one *synchronous* render and restores it in
+// a `finally`, so two renderers with different config coexist in one process with
+// no bleed, and nested/recursive renders inherit the outer config (the swap
+// merges over the parent, so an inner render that sets only `htmlPolicy` keeps the
+// parent's `linkDecorator`).
 //
-// SCOPE: this covers every setting that is read *synchronously* during a
-// render/sink pass — the security/behavioural policy tier plus the grammar and
-// inline-pipeline tier. The heavy *async backend* tier (sanitizer backend,
-// KaTeX/mermaid/highlighter registration) is deliberately NOT here: those
-// backends hydrate asynchronously *after* the scoped block returns
-// (`hydratePendingMath`/`hydratePendingDiagrams` read the global registries once
-// the microtask runs), so they cannot ride a synchronous save/restore. They stay
-// on their `set*`/`load*`/`install*` registration seam — see ADR 0003 and each
-// backend module. `codeHighlighter` and `rawImageRenderer` *are* here because
-// they run inside the synchronous render, not in async hydration.
-import { getCodeHighlighter, setCodeHighlighter, type CodeHighlighter } from './highlight.ts'
-import {
-  getEntityDecoder,
-  getUserNamedEntities,
-  setEntityDecoder,
-  setNamedEntities,
-  type EntityDecoder,
-} from './entity-decoder.ts'
-import {
-  getFlankingPunctuationExclusion,
-  setFlankingPunctuationExclusion,
-} from './inline-emphasis.ts'
-import { getBareUrlCjkBoundary, setBareUrlCjkBoundary } from './inline-spans.ts'
-import { getInlinePasses, setInlinePasses, type InlinePass } from './inline-passes.ts'
-import { getRawImageRenderer, setRawImageRenderer, type RawImageRenderer } from './raw-images.ts'
-import { getSanitizerBackend, setSanitizerBackend, type SanitizerBackend } from './sanitize.ts'
-import { isEmailAutolinksEnabled, setEmailAutolinks } from './autolink-syntax.ts'
-import { getLinkDecorator, setLinkDecorator, type LinkDecorator } from './inline-links.ts'
+// Isolation rests on one invariant: the render + sink pass is **synchronous**.
+// The async backend tier (math/diagram renderers) runs during hydration, *after*
+// the scoped block returns, so those fields ride the config for
+// `StreamingMarkdownRenderer.hydrate()` / the `hydratePending*` options rather
+// than being read through `activeConfig` during the render.
+//
+// This module is a near-leaf: it imports only *types* from the feature modules,
+// so those modules can import `activeConfig` from here at runtime without a cycle.
+import type { HtmlPolicy } from './html-policy.ts'
+import type { SanitizeExtension, SanitizerBackend } from './sanitize.ts'
+import type { LinkImagePolicy } from './link-image-policy.ts'
+import type { TrustedTypesPolicy } from './html-sink.ts'
+import type { LinkDecorator } from './inline-links.ts'
+import type { FenceHandler } from './fence-handlers.ts'
+import type { CodeHighlighter } from './highlight.ts'
+import type { RawImageRenderer } from './raw-images.ts'
+import type { InlinePass } from './inline-passes.ts'
+import type { EntityDecoder } from './entity-decoder.ts'
 import type { MathRenderer } from './math.ts'
 import type { DiagramRenderer } from './mermaid.ts'
-import {
-  type FenceHandler,
-  restoreFenceHandlers,
-  setFenceHandler,
-  snapshotFenceHandlers,
-} from './fence-handlers.ts'
-import { getMathSyntax, setMathSyntax } from './math-syntax.ts'
-import { type RenderPolicyOptions, withRenderPolicies } from './render-policies.ts'
 
 /**
  * The full per-render configuration for a document or a streaming renderer.
  *
- * Extends {@link RenderPolicyOptions} (the security/behavioural policy tier —
- * `htmlPolicy`, `safeHrefSchemes`, `sanitizeExtension`, `linkImagePolicy`,
- * `trustedTypesPolicy`) with the grammar and inline-pipeline tier below. Every
- * field is optional and inherits the process-wide default when omitted; a field
+ * Every field is optional and inherits its built-in default when omitted; a field
  * set to `null` scopes that setting back to its built-in default for this render
- * only.
+ * only. A host injects this once — at construction for `StreamingMarkdownRenderer`,
+ * or per call for `renderMarkdown` — so two renderers with different config coexist
+ * without interfering.
  *
- * A host injects this once — at construction for `StreamingMarkdownRenderer`, or
- * per call for `renderMarkdown` — instead of mutating process-wide state with the
- * `set*` functions. Because the config is a snapshot applied and restored around
- * each synchronous render, two renderers with different config coexist without
- * interfering (the motivation the config-epoch mechanism previously served).
- *
- * The heavy *async backend* tier (KaTeX/mermaid/highlighter/sanitizer backend
- * registration) is not configured here — those hydrate after the synchronous
- * render and stay on their `load*`/`install*`/`set*Backend` registration seam.
+ * The heavy *async backend* tier (`mathRenderer` / `diagramRenderer`) is read
+ * during hydration, after the synchronous render, so it is carried here for
+ * `StreamingMarkdownRenderer.hydrate()` / the `hydratePending*` `renderer` option
+ * rather than applied around the render itself.
  */
-export interface MarkdownConfig extends RenderPolicyOptions {
+export interface MarkdownConfig {
   /**
-   * Force `$…$`-style prose math syntax on (`true`) or off (`false`); `null`
-   * defers to math-renderer registration (the default). See math-syntax.ts.
+   * Raw-HTML handling (#600). `'passthrough'` (the default) emits well-formed tags
+   * for the sink sanitizer to arbitrate; `'escape'` literalizes them. See html-policy.ts.
+   */
+  htmlPolicy?: HtmlPolicy
+  /**
+   * Scheme allowlist enforced on link/image destinations — the gate against
+   * `javascript:`/`data:` XSS. `null` restores the built-in default set. See inline-links.ts.
+   */
+  safeHrefSchemes?: Iterable<string> | null
+  /** Host sanitizer allowlist extension; `null` uses the core allowlist only. See sanitize.ts. */
+  sanitizeExtension?: SanitizeExtension | null
+  /** Opt-in link/image origin allowlist; `null` disables it (unrestricted). See link-image-policy.ts. */
+  linkImagePolicy?: LinkImagePolicy | null
+  /** Trusted Types policy used to bless sink output; `null` uses the default. See html-sink.ts. */
+  trustedTypesPolicy?: TrustedTypesPolicy | null
+  /**
+   * Sanitizer backend for the sink (`null` uses the native browser Sanitizer). See sanitize.ts.
+   */
+  sanitizerBackend?: SanitizerBackend | null
+  /**
+   * Force `$…$`-style prose math syntax on (`true`); `false`/`null` (the default)
+   * leave it off. See math-syntax.ts.
    */
   mathSyntax?: boolean | null
   /**
@@ -109,8 +103,7 @@ export interface MarkdownConfig extends RenderPolicyOptions {
   fenceHandlers?: Record<string, FenceHandler | null>
   /**
    * Synchronous syntax highlighter for fenced code; `null` falls back to escaped
-   * plain text. This is the *synchronous* highlighter seam — an async highlighter
-   * backend still registers via its `load*` entry. See highlight.ts.
+   * plain text. See highlight.ts.
    */
   codeHighlighter?: CodeHighlighter | null
   /**
@@ -134,137 +127,70 @@ export interface MarkdownConfig extends RenderPolicyOptions {
    */
   namedEntities?: Record<string, string>
   /**
-   * Sanitizer backend for the sink (`null` uses the native browser Sanitizer).
-   * Scoped per render like the rest of the synchronous tier. See sanitize.ts.
-   */
-  sanitizerBackend?: SanitizerBackend | null
-  /**
    * Math renderer used by {@link StreamingMarkdownRenderer.hydrate} to fill
-   * pending math scaffolding. Unlike the synchronous fields, this is read during
-   * *async* hydration (after the render returns), so it is carried on the config
-   * for `hydrate()` rather than scoped around the synchronous render. Obtain one
-   * from `loadKatex()` (`@copse/streaming-markdown/math/katex`). Pair with
-   * `mathSyntax: true` to also turn on the prose `$…$` grammar. See math.ts.
+   * pending math scaffolding, and by `hydratePendingMath(root, { renderer })`.
+   * Read during *async* hydration (after the render returns). Obtain one from
+   * `loadKatex()`; pair with `mathSyntax: true` for the prose `$…$` grammar.
    */
   mathRenderer?: MathRenderer | null
   /**
    * Diagram renderer used by {@link StreamingMarkdownRenderer.hydrate} to fill
-   * pending mermaid scaffolding. Read during async hydration (see
-   * {@link mathRenderer}). Obtain one from `loadMermaid()`
-   * (`@copse/streaming-markdown/diagrams/mermaid`). See mermaid.ts.
+   * pending mermaid scaffolding, and by `hydratePendingDiagrams(root, { renderer })`.
+   * Read during async hydration (see {@link mathRenderer}). Obtain one from
+   * `loadMermaid()`.
    */
   diagramRenderer?: DiagramRenderer | null
 }
 
+// The process-wide default config, and the config for the current render. Outside
+// any `withConfig` scope `active === baseDefaults`; a render swaps `active` for the
+// duration of its synchronous pass and restores it.
+let baseDefaults: MarkdownConfig = {}
+let active: MarkdownConfig = baseDefaults
+
 /**
- * Run `fn` with `config` applied to the module-global slots, then restore every
- * touched slot (in reverse) in a `finally`. Returns `fn`'s result. The policy
- * tier is scoped by {@link withRenderPolicies}; the grammar/inline tier here.
+ * The configuration for the current synchronous render — the process defaults
+ * outside any `withConfig` scope. Every read site reads its setting through this,
+ * e.g. `activeConfig().mathSyntax ?? false`. @internal
+ */
+export function activeConfig(): MarkdownConfig {
+  return active
+}
+
+/**
+ * Merge `config` into the **process-wide defaults** — the "install once" seam for
+ * environments that configure a backend or policy for their whole lifetime rather
+ * than per render: a Node/SSR host installing a `sanitizerBackend`, or a test
+ * harness registering a `codeHighlighter`. A field set to `null` clears it back to
+ * the built-in default. Every `renderMarkdown`/streaming call still overrides
+ * these per render via its own `MarkdownConfig`.
  *
- * The render + sink pass must be synchronous for the isolation to hold — each
- * slot is set before `fn()` and restored after, and nested synchronous renders
- * compose because each level saves and restores its own previous value.
+ * Call it before rendering (setup time), not inside a render — it assumes no
+ * `withConfig` scope is active. Most browser apps never need it (the native
+ * Sanitizer is the default and everything else is per-render config).
+ */
+export function setDefaultConfig(config: MarkdownConfig): void {
+  baseDefaults = { ...baseDefaults, ...config }
+  active = baseDefaults
+}
+
+/**
+ * Run `fn` with `config` as the ambient render context, then restore the previous
+ * context in a `finally`. Returns `fn`'s result.
+ *
+ * The swap **merges over** the current context (`{ ...parent, ...config }`) so a
+ * render inherits the process defaults, and a nested/recursive render (a fence
+ * handler or the streaming path re-entering `renderMarkdownUnsafe`) inherits the
+ * outer config and overrides only the fields it sets. Isolation requires the
+ * render to be synchronous: the context is set before `fn()` and restored after,
+ * and nested renders compose because each level restores its own parent.
  */
 export function withConfig<T>(config: MarkdownConfig, fn: () => T): T {
-  return withRenderPolicies(config, () => {
-    const restores: Array<() => void> = []
-
-    if (config.mathSyntax !== undefined) {
-      const previous = getMathSyntax()
-      setMathSyntax(config.mathSyntax)
-      restores.push(() => {
-        setMathSyntax(previous)
-      })
-    }
-    if (config.emailAutolinks !== undefined) {
-      const previous = isEmailAutolinksEnabled()
-      setEmailAutolinks(config.emailAutolinks)
-      restores.push(() => {
-        setEmailAutolinks(previous)
-      })
-    }
-    if (config.flankingPunctuationExclusion !== undefined) {
-      const previous = getFlankingPunctuationExclusion()
-      setFlankingPunctuationExclusion(config.flankingPunctuationExclusion)
-      restores.push(() => {
-        setFlankingPunctuationExclusion(previous)
-      })
-    }
-    if (config.bareUrlCjkBoundary !== undefined) {
-      const previous = getBareUrlCjkBoundary()
-      setBareUrlCjkBoundary(config.bareUrlCjkBoundary)
-      restores.push(() => {
-        setBareUrlCjkBoundary(previous)
-      })
-    }
-    if (config.linkDecorator !== undefined) {
-      const previous = getLinkDecorator()
-      setLinkDecorator(config.linkDecorator)
-      restores.push(() => {
-        setLinkDecorator(previous)
-      })
-    }
-    if (config.fenceHandlers !== undefined) {
-      const previous = snapshotFenceHandlers()
-      for (const [lang, handler] of Object.entries(config.fenceHandlers)) {
-        setFenceHandler(lang, handler)
-      }
-      restores.push(() => {
-        restoreFenceHandlers(previous)
-      })
-    }
-    if (config.codeHighlighter !== undefined) {
-      const previous = getCodeHighlighter()
-      setCodeHighlighter(config.codeHighlighter)
-      restores.push(() => {
-        setCodeHighlighter(previous)
-      })
-    }
-    if (config.rawImageRenderer !== undefined) {
-      const previous = getRawImageRenderer()
-      setRawImageRenderer(config.rawImageRenderer)
-      restores.push(() => {
-        setRawImageRenderer(previous)
-      })
-    }
-    if (config.inlinePasses !== undefined) {
-      const previous = getInlinePasses()
-      setInlinePasses(config.inlinePasses)
-      restores.push(() => {
-        setInlinePasses(previous)
-      })
-    }
-    if (config.entityDecoder !== undefined) {
-      const previous = getEntityDecoder()
-      setEntityDecoder(config.entityDecoder)
-      restores.push(() => {
-        setEntityDecoder(previous)
-      })
-    }
-    if (config.namedEntities !== undefined) {
-      const previous = getUserNamedEntities()
-      setNamedEntities(config.namedEntities)
-      restores.push(() => {
-        setNamedEntities(previous)
-      })
-    }
-    if (config.sanitizerBackend !== undefined) {
-      const previous = getSanitizerBackend()
-      setSanitizerBackend(config.sanitizerBackend)
-      restores.push(() => {
-        setSanitizerBackend(previous)
-      })
-    }
-    // `mathRenderer`/`diagramRenderer` are intentionally NOT scoped here: they are
-    // read during async hydration, after this synchronous block returns, so a
-    // save/restore around `fn()` would be undone before hydration runs. They ride
-    // the config for `StreamingMarkdownRenderer.hydrate()` / the hydrate options.
-
-    if (restores.length === 0) return fn()
-    try {
-      return fn()
-    } finally {
-      for (let i = restores.length - 1; i >= 0; i--) restores[i]!()
-    }
-  })
+  const previous = active
+  active = { ...previous, ...config }
+  try {
+    return fn()
+  } finally {
+    active = previous
+  }
 }

@@ -26,8 +26,10 @@
  * allowlist-bypass tricks — case-folding, `\` vs `/`, embedded credentials
  * (`https://good.com@evil.com`), scheme-relative `//evil.com`, leading/trailing
  * whitespace, and unicode host confusables (folded to punycode). Scheme safety
- * is NOT this policy's job: it stays with {@link setSafeHrefSchemes}.
+ * is NOT this policy's job: it stays with the scheme allowlist.
  */
+import { activeConfig } from './config.ts'
+
 export interface LinkImagePolicy {
   /**
    * Allowed link destinations. A rendered `<a href>` is kept untouched only when
@@ -80,79 +82,41 @@ interface ResolvedPolicy {
   blockedImageClass: string
 }
 
-let activePolicy: ResolvedPolicy | null = null
-
-/**
- * Install the opt-in link/image origin policy, or pass `null` to remove it
- * (restoring byte-identical, unrestricted output). Aligns with the other core
- * registries — {@link setSafeHrefSchemes}, `setSanitizeExtension`,
- * `setLinkDecorator` — set it once, before the first sink render.
- *
- * The policy is enforced at the sanitizer sink, so it applies to every `<a>`
- * (including autolinks) and every `<img>` a host renders, on both sanitizer
- * backends and under Trusted Types. It is deliberately layered *on top of* the
- * scheme allowlist: `setSafeHrefSchemes` keeps deciding which schemes may render
- * (blocking `javascript:`/`data:` links), and this policy then restricts the
- * surviving http(s)/authority URLs to an allowlisted set of origins. Do not use
- * it to re-implement scheme filtering.
- *
- * Prefixes and each candidate URL are compared after WHATWG canonicalization
- * (`new URL(...)` with credentials stripped), which is what closes the common
- * bypasses — see {@link LinkImagePolicy}.
- *
- * ```ts
- * import { setLinkImagePolicy } from '@copse/streaming-markdown'
- * setLinkImagePolicy({
- *   allowedLinkPrefixes: ['https://docs.example.com/'],
- *   allowedImagePrefixes: ['https://cdn.example.com/'],
- *   defaultOrigin: 'https://app.example.com',
- *   allowDataImages: false,
- * })
- * ```
- */
-export function setLinkImagePolicy(policy: LinkImagePolicy | null): void {
-  if (policy === null) {
-    activePolicy = null
-    return
+// Resolving a raw `config.linkImagePolicy` canonicalizes its prefixes; do it once
+// per distinct config value (the read runs per link/image element at the sink).
+let cachedPolicySource: LinkImagePolicy | null | undefined
+let cachedResolved: ResolvedPolicy | null = null
+function resolvedPolicy(): ResolvedPolicy | null {
+  const source = activeConfig().linkImagePolicy ?? null
+  if (source !== cachedPolicySource) {
+    cachedPolicySource = source
+    cachedResolved =
+      source === null
+        ? null
+        : {
+            linkPrefixes: canonicalizePrefixes(source.allowedLinkPrefixes),
+            imagePrefixes: canonicalizePrefixes(source.allowedImagePrefixes),
+            defaultOrigin: source.defaultOrigin,
+            allowDataImages: source.allowDataImages ?? true,
+            blockedLinkClass: source.blockedLinkClass ?? DEFAULT_BLOCKED_LINK_CLASS,
+            blockedImageClass: source.blockedImageClass ?? DEFAULT_BLOCKED_IMAGE_CLASS,
+          }
   }
-  activePolicy = {
-    linkPrefixes: canonicalizePrefixes(policy.allowedLinkPrefixes),
-    imagePrefixes: canonicalizePrefixes(policy.allowedImagePrefixes),
-    defaultOrigin: policy.defaultOrigin,
-    allowDataImages: policy.allowDataImages ?? true,
-    blockedLinkClass: policy.blockedLinkClass ?? DEFAULT_BLOCKED_LINK_CLASS,
-    blockedImageClass: policy.blockedImageClass ?? DEFAULT_BLOCKED_IMAGE_CLASS,
-  }
+  return cachedResolved
 }
 
-/** The active {@link LinkImagePolicy} in resolved form, or `null` when disabled. */
+/** The current render's {@link LinkImagePolicy} in resolved form, or `null` when disabled. */
 export function getLinkImagePolicy(): LinkImagePolicy | null {
-  if (!activePolicy) return null
+  const policy = resolvedPolicy()
+  if (!policy) return null
   return {
-    allowedLinkPrefixes: [...activePolicy.linkPrefixes],
-    allowedImagePrefixes: [...activePolicy.imagePrefixes],
-    defaultOrigin: activePolicy.defaultOrigin,
-    allowDataImages: activePolicy.allowDataImages,
-    blockedLinkClass: activePolicy.blockedLinkClass,
-    blockedImageClass: activePolicy.blockedImageClass,
+    allowedLinkPrefixes: [...policy.linkPrefixes],
+    allowedImagePrefixes: [...policy.imagePrefixes],
+    defaultOrigin: policy.defaultOrigin,
+    allowDataImages: policy.allowDataImages,
+    blockedLinkClass: policy.blockedLinkClass,
+    blockedImageClass: policy.blockedImageClass,
   }
-}
-
-/** @internal Opaque handle for {@link snapshotLinkImagePolicy}. */
-export type LinkImagePolicySnapshot = ResolvedPolicy | null
-
-/**
- * @internal Snapshot the resolved active policy slot for a scoped per-render
- * override (see `withRenderPolicies`). The value is opaque — pass it back to
- * {@link restoreLinkImagePolicy} to restore, without re-canonicalizing.
- */
-export function snapshotLinkImagePolicy(): LinkImagePolicySnapshot {
-  return activePolicy
-}
-
-/** @internal Restore a snapshot from {@link snapshotLinkImagePolicy}. */
-export function restoreLinkImagePolicy(snapshot: LinkImagePolicySnapshot): void {
-  activePolicy = snapshot
 }
 
 /**
@@ -274,7 +238,7 @@ function isDataUrl(canonical: string): boolean {
  * check) when no policy is installed, so the default path stays free.
  */
 export function applyLinkImagePolicy(node: Element, tagName: string): void {
-  const policy = activePolicy
+  const policy = resolvedPolicy()
   if (!policy) return
   if (tagName === 'a') enforceLink(node, policy)
   else if (tagName === 'img') enforceImage(node, policy)

@@ -1,5 +1,6 @@
 import { isEmailAutolinksEnabled } from './autolink-syntax.ts'
 import { decodeEscapedPunctuation, encodeBackslashEscapes } from './backslash-escapes.ts'
+import { activeConfig } from './config.ts'
 import { escapeHtmlTextNodes } from './escape.ts'
 import { renderAngleAutolinks } from './inline-autolinks.ts'
 import { renderInlineCode } from './inline-code-spans.ts'
@@ -141,22 +142,10 @@ function renderedBareLink(label: string, href: string): string {
  * Left `null` in the default build (Latin URLs never contain these code points),
  * so non-CJK output is byte-identical.
  */
-let bareUrlCjkBoundary: ((ch: string) => boolean) | null = null
-
-/** Inject (or clear with `null`) the bare-autolink CJK-punctuation boundary. */
-export function setBareUrlCjkBoundary(fn: ((ch: string) => boolean) | null): void {
-  bareUrlCjkBoundary = fn
-}
-
-/** The active bare-autolink CJK boundary, or `null`. Snapshot for `withConfig`. */
-export function getBareUrlCjkBoundary(): ((ch: string) => boolean) | null {
-  return bareUrlCjkBoundary
-}
-
 /** Split a captured bare URL at the first CJK-punctuation boundary, if any. */
 function splitBareUrlAtCjkBoundary(rawUrl: string): { url: string; tail: string } {
-  const boundary = bareUrlCjkBoundary
-  if (boundary !== null) {
+  const boundary = activeConfig().bareUrlCjkBoundary
+  if (boundary != null) {
     for (let i = 0; i < rawUrl.length; i++) {
       if (boundary(rawUrl[i] ?? '')) return { url: rawUrl.slice(0, i), tail: rawUrl.slice(i) }
     }

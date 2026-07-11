@@ -26,6 +26,8 @@
 // without creating an import cycle.
 
 /** Where in the inline pipeline a pass runs. */
+import { activeConfig } from './config.ts'
+
 export type InlinePassStage = 'before-links' | 'after-links'
 
 /** Render-time services handed to {@link InlinePass.apply}. */
@@ -68,22 +70,17 @@ export interface InlinePass {
   holdStart?(line: string, mask: boolean[]): number
 }
 
-let inlinePasses: readonly InlinePass[] = []
+const NO_PASSES: readonly InlinePass[] = []
 
 /**
- * Register the active inline passes wholesale (execution order = array order
- * within each stage), or pass `null`/`[]` to remove them. Set once, before the
- * first render — the at-rest and streaming emitters share this registry.
+ * The inline passes configured for the current render (execution order = array
+ * order within each stage), optionally filtered to one pipeline stage. Set them
+ * per render via `MarkdownConfig.inlinePasses`.
  */
-export function setInlinePasses(passes: readonly InlinePass[] | null): void {
-  inlinePasses = passes ? [...passes] : []
-  emitted.clear()
-}
-
-/** The registered passes, optionally filtered to one pipeline stage. */
 export function getInlinePasses(stage?: InlinePassStage): readonly InlinePass[] {
-  if (stage === undefined) return inlinePasses
-  return inlinePasses.filter((pass) => (pass.stage ?? 'before-links') === stage)
+  const passes = activeConfig().inlinePasses ?? NO_PASSES
+  if (stage === undefined) return passes
+  return passes.filter((pass) => (pass.stage ?? 'before-links') === stage)
 }
 
 // Placeholder tokens for pass-emitted HTML: PUA characters that are inert to

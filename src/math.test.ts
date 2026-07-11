@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { tokenizeBlocks } from './block-tokenizer.ts'
 import { hydratePendingMath, type MathRenderer } from './math.ts'
-import { setMathSyntax } from './math-syntax.ts'
+import { setDefaultConfig } from './config.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 
@@ -15,7 +15,7 @@ import { sanitizeRenderedMarkdown } from './sanitize.ts'
 // Math prose syntax is gated on renderer registration (#78); this file tests
 // the grammar itself, so force it on for the whole file (node:test isolates
 // each file in its own process). The gate is covered by math-syntax.test.ts.
-setMathSyntax(true)
+setDefaultConfig({ mathSyntax: true })
 
 const BLOCK_SCAFFOLD_RE =
   /<div class="math-block math-block--pending"><pre class="math">([^<]*)<\/pre><\/div>/

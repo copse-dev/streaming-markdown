@@ -1,12 +1,13 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderMarkdownUnsafe } from './renderer.ts'
-import { installHighlightjs } from './highlight-hljs.ts'
+import { highlightjsHighlighter } from './highlight-hljs.ts'
+import { setDefaultConfig } from './config.ts'
 import { withHostImagePolicy } from '../tests/host-image-test-policy.ts'
 
 // The fenced-code cases below assert highlighted (hljs span) output; register the
-// backend the core now lazy-loads. See highlight-lazy.test.ts for the plain path.
-installHighlightjs()
+// backend as the process default. See highlight-lazy.test.ts for the plain path.
+setDefaultConfig({ codeHighlighter: highlightjsHighlighter })
 
 describe('renderMarkdownUnsafe', () => {
   it('renders headings on their own lines', () => {

@@ -1,3 +1,4 @@
+import { activeConfig } from './config.ts'
 import { escapeMermaidHtml } from './escape.ts'
 import { mathBlockHtml, syncFormingMathBlockDom } from './math-block.ts'
 
@@ -123,41 +124,39 @@ function normalizeFenceLang(lang: string): string {
   return lang.trim().toLowerCase()
 }
 
-const fenceHandlers = new Map<string, FenceHandler>([
+/** The built-in handlers, always present unless a render's config overrides them. */
+const BUILTIN_FENCE_HANDLERS = new Map<string, FenceHandler>([
   ['mermaid', mermaidFenceHandler],
   ['math', mathFenceHandler],
 ])
 
-/**
- * Register a {@link FenceHandler} for a fence language, replacing any existing
- * one, or pass `null` to remove it (removing `'mermaid'` restores the default
- * highlighted `<pre><code>` for mermaid fences). Set handlers once, before the
- * first render — at-rest and streaming emitters share this registry, so a
- * mid-stream change would render a fence differently across frames.
- */
-export function setFenceHandler(lang: string, handler: FenceHandler | null): void {
-  const key = normalizeFenceLang(lang)
-  if (handler) fenceHandlers.set(key, handler)
-  else fenceHandlers.delete(key)
+// A render's `config.fenceHandlers` is a plain object with arbitrary-case keys;
+// normalize it into a lookup Map once per distinct config object (fences aren't
+// hot, but a code-heavy document reads this per block).
+let cachedOverrideSource: Record<string, FenceHandler | null> | undefined
+let cachedOverrideMap: Map<string, FenceHandler | null> | undefined
+function overrideHandlers(): Map<string, FenceHandler | null> | undefined {
+  const source = activeConfig().fenceHandlers
+  if (!source) return undefined
+  if (source !== cachedOverrideSource) {
+    cachedOverrideSource = source
+    cachedOverrideMap = new Map()
+    for (const [lang, handler] of Object.entries(source)) {
+      cachedOverrideMap.set(normalizeFenceLang(lang), handler)
+    }
+  }
+  return cachedOverrideMap
 }
 
-/** The registered {@link FenceHandler} for a fence language, or `null`. */
+/**
+ * The {@link FenceHandler} for a fence language, or `null`. A render's
+ * `config.fenceHandlers` layers over the built-in `mermaid`/`math` handlers: a
+ * value there replaces (or, if `null`, removes) the handler for that language for
+ * this render only.
+ */
 export function getFenceHandler(lang: string): FenceHandler | null {
-  return fenceHandlers.get(normalizeFenceLang(lang)) ?? null
-}
-
-/**
- * Snapshot the whole fence-handler registry so a scoped config can install its
- * own handlers for one render and restore the prior set afterwards (see
- * `withConfig`). The value is opaque — pass it back to
- * {@link restoreFenceHandlers}.
- */
-export function snapshotFenceHandlers(): Map<string, FenceHandler> {
-  return new Map(fenceHandlers)
-}
-
-/** Restore a registry snapshot taken by {@link snapshotFenceHandlers}. */
-export function restoreFenceHandlers(snapshot: Map<string, FenceHandler>): void {
-  fenceHandlers.clear()
-  for (const [lang, handler] of snapshot) fenceHandlers.set(lang, handler)
+  const key = normalizeFenceLang(lang)
+  const overrides = overrideHandlers()
+  if (overrides?.has(key)) return overrides.get(key) ?? null
+  return BUILTIN_FENCE_HANDLERS.get(key) ?? null
 }

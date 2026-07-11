@@ -3,7 +3,7 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { hydratePendingMath } from './math.ts'
 import { __setKatexImporterForTests, katexMathRenderer, loadKatex } from './math-katex.ts'
-import { setMathSyntax } from './math-syntax.ts'
+import { setDefaultConfig } from './config.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 
 // The KaTeX backend is a thin lazy adapter over the optional `katex` peer
@@ -15,7 +15,7 @@ import { renderMarkdownUnsafe } from './renderer.ts'
 // Math prose syntax is gated on renderer registration (#78) but there is no
 // global registry any more, so force it on for the whole file (node:test
 // isolates each file in its own process) to emit the `$$…$$` / `$…$` fixtures.
-setMathSyntax(true)
+setDefaultConfig({ mathSyntax: true })
 
 /** A fake `katex` module: records calls and returns deterministic HTML. */
 function fakeKatexModule() {

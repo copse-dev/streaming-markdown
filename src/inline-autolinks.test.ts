@@ -1,7 +1,7 @@
-import { afterEach, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderInlineSpans } from './inline-spans.ts'
-import { setSafeHrefSchemes } from './inline-links.ts'
+import { withConfig } from './config.ts'
 
 describe('renderAngleAutolinks', () => {
   it('renders bare scheme and email autolinks', () => {
@@ -43,8 +43,6 @@ describe('renderAngleAutolinks', () => {
 })
 
 describe('angle autolinks route through the scheme allowlist (#139)', () => {
-  afterEach(() => setSafeHrefSchemes(null))
-
   it('links allowlisted schemes', () => {
     assert.match(renderInlineSpans('<https://ex.com>'), /<a href="https:\/\/ex\.com">/)
     assert.match(renderInlineSpans('<ftp://ex.com>'), /<a href="ftp:\/\/ex\.com">/)
@@ -62,9 +60,10 @@ describe('angle autolinks route through the scheme allowlist (#139)', () => {
     }
   })
 
-  it('narrowing setSafeHrefSchemes narrows autolinks too', () => {
-    setSafeHrefSchemes(['https'])
-    assert.match(renderInlineSpans('<https://ex.com>'), /<a /)
-    assert.doesNotMatch(renderInlineSpans('<mailto:a@b.com>'), /<a /) // mailto no longer allowed
+  it('narrowing safeHrefSchemes narrows autolinks too', () => {
+    withConfig({ safeHrefSchemes: ['https'] }, () => {
+      assert.match(renderInlineSpans('<https://ex.com>'), /<a /)
+      assert.doesNotMatch(renderInlineSpans('<mailto:a@b.com>'), /<a /) // mailto no longer allowed
+    })
   })
 })

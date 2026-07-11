@@ -12,7 +12,7 @@ import sql from 'highlight.js/lib/languages/sql'
 import typescript from 'highlight.js/lib/languages/typescript'
 import xml from 'highlight.js/lib/languages/xml'
 import yaml from 'highlight.js/lib/languages/yaml'
-import { type CodeHighlighter, setCodeHighlighter } from './highlight.ts'
+import type { CodeHighlighter } from './highlight.ts'
 
 // PROTOTYPE (#lazy-load): the highlight.js backend. This is the ONLY module that
 // imports `highlight.js`, so it — and its dozen language grammars — stays out of
@@ -21,14 +21,13 @@ import { type CodeHighlighter, setCodeHighlighter } from './highlight.ts'
 // `@copse/streaming-markdown/sanitizers/dompurify`), and is reachable two ways:
 //
 //   • statically, when a host wants highlighting from the first paint:
-//       import { setCodeHighlighter } from '@copse/streaming-markdown'
 //       import { highlightjsHighlighter } from '@copse/streaming-markdown/highlighters/highlightjs'
-//       setCodeHighlighter(highlightjsHighlighter)
+//       renderMarkdown(md, { codeHighlighter: highlightjsHighlighter })
 //
 //   • lazily, so the grammar payload is fetched as a separate chunk only when the
 //     host first needs it (e.g. on the first code fence, or at idle):
 //       const { loadHighlightjs } = await import('@copse/streaming-markdown/highlighters/highlightjs')
-//       await loadHighlightjs()
+//       const hl = await loadHighlightjs()  // then pass via config.codeHighlighter
 //
 // The grammar list MUST stay in sync with `KNOWN_LANGUAGES` in `highlight.ts`, so
 // the core resolves the same set of ids it hands back to this backend.
@@ -47,7 +46,7 @@ hljs.registerLanguage('rust', rust)
 hljs.registerLanguage('go', go)
 hljs.registerLanguage('sql', sql)
 
-/** highlight.js-backed {@link CodeHighlighter}. Register it via {@link installHighlightjs}. */
+/** highlight.js-backed {@link CodeHighlighter}. Pass it via `MarkdownConfig.codeHighlighter`. */
 export const highlightjsHighlighter: CodeHighlighter = {
   highlight(code: string, language: string): string {
     // The core only passes ids it resolved against KNOWN_LANGUAGES, but guard
@@ -60,18 +59,13 @@ export const highlightjsHighlighter: CodeHighlighter = {
   },
 }
 
-/** Register the highlight.js backend synchronously (this module is already loaded). */
-export function installHighlightjs(): CodeHighlighter {
-  setCodeHighlighter(highlightjsHighlighter)
-  return highlightjsHighlighter
-}
-
 /**
- * Lazy convenience: resolve the highlight.js backend and register it. When called
- * through a dynamic `import('.../highlighters/highlightjs')`, the grammar payload
- * is a code-split chunk fetched only at this point — the "lazy load" the prototype
- * demonstrates. Safe to call more than once (idempotent registration).
+ * Resolve the highlight.js {@link CodeHighlighter}. When called through a dynamic
+ * `import('.../highlighters/highlightjs')`, the grammar payload is a code-split
+ * chunk fetched only at this point — the "lazy load" the prototype demonstrates.
+ * Pass the result via `MarkdownConfig.codeHighlighter`; equivalent to importing
+ * {@link highlightjsHighlighter} directly.
  */
 export function loadHighlightjs(): Promise<CodeHighlighter> {
-  return Promise.resolve(installHighlightjs())
+  return Promise.resolve(highlightjsHighlighter)
 }

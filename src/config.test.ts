@@ -1,21 +1,15 @@
 import '../tests/setup-dom-jsdom.ts'
-import { describe, it, afterEach } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
-import {
-  getLinkDecorator,
-  setLinkDecorator,
-  type LinkDecorator,
-  neutralLinkDecorator,
-} from './inline-links.ts'
-import { getFenceHandler, setFenceHandler, type FenceHandler } from './fence-handlers.ts'
-import { getCodeHighlighter, setCodeHighlighter, type CodeHighlighter } from './highlight.ts'
-import { getMathSyntax, setMathSyntax } from './math-syntax.ts'
+import { type LinkDecorator } from './inline-links.ts'
+import { getFenceHandler, type FenceHandler } from './fence-handlers.ts'
+import { getCodeHighlighter, type CodeHighlighter } from './highlight.ts'
+import { getMathSyntax } from './math-syntax.ts'
 import { withConfig, type MarkdownConfig } from './config.ts'
 import { isEmailAutolinksEnabled } from './autolink-syntax.ts'
 import { getEntityDecoder, getNamedEntities } from './entity-decoder.ts'
-import { getRawImageRenderer } from './raw-images.ts'
 import { getInlinePasses } from './inline-passes.ts'
 import { getSanitizerBackend } from './sanitize.ts'
 import type { MathRenderer } from './math.ts'
@@ -24,15 +18,8 @@ import type { MathRenderer } from './math.ts'
 // Two renders with different `MarkdownConfig` produce their own output in one
 // process — no `set*`, no epoch — and every global slot is left untouched after.
 describe('config-injected render (spike for #145)', () => {
-  // Belt-and-braces: the whole point is that these NEVER need resetting because
-  // the config never mutates them, but restore anyway so a regression here can't
-  // leak into other suites.
-  afterEach(() => {
-    setLinkDecorator(null)
-    setMathSyntax(null)
-    setFenceHandler('demo', null)
-  })
-
+  // The whole point is that these NEVER need resetting: per-call config is scoped
+  // to one synchronous render and restored automatically, so no afterEach cleanup.
   const brackets: LinkDecorator = ({ title }) =>
     title ? ` title="${title}" data-demo="1"` : ' data-demo="1"'
 
@@ -44,13 +31,11 @@ describe('config-injected render (spike for #145)', () => {
     const decorated = renderMarkdownUnsafe('[x](https://example.com)', { linkDecorator: brackets })
     assert.equal(decorated, '<p><a href="https://example.com" data-demo="1">x</a></p>')
 
-    // Default is unchanged: a plain call still emits neutral anchors, and the
-    // global active decorator is still the neutral built-in.
+    // Default is unchanged: a plain call (no config) still emits neutral anchors.
     assert.equal(
       renderMarkdownUnsafe('[x](https://example.com)'),
       '<p><a href="https://example.com">x</a></p>',
     )
-    assert.equal(getLinkDecorator(), neutralLinkDecorator)
   })
 
   it('applies per-call fence handlers layered over the built-ins, then restores', () => {
@@ -97,10 +82,6 @@ describe('config-injected render (spike for #145)', () => {
 })
 
 describe('config-injected backends (spike for #145)', () => {
-  afterEach(() => {
-    setCodeHighlighter(null)
-  })
-
   const shouty: CodeHighlighter = {
     highlight: (code) => `<span class="hi">${code.toUpperCase()}</span>`,
     highlightAuto: (code) => `<span class="hi">${code.toUpperCase()}</span>`,
@@ -138,42 +119,45 @@ describe('withConfig scopes and restores every synchronous field', () => {
       namedEntities: { spikeent: 'X' },
       sanitizerBackend: null,
     }
-    // Snapshot the fields that have observable getters.
+    // Snapshot the default (no-config) value of each field that has a remaining
+    // getter. The deleted linkDecorator / rawImageRenderer getters are asserted via
+    // rendered output in the per-call suites above, so they are dropped here.
     const before = {
       math: getMathSyntax(),
       email: isEmailAutolinksEnabled(),
-      decorator: getLinkDecorator(),
       highlighter: getCodeHighlighter(),
-      raw: getRawImageRenderer(),
       passes: getInlinePasses(),
       decoder: getEntityDecoder(),
+      named: getNamedEntities()['spikeent'],
       sanitizer: getSanitizerBackend(),
       fence: getFenceHandler('spikelang'),
     }
 
     let sawInside = false
     const out = withConfig(full, () => {
-      // Inside the scope every field is applied.
+      // Inside the scope every field reads back through its remaining getter.
       sawInside = true
       assert.equal(getMathSyntax(), true)
       assert.equal(isEmailAutolinksEnabled(), false)
+      assert.equal(getCodeHighlighter(), full.codeHighlighter)
+      assert.equal(getEntityDecoder(), full.entityDecoder)
       assert.notEqual(getEntityDecoder(), before.decoder)
       assert.equal(getNamedEntities()['spikeent'], 'X')
       assert.notEqual(getFenceHandler('spikelang'), null)
+      assert.deepEqual(getInlinePasses(), [])
       return 'ran'
     })
 
     assert.ok(sawInside)
     assert.equal(out, 'ran')
-    // Every touched slot is restored.
+    // Outside the scope every field returns to its default.
     assert.equal(getMathSyntax(), before.math)
     assert.equal(isEmailAutolinksEnabled(), before.email)
-    assert.equal(getLinkDecorator(), before.decorator)
     assert.equal(getCodeHighlighter(), before.highlighter)
-    assert.equal(getRawImageRenderer(), before.raw)
     // setInlinePasses copies its input, so compare by content not reference.
     assert.deepEqual(getInlinePasses(), before.passes)
     assert.equal(getEntityDecoder(), before.decoder)
+    assert.equal(getNamedEntities()['spikeent'], before.named)
     assert.equal(getSanitizerBackend(), before.sanitizer)
     assert.equal(getFenceHandler('spikelang'), before.fence)
   })

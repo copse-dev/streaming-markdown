@@ -14,24 +14,14 @@
 // This module is a dependency-free leaf so the block tokenizer, the inline
 // pipeline, and the hold walker can all read the flag without import cycles.
 
-let syntaxOverride: boolean | null = null
+import { activeConfig } from './config.ts'
 
-/**
- * @internal Writer behind `MarkdownConfig.mathSyntax`. Forces math prose syntax
- * on (`true`), off (`false`), or off-by-default (`null`). Not part of the public
- * API — hosts pass `{ mathSyntax }` to a render entry point, which scopes this
- * slot via `withConfig`; this exists so that scoping has something to write.
- */
-export function setMathSyntax(enabled: boolean | null): void {
-  syntaxOverride = enabled
-}
-
-/** The current explicit override (`null` when math prose syntax is off). */
+/** The current render's explicit `mathSyntax` config (`null`/absent when off). */
 export function getMathSyntax(): boolean | null {
-  return syntaxOverride
+  return activeConfig().mathSyntax ?? null
 }
 
-/** Whether `$…$`-style prose math is currently recognized (see module note). */
+/** Whether `$…$`-style prose math is recognized for the current render. */
 export function isMathSyntaxEnabled(): boolean {
-  return syntaxOverride ?? false
+  return activeConfig().mathSyntax ?? false
 }

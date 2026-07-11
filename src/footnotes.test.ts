@@ -6,7 +6,6 @@ import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { renderStreamingMarkdown, StreamingMarkdownRenderer } from './streaming.ts'
 import { collectFootnoteDefinitions, tokenizeBlocks } from './block-tokenizer.ts'
 import { footnoteHoldStart, isPendingFootnoteDefLine } from './footnotes.ts'
-import { setMathSyntax } from './math-syntax.ts'
 
 describe('GFM footnotes at rest (#72)', () => {
   it('renders a reference and its trailing section with a backref', () => {
@@ -162,36 +161,29 @@ describe('GFM footnotes at rest (#72)', () => {
 
   // The math prose grammar is gated on renderer registration (#78); these two
   // cases exercise math ↔ footnote interaction, so force the grammar on for the
-  // duration and restore the default afterward.
+  // render via per-call config.
   it('coexists with inline math: adjacent constructs both render (#70/#72)', () => {
-    setMathSyntax(true)
-    try {
-      const html = renderMarkdownUnsafe('Euler[^e] says $e^{i\\pi}=-1$ here.\n\n[^e]: the identity')
-      assert.match(html, /<sup class="footnote-ref"><a href="#fn-e" id="fnref-e">1<\/a><\/sup>/)
-      assert.match(html, /<span class="math-inline[^"]*">e\^\{i\\pi\}=-1<\/span>/)
-      assert.match(html, /<section class="footnotes">/)
-    } finally {
-      setMathSyntax(null)
-    }
+    const html = renderMarkdownUnsafe('Euler[^e] says $e^{i\\pi}=-1$ here.\n\n[^e]: the identity', {
+      mathSyntax: true,
+    })
+    assert.match(html, /<sup class="footnote-ref"><a href="#fn-e" id="fnref-e">1<\/a><\/sup>/)
+    assert.match(html, /<span class="math-inline[^"]*">e\^\{i\\pi\}=-1<\/span>/)
+    assert.match(html, /<section class="footnotes">/)
   })
 
   it('math content is opaque source: [^1] inside math never becomes a footnote', () => {
     // Inline math runs before the footnote pass and shields its verbatim
     // content; a display-math block is opaque like a fence, so a `[^1]:` line
     // inside it is neither a definition nor a reference.
-    setMathSyntax(true)
-    try {
-      const html = renderMarkdownUnsafe(
-        'inline $[^1]$ opaque, real[^1]\n\n$$\n[^1]: not a def\na_i\n$$\n\n[^1]: real',
-      )
-      assert.match(html, /<span class="math-inline[^"]*">\[\^1\]<\/span>/)
-      assert.match(html, /<pre class="math">\[\^1\]: not a def\na_i<\/pre>/)
-      // Exactly one real reference and one section item, defined by the last line.
-      assert.equal(html.match(/<sup class="footnote-ref">/g)?.length, 1)
-      assert.match(html, /<li id="fn-1"><p>real/)
-    } finally {
-      setMathSyntax(null)
-    }
+    const html = renderMarkdownUnsafe(
+      'inline $[^1]$ opaque, real[^1]\n\n$$\n[^1]: not a def\na_i\n$$\n\n[^1]: real',
+      { mathSyntax: true },
+    )
+    assert.match(html, /<span class="math-inline[^"]*">\[\^1\]<\/span>/)
+    assert.match(html, /<pre class="math">\[\^1\]: not a def\na_i<\/pre>/)
+    // Exactly one real reference and one section item, defined by the last line.
+    assert.equal(html.match(/<sup class="footnote-ref">/g)?.length, 1)
+    assert.match(html, /<li id="fn-1"><p>real/)
   })
 })
 

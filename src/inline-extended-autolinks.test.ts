@@ -3,12 +3,11 @@
 // grammar in `src/inline-spans.ts` and the conformance floor in
 // `src/gfm-conformance.test.ts` (Autolinks (extension) 11/11).
 import '../tests/setup-dom-jsdom.ts'
-import { afterEach, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderInlineSpans } from './inline-spans.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
-import { setEmailAutolinks } from './autolink-syntax.ts'
-import { setSafeHrefSchemes } from './inline-links.ts'
+import { withConfig } from './config.ts'
 import { StreamingMarkdownRenderer } from './streaming.ts'
 
 // Neutral default link output (#124): a plain `<a href>` with no
@@ -104,16 +103,16 @@ describe('extended email autolinks', () => {
 })
 
 describe('generated-href scheme safety', () => {
-  afterEach(() => setSafeHrefSchemes(null))
-
   it('does not linkify a www host when http is not an allowed scheme', () => {
-    setSafeHrefSchemes(['https'])
-    assert.equal(renderInlineSpans('www.example.com'), 'www.example.com')
+    withConfig({ safeHrefSchemes: ['https'] }, () => {
+      assert.equal(renderInlineSpans('www.example.com'), 'www.example.com')
+    })
   })
 
   it('does not linkify a bare email when mailto is not an allowed scheme', () => {
-    setSafeHrefSchemes(['https'])
-    assert.equal(renderInlineSpans('foo@bar.baz'), 'foo@bar.baz')
+    withConfig({ safeHrefSchemes: ['https'] }, () => {
+      assert.equal(renderInlineSpans('foo@bar.baz'), 'foo@bar.baz')
+    })
   })
 })
 
@@ -216,29 +215,31 @@ describe('extended autolink boundary and path-validation fixes (#115 review)', (
 })
 
 describe('email autolink toggle (#115)', () => {
-  afterEach(() => setEmailAutolinks(true))
-
   it('links a bare email by default', () => {
     assert.equal(renderInlineSpans('foo@bar.com'), anchor('mailto:foo@bar.com', 'foo@bar.com'))
   })
 
   it('leaves a bare email as plain text when disabled', () => {
-    setEmailAutolinks(false)
-    assert.equal(renderInlineSpans('Reach foo@bar.com today'), 'Reach foo@bar.com today')
+    withConfig({ emailAutolinks: false }, () => {
+      assert.equal(renderInlineSpans('Reach foo@bar.com today'), 'Reach foo@bar.com today')
+    })
   })
 
   it('still linkifies www/URL autolinks when only email is disabled', () => {
-    setEmailAutolinks(false)
-    assert.equal(
-      renderInlineSpans('www.example.com'),
-      anchor('http://www.example.com', 'www.example.com'),
-    )
+    withConfig({ emailAutolinks: false }, () => {
+      assert.equal(
+        renderInlineSpans('www.example.com'),
+        anchor('http://www.example.com', 'www.example.com'),
+      )
+    })
   })
 
-  it('re-enabling restores email autolinking', () => {
-    setEmailAutolinks(false)
-    setEmailAutolinks(true)
-    assert.equal(renderInlineSpans('foo@bar.com'), anchor('mailto:foo@bar.com', 'foo@bar.com'))
+  it('an inner enable overrides an outer disable', () => {
+    withConfig({ emailAutolinks: false }, () => {
+      withConfig({ emailAutolinks: true }, () => {
+        assert.equal(renderInlineSpans('foo@bar.com'), anchor('mailto:foo@bar.com', 'foo@bar.com'))
+      })
+    })
   })
 })
 

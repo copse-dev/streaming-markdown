@@ -1,9 +1,10 @@
 import '../tests/setup-dom-jsdom.ts'
-import { afterEach, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { withConfig } from './config.ts'
 import { escapeHtml } from './escape.ts'
 import { pendingHoldIndex } from './inline-emphasis.ts'
-import { getInlinePasses, type InlinePass, setInlinePasses } from './inline-passes.ts'
+import { getInlinePasses, type InlinePass } from './inline-passes.ts'
 import { renderPendingLine } from './render-pending-line.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
@@ -57,19 +58,18 @@ const highlightPass: InlinePass = {
   },
 }
 
-afterEach(() => setInlinePasses(null))
-
 describe('inline pass registry', () => {
   it('defaults to no passes and supports wholesale set/reset', () => {
     assert.equal(getInlinePasses().length, 0)
-    setInlinePasses([citationPass, highlightPass])
-    assert.equal(getInlinePasses().length, 2)
-    assert.deepEqual(
-      getInlinePasses('before-links').map((p) => p.name),
-      ['citations', 'highlight'],
-    )
-    assert.equal(getInlinePasses('after-links').length, 0)
-    setInlinePasses(null)
+    withConfig({ inlinePasses: [citationPass, highlightPass] }, () => {
+      assert.equal(getInlinePasses().length, 2)
+      assert.deepEqual(
+        getInlinePasses('before-links').map((p) => p.name),
+        ['citations', 'highlight'],
+      )
+      assert.equal(getInlinePasses('after-links').length, 0)
+    })
+    // Outside the scope the passes fall back to the built-in default (none).
     assert.equal(getInlinePasses().length, 0)
   })
 
@@ -82,53 +82,58 @@ describe('inline pass registry', () => {
 
 describe('before-links passes', () => {
   it('renders citations through ctx.emit, surviving the escape step', () => {
-    setInlinePasses([citationPass])
-    const html = renderMarkdownUnsafe('See [@doe2020] for details.')
+    const html = renderMarkdownUnsafe('See [@doe2020] for details.', {
+      inlinePasses: [citationPass],
+    })
     assert.match(html, /<span class="citation">@doe2020<\/span>/)
     assert.doesNotMatch(html, /\[@doe2020\]/)
   })
 
   it('wins over markdown link-label parsing (Pandoc ordering)', () => {
-    setInlinePasses([citationPass])
-    const html = renderMarkdownUnsafe('[@doe2020] vs [a real link](https://example.com)')
+    const html = renderMarkdownUnsafe('[@doe2020] vs [a real link](https://example.com)', {
+      inlinePasses: [citationPass],
+    })
     assert.match(html, /<span class="citation">@doe2020<\/span>/)
     assert.match(html, /<a[^>]*href="https:\/\/example\.com"[^>]*>a real link<\/a>/)
   })
 
   it('respects backslash escapes and code-span shielding', () => {
-    setInlinePasses([citationPass, highlightPass])
-    const escaped = renderMarkdownUnsafe('literal \\[@doe2020]')
+    const config = { inlinePasses: [citationPass, highlightPass] }
+    const escaped = renderMarkdownUnsafe('literal \\[@doe2020]', config)
     assert.doesNotMatch(escaped, /citation/)
     assert.match(escaped, /\[@doe2020\]/)
 
-    const code = renderMarkdownUnsafe('`[@doe2020] ==x==` and [@real2021]')
+    const code = renderMarkdownUnsafe('`[@doe2020] ==x==` and [@real2021]', config)
     assert.match(code, /<code>\[@doe2020\] ==x==<\/code>/)
     assert.match(code, /<span class="citation">@real2021<\/span>/)
   })
 
   it('emitted <mark> passes the sanitizer sink', () => {
-    setInlinePasses([highlightPass])
-    const html = sanitizeRenderedMarkdown(renderMarkdownUnsafe('a ==bright== idea'))
+    const html = sanitizeRenderedMarkdown(
+      renderMarkdownUnsafe('a ==bright== idea', { inlinePasses: [highlightPass] }),
+    )
     assert.match(html, /<mark>bright<\/mark>/)
   })
 
   it('applies inside GFM table cells', () => {
-    setInlinePasses([citationPass])
-    const html = renderMarkdownUnsafe('| ref |\n| --- |\n| [@doe2020] |')
+    const html = renderMarkdownUnsafe('| ref |\n| --- |\n| [@doe2020] |', {
+      inlinePasses: [citationPass],
+    })
     assert.match(html, /<td><span class="citation">@doe2020<\/span><\/td>/)
   })
 })
 
 describe('after-links passes', () => {
   it('runs over text with links already rendered', () => {
-    setInlinePasses([
-      {
-        name: 'todo-flag',
-        stage: 'after-links',
-        apply: (text, ctx) => text.replace(/\bTODO\b/g, () => ctx.emit('<mark>TODO</mark>')),
-      },
-    ])
-    const html = renderMarkdownUnsafe('TODO check [docs](https://example.com)')
+    const html = renderMarkdownUnsafe('TODO check [docs](https://example.com)', {
+      inlinePasses: [
+        {
+          name: 'todo-flag',
+          stage: 'after-links',
+          apply: (text, ctx) => text.replace(/\bTODO\b/g, () => ctx.emit('<mark>TODO</mark>')),
+        },
+      ],
+    })
     assert.match(html, /<mark>TODO<\/mark>/)
     assert.match(html, /<a[^>]*href="https:\/\/example\.com"/)
   })
@@ -136,11 +141,10 @@ describe('after-links passes', () => {
 
 describe('placeholder-token safety', () => {
   it('attacker-typed placeholder characters cannot address emitted HTML', () => {
-    setInlinePasses([citationPass])
     // The pass emits token id 0 for the citation; the literal U+E100/U+E101
     // characters in the input are stripped before any pass runs, so the typed
     // token degrades to a plain "0" instead of resolving to the emitted span.
-    const html = renderMarkdownUnsafe('[@a] then \uE1000\uE101')
+    const html = renderMarkdownUnsafe('[@a] then \uE1000\uE101', { inlinePasses: [citationPass] })
     const citations = html.match(/<span class="citation">/g) ?? []
     assert.equal(citations.length, 1)
     assert.match(html, /then 0/)
@@ -149,42 +153,45 @@ describe('placeholder-token safety', () => {
 
 describe('streaming hold', () => {
   it('holds a half-open citation and highlight in the pending tail', () => {
-    setInlinePasses([citationPass, highlightPass])
-    assert.equal(pendingHoldIndex('see [@doe'), 4)
-    assert.equal(pendingHoldIndex('an ==unfinished'), 3)
-    // A trailing '=' only holds when it is the line's last character.
-    assert.equal(pendingHoldIndex('a =maybe'), 'a =maybe'.length)
-    const complete = 'done [@doe2020] and ==x== fine'
-    assert.equal(pendingHoldIndex(complete), complete.length)
+    withConfig({ inlinePasses: [citationPass, highlightPass] }, () => {
+      assert.equal(pendingHoldIndex('see [@doe'), 4)
+      assert.equal(pendingHoldIndex('an ==unfinished'), 3)
+      // A trailing '=' only holds when it is the line's last character.
+      assert.equal(pendingHoldIndex('a =maybe'), 'a =maybe'.length)
+      const complete = 'done [@doe2020] and ==x== fine'
+      assert.equal(pendingHoldIndex(complete), complete.length)
+    })
   })
 
   it('renderPendingLine suppresses the held tail', () => {
-    setInlinePasses([citationPass])
-    const html = renderPendingLine('progress on [@partial')
+    const html = withConfig({ inlinePasses: [citationPass] }, () =>
+      renderPendingLine('progress on [@partial'),
+    )
     assert.match(html, /progress on/)
     assert.doesNotMatch(html, /\[@partial/)
   })
 
   it('does not hold inside code spans', () => {
-    setInlinePasses([citationPass])
-    const line = 'x `[@key` y'
-    assert.equal(pendingHoldIndex(line), line.length)
+    withConfig({ inlinePasses: [citationPass] }, () => {
+      const line = 'x `[@key` y'
+      assert.equal(pendingHoldIndex(line), line.length)
+    })
   })
 })
 
 describe('streaming convergence', () => {
   it('char-by-char streaming converges to the sanitized at-rest render', () => {
-    setInlinePasses([citationPass, highlightPass])
+    const config = { inlinePasses: [citationPass, highlightPass] }
     const source =
       'Findings from [@doe2020] were ==significant== (see `[@raw]` and [link](https://example.com)).\n\n- item with [@smith2021]\n'
     const host = document.createElement('div')
-    const renderer = new StreamingMarkdownRenderer(host)
+    const renderer = new StreamingMarkdownRenderer(host, config)
     for (let i = 1; i <= source.length; i++) {
       renderer.update(source.slice(0, i))
     }
     renderer.update(source)
     const expected = document.createElement('div')
-    expected.innerHTML = sanitizeRenderedMarkdown(renderMarkdownUnsafe(source))
+    expected.innerHTML = sanitizeRenderedMarkdown(renderMarkdownUnsafe(source, config))
     assert.equal(host.innerHTML.includes('<span class="citation">@doe2020</span>'), true)
     assert.equal(
       host.querySelector('p')?.innerHTML,

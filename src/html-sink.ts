@@ -1,3 +1,4 @@
+import { activeConfig } from './config.ts'
 import {
   sanitizeRenderedMarkdown,
   sanitizeRenderedMarkdownInto,
@@ -47,7 +48,6 @@ interface TrustedTypesFactory {
   createPolicy(name: string, rules: { createHTML: (input: string) => string }): TrustedTypesPolicy
 }
 
-let hostPolicy: TrustedTypesPolicy | null = null
 // `undefined` = default-policy creation not yet attempted; `null` = attempted
 // and unavailable (no `trustedTypes` global, or the policy name is not
 // allowlisted by the page's CSP).
@@ -60,49 +60,8 @@ let defaultPolicy: TrustedTypesPolicy | null | undefined
 // shim) invalidates the cache.
 let defaultPolicyFactory: TrustedTypesFactory | undefined
 
-/**
- * Inject the Trusted Types policy used to bless sanitized markdown HTML before
- * it reaches `innerHTML`, or pass `null` to restore the default (a lazily
- * created policy named `streaming-markdown`). Set it once, before the first
- * render, when the page's CSP `trusted-types` directive does not allowlist the
- * default name:
- *
- * ```ts
- * import { setTrustedTypesPolicy } from '@copse/streaming-markdown'
- * setTrustedTypesPolicy(
- *   window.trustedTypes.createPolicy('my-app#markdown', { createHTML: (s) => s }),
- * )
- * ```
- *
- * The policy's `createHTML` always receives markup this package has already
- * passed through {@link sanitizeRenderedMarkdown}, so an identity rule is
- * sound; the hook exists for CSP policy-name control, not to replace the
- * sanitizer.
- */
-export function setTrustedTypesPolicy(policy: TrustedTypesPolicy | null): void {
-  hostPolicy = policy
-  // Allow a failed probe to retry on the next sink write (tests and hosts that
-  // install a `trustedTypes` shim late). A *successfully created* default
-  // policy is deliberately NOT discarded: `createPolicy('streaming-markdown')`
-  // would throw on the second call under a CSP without 'allow-duplicates', and
-  // resolvePolicy's factory-identity check already handles shim swaps.
-  if (defaultPolicy === null) defaultPolicy = undefined
-}
-
-/**
- * @internal Snapshot the host Trusted Types policy slot for a scoped per-render
- * override (see `withRenderPolicies`). Restore with {@link restoreTrustedTypesPolicy}.
- */
-export function snapshotTrustedTypesPolicy(): TrustedTypesPolicy | null {
-  return hostPolicy
-}
-
-/** @internal Restore a snapshot from {@link snapshotTrustedTypesPolicy}. */
-export function restoreTrustedTypesPolicy(snapshot: TrustedTypesPolicy | null): void {
-  hostPolicy = snapshot
-}
-
 function resolvePolicy(): TrustedTypesPolicy | null {
+  const hostPolicy = activeConfig().trustedTypesPolicy
   if (hostPolicy) return hostPolicy
   const trustedTypes = (globalThis as { trustedTypes?: TrustedTypesFactory }).trustedTypes
   if (defaultPolicy === undefined || defaultPolicyFactory !== trustedTypes) {

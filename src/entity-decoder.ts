@@ -28,6 +28,8 @@
  * cycles or pulling `entities` into the default bundle.
  */
 
+import { activeConfig } from './config.ts'
+
 /** Decodes HTML character references in `text` (strict: a trailing `;` is required). */
 export type EntityDecoder = (text: string) => string
 
@@ -362,85 +364,47 @@ function decodeStrictWith(text: string, resolveNamed: (name: string) => string |
   })
 }
 
-let userNamed: Record<string, string> = {}
-let effectiveNamed: Record<string, string> = { ...BUILTIN_NAMED_ENTITIES }
-let customDecoder: EntityDecoder | null = null
-
-function rebuildEffective(): void {
-  effectiveNamed = { ...BUILTIN_NAMED_ENTITIES, ...userNamed }
+// The effective named set is `BUILTIN ⊕ config.namedEntities`; rebuild it once per
+// distinct `config.namedEntities` value (the decode runs on link/fence/escape text).
+let cachedNamedSource: Record<string, string> | undefined
+let cachedEffective: Record<string, string> = BUILTIN_NAMED_ENTITIES
+function effectiveNamed(): Record<string, string> {
+  const source = activeConfig().namedEntities
+  if (!source) return BUILTIN_NAMED_ENTITIES
+  if (source !== cachedNamedSource) {
+    cachedNamedSource = source
+    cachedEffective = { ...BUILTIN_NAMED_ENTITIES, ...source }
+  }
+  return cachedEffective
 }
 
 function builtinDecode(text: string): string {
-  return decodeStrictWith(text, (name) => effectiveNamed[name])
+  const named = effectiveNamed()
+  return decodeStrictWith(text, (name) => named[name])
 }
 
 /**
  * Decode HTML character references in `text`, strictly (a trailing `;` is
- * required, per CommonMark). Routes through a decoder registered with
- * {@link setEntityDecoder}, else uses the built-in numeric + HTML4-named decoder.
- * This is the entry point the parser's link, fence, and escape passes call.
+ * required, per CommonMark). Routes through the render's `entityDecoder` config
+ * (e.g. the full `entities` table or {@link browserEntityDecoder}) when set, else
+ * the built-in numeric + HTML4-named decoder. The parser's link, fence, and
+ * escape passes call this.
  */
 export function decodeHtmlEntities(text: string): string {
-  return (customDecoder ?? builtinDecode)(text)
+  return (activeConfig().entityDecoder ?? builtinDecode)(text)
 }
 
-/**
- * Replace the reference decoder wholesale — e.g. the full `entities` table or
- * {@link browserEntityDecoder}. Pass `null` to restore the built-in decoder.
- * A custom decoder is responsible for its own strictness; the built-in one and
- * {@link browserEntityDecoder} both require the trailing `;`.
- */
-export function setEntityDecoder(decoder: EntityDecoder | null): void {
-  customDecoder = decoder
-}
-
-/** The decoder registered with {@link setEntityDecoder}, or `null` when using the built-in. */
+/** The render's `entityDecoder` config, or `null` when using the built-in. */
 export function getEntityDecoder(): EntityDecoder | null {
-  return customDecoder
+  return activeConfig().entityDecoder ?? null
 }
 
 /**
- * Replace the user-defined named references layered over the built-in HTML4 set.
- * Keys are bare names (no `&`/`;`); values are the literal replacement strings.
- * User entries win over built-ins on collision. Only affects the built-in
- * decoder — a custom {@link setEntityDecoder} decoder owns its own set.
+ * The effective named set the built-in decoder uses for the current render
+ * (built-in HTML4 ⊕ the render's `namedEntities` config).
  */
-export function setNamedEntities(named: Record<string, string>): void {
-  userNamed = { ...named }
-  rebuildEffective()
-}
-
-/** Merge additional named references into the user layer (see {@link setNamedEntities}). */
-export function addNamedEntities(named: Record<string, string>): void {
-  userNamed = { ...userNamed, ...named }
-  rebuildEffective()
-}
-
-/** The effective named set the built-in decoder uses (built-in ⊕ user entries). */
 export function getNamedEntities(): Readonly<Record<string, string>> {
-  return { ...effectiveNamed }
-}
-
-/**
- * The raw *user* layer registered via {@link setNamedEntities} (without the
- * built-ins folded in) — the value to snapshot and pass back to
- * {@link setNamedEntities} for a scoped `withConfig` save/restore.
- */
-export function getUserNamedEntities(): Record<string, string> {
-  return { ...userNamed }
-}
-
-/**
- * Restore the default decoder and clear user-added names (test/host reset).
- *
- * @experimental Test/reset helper, exported from the main entry but not part of
- * the stable v1 surface (#147). May move behind a test-utilities subpath or be
- * removed in a minor release.
- */
-export function resetEntityDecoder(): void {
-  userNamed = {}
-  customDecoder = null
-  rebuildEffective()
+  return { ...effectiveNamed() }
 }
 
 let sharedTextarea: { innerHTML: string; value: string } | null = null
