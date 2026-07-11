@@ -21,6 +21,8 @@ import { dirname, resolve } from 'node:path'
 import { renderStreamingMarkdown, StreamingMarkdownRenderer } from '../src/streaming.ts'
 import { IncrementalSourceScanner } from '../src/incremental-scan.ts'
 import { tokenizeBlocks } from '../src/block-tokenizer.ts'
+import { setCodeHighlighter } from '../src/highlight.ts'
+import { installHighlightjs } from '../src/highlight-hljs.ts'
 import { loadBaselinePassingExamples } from '../tests/commonmark/baseline-examples.ts'
 
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -101,6 +103,29 @@ function footnoteDoc(paras: number): string {
   return `${body}\n\n${defs}\n`
 }
 
+/**
+ * Code-block-heavy fixture (#155): `blocks` fenced code blocks, each `linesPer`
+ * lines, streamed token-by-token. Once a fence closes it becomes a committed
+ * block the frozen-tail path freezes, so it is highlighted (or escaped) exactly
+ * once; re-highlighting the growing set of *closed* blocks on every update is the
+ * super-linear cost a naive re-render incurs, and the case competitors benchmark
+ * on code-heavy LLM traces. Language `js` so a registered highlighter does real work.
+ */
+function codeBlocksDoc(blocks: number, linesPer = 8): string {
+  return (
+    Array.from(
+      { length: blocks },
+      (_, i) =>
+        '```js\n' +
+        Array.from(
+          { length: linesPer },
+          (_, j) => `const x_${String(i)}_${String(j)} = compute(${String(j)}) + ${String(i)};`,
+        ).join('\n') +
+        '\n```',
+    ).join('\n\n') + '\n'
+  )
+}
+
 function chunkBoundaries(length: number, chunk: number): number[] {
   const cuts: number[] = []
   for (let i = chunk; i < length; i += chunk) cuts.push(i)
@@ -151,6 +176,7 @@ const fixtures: { name: string; text: string }[] = [
   { name: 'terms-of-service', text: termsOfService() },
   { name: 'synthetic-table+list', text: syntheticTableAndList() },
   { name: 'footnotes-heavy', text: footnoteDoc(80) },
+  { name: 'code-blocks-heavy', text: codeBlocksDoc(40) },
 ]
 
 console.log(
@@ -394,5 +420,54 @@ if (meanLazyGrowth >= 3.0) {
   throw new Error(
     `Lazy-blockquote tokenize scaled ${meanLazyGrowth.toFixed(2)}×/doubling — expected ~linear (< 3×). ` +
       `A per-candidate re-tokenize of the stripped quote prefix (#111) is the likely cause.`,
+  )
+}
+
+// Code-block scaling (#155): stream a document of many fenced code blocks at a
+// FIXED chunk so the number of *closed* (frozen) blocks grows with the input.
+// Each closed fence is frozen once, so it is highlighted a single time — doubling
+// the block count should ~double the work, not square it. A regression that stops
+// freezing closed code blocks (re-highlighting the whole growing prefix on every
+// update) is the super-linear cost this guards. Measured WITH a highlighter
+// registered because re-highlight cost is what dominates real code-heavy traces
+// (the main fixtures table above runs the same shape with no highlighter, for the
+// frozen-tail-structure-only cost). This also produces the number the eventual
+// published benchmark reports for code-heavy content. Kept deliberately light
+// (few blocks, coarse chunk) since it runs last in an already memory-heavy process.
+console.log('\ncode-block scaling — DOM path + highlight.js, fixed 64-byte chunk (closed blocks grow with size)\n')
+const codeScaleCols = [pad('blocks', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
+console.log(codeScaleCols.join('  '))
+console.log('-'.repeat(codeScaleCols.join('  ').length))
+installHighlightjs()
+const codeIters = Math.min(args.iters, 3)
+let prevCodeMs = 0
+const codeGrowth: number[] = []
+for (const blocks of [10, 20, 40]) {
+  const text = codeBlocksDoc(blocks)
+  const updates = chunkBoundaries(text.length, 64).length
+  const domMs = measure(() => benchDomPath(text, 64), codeIters, args.warmup)
+  const factor = prevCodeMs > 0 ? domMs / prevCodeMs : 0
+  if (factor > 0) codeGrowth.push(factor)
+  console.log(
+    [
+      pad(String(blocks), 8),
+      padLeft(String(text.length), 8),
+      padLeft(String(updates), 9),
+      padLeft(domMs.toFixed(2), 10),
+      padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
+    ].join('  '),
+  )
+  prevCodeMs = domMs
+}
+setCodeHighlighter(null)
+
+const meanCodeGrowth = codeGrowth.reduce((a, x) => a + x, 0) / codeGrowth.length
+console.log(
+  `\ncode-block mean growth per doubling (highlighter on): ${meanCodeGrowth.toFixed(2)}× (regression guard: < 3.0×; re-highlight-all ≈ 4×)`,
+)
+if (meanCodeGrowth >= 3.0) {
+  throw new Error(
+    `Code-block DOM streaming scaled ${meanCodeGrowth.toFixed(2)}×/doubling with a highlighter — expected ~O(n) ` +
+      `(< 3×; see #155). A regression to re-highlighting closed/frozen code blocks per update is the likely cause.`,
   )
 }
