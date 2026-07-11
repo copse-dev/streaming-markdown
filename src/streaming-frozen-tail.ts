@@ -64,8 +64,11 @@ import {
 } from './render-blocks.ts'
 import {
   createFootnoteContext,
-  setActiveFootnoteContext,
+  type FootnoteContext,
   type FootnoteDefinitionMap,
+  footnoteRefLabelsIn,
+  reseatFootnoteContext,
+  setActiveFootnoteContext,
 } from './footnotes.ts'
 import { getHtmlPolicy } from './html-policy.ts'
 import { type LinkReferenceMap } from './link-references.ts'
@@ -420,6 +423,20 @@ export class FrozenTailRenderer {
   private fnSectionOl: HTMLElement | null = null
   /** Last-rendered footnote section `<li>` HTML strings (change-detection). */
   private fnSectionItems: string[] = []
+  // Persisted state for the append-only fast path (#133): when definitions
+  // stream in over a fixed body in first-use order, a commit re-renders only the
+  // one newly-resolved reference block and appends only the new section item(s),
+  // instead of re-rendering the whole document every commit (the O(n²) driver).
+  /** The context carried across commits — its numbering/slugs stay authoritative. */
+  private fnCtx: FootnoteContext | null = null
+  /** Normalized `[^label]` refs per body part (raw-source scan, over-approximate). */
+  private fnPartLabels: string[][] = []
+  /** Distinct body labels in first-use (scan) order. */
+  private fnBodyOrder: string[] = []
+  /** How many times each body label is referenced (single-use gates the fast path). */
+  private fnBodyCount = new Map<string, number>()
+  /** Source offset where the body ends; new content past it disqualifies the fast path. */
+  private fnBodyEnd = 0
 
   private resetFootnoteState(): void {
     this.fnActive = false
@@ -429,6 +446,11 @@ export class FrozenTailRenderer {
     this.fnBodyParts = []
     this.fnSectionOl = null
     this.fnSectionItems = []
+    this.fnCtx = null
+    this.fnPartLabels = []
+    this.fnBodyOrder = []
+    this.fnBodyCount = new Map()
+    this.fnBodyEnd = 0
   }
 
   reset(): void {
@@ -797,7 +819,7 @@ export class FrozenTailRenderer {
     tokens: BlockToken[],
     linkRefs: LinkReferenceMap,
     footnoteDefs: FootnoteDefinitionMap,
-  ): { parts: RenderedPart[]; items: string[] } {
+  ): { parts: RenderedPart[]; items: string[]; ctx: FootnoteContext } {
     const ctx = createFootnoteContext(footnoteDefs)
     setActiveFootnoteContext(ctx)
     try {
@@ -805,10 +827,38 @@ export class FrozenTailRenderer {
       // section (reads ctx.order) — exactly renderMarkdownCore's sequence.
       const parts = renderBlocksToParts(complete, tokens, { linkRefs, ...RENDER_OPTS })
       const items = renderFootnoteSectionItems(ctx, linkRefs)
-      return { parts, items }
+      return { parts, items, ctx }
     } finally {
       setActiveFootnoteContext(null)
     }
+  }
+
+  /**
+   * Capture the per-body-part reference scan and the persisted context after a
+   * full frame render, arming the append-only fast path (#133). Called from both
+   * `fnRebuild` and the full incremental path so the fast path can resume after
+   * either.
+   */
+  private captureFootnoteFastState(
+    complete: string,
+    parts: RenderedPart[],
+    ctx: FootnoteContext,
+  ): void {
+    this.fnCtx = ctx
+    this.fnPartLabels = parts.map((p) => footnoteRefLabelsIn(complete.slice(p.start, p.end)))
+    this.fnBodyOrder = []
+    this.fnBodyCount = new Map()
+    const seen = new Set<string>()
+    for (const labels of this.fnPartLabels) {
+      for (const label of labels) {
+        this.fnBodyCount.set(label, (this.fnBodyCount.get(label) ?? 0) + 1)
+        if (!seen.has(label)) {
+          seen.add(label)
+          this.fnBodyOrder.push(label)
+        }
+      }
+    }
+    this.fnBodyEnd = parts.length > 0 ? (parts[parts.length - 1]?.end ?? 0) : 0
   }
 
   /**
@@ -826,7 +876,7 @@ export class FrozenTailRenderer {
     linkRefKey: string,
     footnoteDefs: FootnoteDefinitionMap,
   ): void {
-    const { parts, items } = this.renderFootnoteFrame(complete, tokens, linkRefs, footnoteDefs)
+    const { parts, items, ctx } = this.renderFootnoteFrame(complete, tokens, linkRefs, footnoteDefs)
     const body = parts.map((p) => p.html).join('\n')
     const section =
       items.length > 0 ? `<section class="footnotes"><ol>${items.join('')}</ol></section>` : ''
@@ -865,14 +915,16 @@ export class FrozenTailRenderer {
     this.fnGaveUp = false
     this.fnSource = complete
     this.fnLinkRefKey = linkRefKey
+    this.captureFootnoteFastState(complete, parts, ctx)
   }
 
   /**
-   * Incremental footnote commit. Returns false (signalling a rebuild) on any
-   * structural change the surgical path can't express: a different body-part
-   * count or boundary, a raw-HTML imbalance, a tag change, or the section
-   * appearing/disappearing/shrinking. On the fast path it re-morphs only the
-   * body parts whose HTML changed and the changed/appended section items.
+   * Incremental footnote commit. Tries the append-only fast path first (#133);
+   * otherwise falls back to a full frame render + per-part diff-morph (the path
+   * that handles renumbering, repeated references, and nested footnotes). Returns
+   * false — signalling a rebuild — on any structural change neither path can
+   * express: a different body-part count or boundary, a raw-HTML imbalance, a tag
+   * change, or the section appearing/disappearing/shrinking.
    */
   private fnIncremental(
     completedEl: HTMLElement,
@@ -881,7 +933,11 @@ export class FrozenTailRenderer {
     linkRefs: LinkReferenceMap,
   ): boolean {
     const footnoteDefs = collectFootnoteDefinitions(complete, tokens)
-    const { parts, items } = this.renderFootnoteFrame(complete, tokens, linkRefs, footnoteDefs)
+
+    const fast = this.fnFastCommit(completedEl, complete, tokens, linkRefs, footnoteDefs)
+    if (fast !== 'skip') return fast === 'done'
+
+    const { parts, items, ctx } = this.renderFootnoteFrame(complete, tokens, linkRefs, footnoteDefs)
 
     // Structural guard: body must have the same parts at the same source spans
     // (footnote definitions render nothing, so committing one leaves the body
@@ -904,7 +960,92 @@ export class FrozenTailRenderer {
       this.renderedChars += part.html.length
     }
 
-    return this.syncFootnoteSection(completedEl, items)
+    if (!this.syncFootnoteSection(completedEl, items)) return false
+    // Re-arm the fast path with the fresh context (body is unchanged, so the
+    // scan metadata is identical; only the numbering context advanced).
+    this.captureFootnoteFastState(complete, parts, ctx)
+    return true
+  }
+
+  /**
+   * The append-only fast path (#133): when definitions stream in over a fixed
+   * body in first-use order, each with a single, non-nested reference, re-render
+   * only the newly-resolved reference block(s) and append only the new section
+   * item(s) — turning the per-commit O(n) full re-render into O(delta). Returns
+   * `'skip'` (defer to the full path) on anything it can't safely express, or
+   * `'rebuild'` when a morph guard fails mid-commit.
+   */
+  private fnFastCommit(
+    completedEl: HTMLElement,
+    complete: string,
+    tokens: BlockToken[],
+    linkRefs: LinkReferenceMap,
+    footnoteDefs: FootnoteDefinitionMap,
+  ): 'done' | 'skip' | 'rebuild' {
+    const persisted = this.fnCtx
+    if (!persisted) return 'skip'
+
+    // (1) Body unchanged: everything committed past the body is a definition,
+    // blank, or link-ref line (no new body block appeared).
+    for (const token of tokens) {
+      if (token.end <= this.fnBodyEnd) continue
+      if (
+        token.kind !== 'footnote_def' &&
+        token.kind !== 'blank' &&
+        token.kind !== 'link_ref_def'
+      ) {
+        return 'skip'
+      }
+    }
+
+    // (2) Resolved labels in scan order must extend the real rendered order as a
+    // prefix — append-only, and the raw scan agrees with the actual numbering.
+    const resolvedNow = this.fnBodyOrder.filter((label) => footnoteDefs.has(label))
+    const prev = persisted.order
+    if (resolvedNow.length < prev.length) return 'skip'
+    for (let i = 0; i < prev.length; i++) if (resolvedNow[i] !== prev[i]) return 'skip'
+    const newLabels = resolvedNow.slice(prev.length)
+
+    // (3) Single-use references only (repeated refs need cross-part id dedup this
+    // path doesn't reproduce), and (4) no footnote content cites another footnote
+    // (a section-first-use reference grows numbering outside the body order — its
+    // label may not even appear in the body scan).
+    for (const label of resolvedNow) if ((this.fnBodyCount.get(label) ?? 0) !== 1) return 'skip'
+    for (const def of footnoteDefs.values()) if (def.content.includes('[^')) return 'skip'
+
+    if (newLabels.length === 0) return 'done' // e.g. an unreferenced definition committed
+
+    // Reseat onto the current definition map (so new labels resolve) while
+    // carrying existing numbers/slugs forward, then render the dirty parts (those
+    // citing a new label) in document order and append the new section items.
+    const ctx = reseatFootnoteContext(footnoteDefs, persisted)
+    const newSet = new Set(newLabels)
+    let appendedItems: string[]
+    setActiveFootnoteContext(ctx)
+    try {
+      for (let i = 0; i < this.fnPartLabels.length; i++) {
+        const labels = this.fnPartLabels[i]
+        const cached = this.fnBodyParts[i]
+        if (!labels || !cached || !labels.some((label) => newSet.has(label))) continue
+        const partTokens = tokens.filter((t) => t.start >= cached.start && t.end <= cached.end)
+        const html = renderBlocksToParts(complete, partTokens, { linkRefs, ...RENDER_OPTS })
+          .map((p) => p.html)
+          .join('\n')
+        if (html !== '' && hasUnfreezableRawHtml(html)) return 'rebuild'
+        if (!this.morphPartElement(completedEl, cached.el, html)) return 'rebuild'
+        cached.html = html
+        this.renderedChars += html.length
+      }
+      appendedItems = renderFootnoteSectionItems(ctx, linkRefs, this.fnSectionItems.length)
+    } finally {
+      setActiveFootnoteContext(null)
+    }
+
+    if (!this.syncFootnoteSection(completedEl, [...this.fnSectionItems, ...appendedItems])) {
+      return 'rebuild'
+    }
+    this.fnCtx = ctx
+    return 'done'
   }
 
   /**
