@@ -593,12 +593,19 @@ export interface StreamingMarkdownOptions extends RenderPolicyOptions {}
  * Render assistant text while it is still streaming.
  * Completed blocks (per the block tokenizer) are markdown-rendered; the pending
  * tail only renders safe inline markdown once its block context is unambiguous.
+ *
+ * Returns {@link SanitizedHtml}, matching {@link renderMarkdown}: the output is
+ * `sanitizeRenderedMarkdown` parts joined by literal allowlisted seams (forming
+ * fence/math/table scaffolding, pending inline/block wrappers — every one built
+ * with `asSanitizedHtml`), so the whole string carries the sanitized brand.
+ * Hosts assigning it to `innerHTML` keep the compile-time protection and the
+ * Trusted Types story instead of dropping to an unbranded `string` (#140).
  */
 export function renderStreamingMarkdown(
   content: string,
   options: StreamingMarkdownOptions = {},
-): string {
-  return withRenderPolicies(options, () => renderStreamingMarkdownCore(content))
+): SanitizedHtml {
+  return withRenderPolicies(options, () => asSanitizedHtml(renderStreamingMarkdownCore(content)))
 }
 
 function renderStreamingMarkdownCore(content: string): string {
