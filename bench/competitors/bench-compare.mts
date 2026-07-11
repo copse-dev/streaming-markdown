@@ -800,7 +800,18 @@ if (args.isolate) {
           ...['--max-updates', String(args.maxUpdates)],
           ...(args.parity ? ['--parity'] : []),
         ],
-        { stdio: ['ignore', 'inherit', 'inherit'], cwd: benchDir },
+        {
+          stdio: ['ignore', 'inherit', 'inherit'],
+          cwd: benchDir,
+          env: {
+            ...process.env,
+            // The jsdom sanitize retention (see child-mode note) accumulates
+            // ~5 GB over one sanitizing contestant's 4 passes on the largest
+            // fixture; children get a fixed 8 GB ceiling (appended, so it wins
+            // over any inherited limit) since only one child runs at a time.
+            NODE_OPTIONS: `${process.env['NODE_OPTIONS'] ?? ''} --max-old-space-size=8192`.trim(),
+          },
+        },
       )
       if (child.status === 0 && existsSync(partial)) {
         const partialJson = JSON.parse(readFileSync(partial, 'utf8')) as {

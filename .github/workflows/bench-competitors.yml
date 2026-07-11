@@ -51,11 +51,10 @@ jobs:
       - name: Install (competitors)
         run: npm ci --prefix bench/competitors
 
+      # No NODE_OPTIONS here: the harness sets an 8 GB ceiling on each
+      # measurement child itself (one child at a time; standard hosted
+      # runners have 16 GB), and the parent process stays small.
       - name: Run cross-library bench
-        env:
-          # The React full-re-render competitors hold large retained trees on
-          # the long-transcript fixture; headroom mirrors ci.yml's bench job.
-          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run bench:competitors
 
       - name: Upload results
