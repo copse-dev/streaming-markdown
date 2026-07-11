@@ -72,6 +72,8 @@ for await (const chunk of stream) {
   restrict which origins links/images may point at, rewrite/neutralize the rest,
   and strip base64 `data:` images — off by default, byte-identical until you set
   it. See [Link/image origin policy in `docs/EXTENDING.md`](docs/EXTENDING.md#linkimage-origin-policy).
+  The full security model, threat model, and hardening knobs are in
+  [`docs/SECURITY.md`](docs/SECURITY.md).
 - **Zero runtime dependencies.** The core carries no required dependency. HTML
   character references decode against a built-in set (the 252 classic HTML4 named
   references plus all numeric references) that covers essentially everything real
@@ -146,6 +148,8 @@ variables, and native-nesting note — are in [`docs/EXTENDING.md`](docs/EXTENDI
   optional and lazy, and how the code-split loading works.
 - **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — design invariants, the
   two-emitter streaming architecture, and the regression/conformance suite.
+- **[`docs/SECURITY.md`](docs/SECURITY.md)** — the sanitize-at-the-sink security
+  model, a threat model, trust boundaries, and hardening knobs.
 
 ## Development
 
