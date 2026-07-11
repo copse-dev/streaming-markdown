@@ -67,6 +67,7 @@ import {
   type FootnoteContext,
   type FootnoteDefinitionMap,
   footnoteRefLabelsIn,
+  getActiveFootnoteContext,
   reseatFootnoteContext,
   setActiveFootnoteContext,
 } from './footnotes.ts'
@@ -821,6 +822,9 @@ export class FrozenTailRenderer {
     footnoteDefs: FootnoteDefinitionMap,
   ): { parts: RenderedPart[]; items: string[]; ctx: FootnoteContext } {
     const ctx = createFootnoteContext(footnoteDefs)
+    // Restore the prior context, not null, so a recursive render from a fence
+    // handler / inline pass can't strand an outer document's footnotes (#144).
+    const previous = getActiveFootnoteContext()
     setActiveFootnoteContext(ctx)
     try {
       // Body first (advances first-use numbering in document order), then the
@@ -829,7 +833,7 @@ export class FrozenTailRenderer {
       const items = renderFootnoteSectionItems(ctx, linkRefs)
       return { parts, items, ctx }
     } finally {
-      setActiveFootnoteContext(null)
+      setActiveFootnoteContext(previous)
     }
   }
 
@@ -1021,6 +1025,7 @@ export class FrozenTailRenderer {
     const ctx = reseatFootnoteContext(footnoteDefs, persisted)
     const newSet = new Set(newLabels)
     let appendedItems: string[]
+    const previous = getActiveFootnoteContext()
     setActiveFootnoteContext(ctx)
     try {
       for (let i = 0; i < this.fnPartLabels.length; i++) {
@@ -1038,7 +1043,7 @@ export class FrozenTailRenderer {
       }
       appendedItems = renderFootnoteSectionItems(ctx, linkRefs, this.fnSectionItems.length)
     } finally {
-      setActiveFootnoteContext(null)
+      setActiveFootnoteContext(previous)
     }
 
     if (!this.syncFootnoteSection(completedEl, [...this.fnSectionItems, ...appendedItems])) {
