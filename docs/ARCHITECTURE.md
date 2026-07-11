@@ -527,14 +527,14 @@ counts). Current state:
 | Strikethrough           | 2/2      | Full — double-tilde `~~x~~` → `<del>`.                                                     |
 | Tables                  | 8/8      | Full — column alignment (`:-:`/`--:` → `align`, `parseTableAlignments`), escaped `\|` in cells (`splitTableRow`), column-count normalization and delimiter/header mismatch rejection (`tableColumnsMatch`) are all implemented. |
 | Task list items         | 0/2      | Renderer output diverges on purpose — it adds `class="task-list-item"`/`contains-task-list` and a `disabled` checkbox for app styling ([#614](https://github.com/copse-dev/agent-pane/issues/614)), which the spec's bare `<input>` output does not.  |
-| Autolinks (extension)   | 0/11     | Only bare `http(s)://` is linked (`inline-spans.ts`); no `www.`, no bare email. Trailing-punctuation trimming follows GFM's balanced-paren rule (a closing `)` that balances an earlier `(` stays in the link, #107) but not its entity rules.                 |
+| Autolinks (extension)   | 11/11    | Full (#125) — bare `http(s)://` plus `www.`, bare-URL, and email autolinks (`inline-autolinks.ts` / `inline-spans.ts`). Trailing-punctuation trimming follows GFM's balanced-paren rule (a closing `)` that balances an earlier `(` stays in the link, #107) and the extension's boundary/entity rules. |
 | Disallowed Raw HTML     | 0/1      | In the harness's pinned `'escape'` mode the renderer escapes *all* attributed/structural raw HTML, which is stricter than GFM's tag filter — so the filtered-passthrough output never matches. |
 
-Tables and Strikethrough are the fully-conforming extensions; the rest cap out on a
-real grammar gap (extended autolinks) or deliberate divergence (task-list classes,
-raw-HTML escaping). Closing the `www.`/bare-email extended-autolink gap (0/11) is
-the highest-value remaining follow-up — task-list `class`/`disabled` output and the
-disallowed-raw-HTML tag filter are intentional divergences, not gaps to close.
+Tables, Strikethrough, and Autolinks are the fully-conforming extensions. The
+remaining two cap out on **deliberate divergences, not gaps to close**: task-list
+items add `class="task-list-item"`/`contains-task-list` and a `disabled` checkbox
+for app styling, and Disallowed Raw HTML is escaped more strictly than GFM's tag
+filter under the harness's pinned `'escape'` mode.
 
 ### Streaming convergence fuzz (`streaming-convergence.test.ts`, via `npm test`)
 
