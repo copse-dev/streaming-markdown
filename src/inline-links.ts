@@ -133,7 +133,7 @@ export interface LinkDecoration {
  * Host hook that returns the attribute string appended after `href` on a
  * rendered `<a>` (e.g. ` target="_blank" rel="…" data-browser-link="true"`).
  * Keeps app-specific link decoration out of the parser core so the package can
- * be hosted elsewhere (#601). Install with {@link setLinkDecorator}.
+ * be hosted elsewhere (#601). Supply per render via `MarkdownConfig.linkDecorator`.
  */
 export type LinkDecorator = (link: LinkDecoration) => string
 
@@ -142,7 +142,7 @@ export type LinkDecorator = (link: LinkDecoration) => string
  * only a `title` attribute when the link carries one and nothing else: no
  * `target`, no `rel`, no `class`, and no `data-*` routing hooks. A general
  * "just render this" consumer gets plain CommonMark-shaped anchors and opts into
- * host semantics explicitly via {@link setLinkDecorator}.
+ * host semantics explicitly via `MarkdownConfig.linkDecorator`.
  */
 export const neutralLinkDecorator: LinkDecorator = ({ title }) =>
   title ? ` title="${escapeHtml(title)}"` : ''
@@ -152,8 +152,8 @@ export const neutralLinkDecorator: LinkDecorator = ({ title }) =>
  * / `data-browser-link` flag links for `workspace-links.ts` / `browser-links.ts`
  * and external links open in a new context. This is host-specific and lives
  * behind the `@copse/streaming-markdown/host/workspace` entry; a host that wants
- * the pre-0.10 in-app behaviour restores it with a single call:
- * `setLinkDecorator(appLinkDecorator)`.
+ * the pre-0.10 in-app behaviour restores it per render with
+ * `{ linkDecorator: appLinkDecorator }`.
  */
 export const appLinkDecorator: LinkDecorator = ({ isWorkspace, title }) => {
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''

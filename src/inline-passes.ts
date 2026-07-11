@@ -15,7 +15,7 @@
 //    characters are stripped from the input before any pass runs, so markdown
 //    text can never address the side table. The sink sanitizer remains the
 //    second gate: emitted HTML using non-allowlisted tags/attributes needs
-//    `setSanitizeExtension`.
+//    `MarkdownConfig.sanitizeExtension`.
 // 3. **Streaming hold.** `pendingHoldIndex` (`inline-emphasis.ts`) takes the min
 //    over registered passes' {@link InlinePass.holdStart}, so a half-open
 //    construct (`[@doe`, `==foo`) holds instead of flashing raw mid-stream —
@@ -36,7 +36,7 @@ export interface InlinePassContext {
    * Shield trusted HTML from later passes and the escape step. Returns an inert
    * placeholder token to splice into the returned text; the pipeline restores
    * the HTML after escaping. The HTML still passes the host's sanitizer sink —
-   * stay inside the allowlist or widen it via `setSanitizeExtension`.
+   * stay inside the allowlist or widen it via `MarkdownConfig.sanitizeExtension`.
    */
   emit(html: string): string
 }

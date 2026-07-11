@@ -14,9 +14,9 @@ export interface RawImageTag {
  * raw HTML, so by default every `<img>` is left untouched (and thus escaped like
  * any other tag). A host that wants to allow specific images (e.g. resolving an
  * app-specific artifact URL to an inert placeholder) injects a renderer via
- * {@link setRawImageRenderer}; return the replacement HTML, or `null` to leave the
- * tag for the default escaping. Whatever the host emits still passes through
- * `sanitizeRenderedMarkdown` — widen its allowlist via `setSanitizeExtension`.
+ * `MarkdownConfig.rawImageRenderer`; return the replacement HTML, or `null` to leave
+ * the tag for the default escaping. Whatever the host emits still passes through
+ * `sanitizeRenderedMarkdown` — widen its allowlist via `MarkdownConfig.sanitizeExtension`.
  */
 export type RawImageRenderer = (img: RawImageTag) => string | null
 

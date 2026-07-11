@@ -84,13 +84,11 @@ export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './e
 // HTML character-reference decoding is a pluggable backend (#594). The default
 // decoder carries the 252 classic HTML4 named references plus all numeric refs
 // (~1 KB) rather than the full ~2,100-entry HTML5 table (~23 KB gzip). Hosts that
-// need the full set register a decoder — `browserEntityDecoder` (zero bundle cost
+// need the full set supply a decoder — `browserEntityDecoder` (zero bundle cost
 // in the DOM) or the `@copse/streaming-markdown/entities/full` entry (backed by
-// the `entities` peer dependency) — or extend the built-in set with
-// `addNamedEntities`. See docs/ARCHITECTURE.md.
-// `BUILTIN_NAMED_ENTITIES` (internal data table) and `resetEntityDecoder`
-// (test/reset helper) are marked `@experimental` (#147) — not part of the stable
-// v1 surface. Extend the decoder via `addNamedEntities` / `setNamedEntities`.
+// the `entities` peer dependency). See docs/ARCHITECTURE.md.
+// `BUILTIN_NAMED_ENTITIES` (internal data table) is marked `@experimental`
+// (#147) — not part of the stable v1 surface.
 // The entity decoder is scoped per render via `MarkdownConfig.entityDecoder`
 // (the full HTML5 table from the `entities/full` entry, or `browserEntityDecoder`);
 // a user named-reference table via `MarkdownConfig.namedEntities`. The built-in

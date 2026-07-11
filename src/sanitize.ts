@@ -117,7 +117,8 @@ export interface SanitizerConfig {
  * dropping every tag/attribute outside the allowlist and invoking
  * {@link SanitizerConfig.onElement} for each element it keeps.
  *
- * Swap the active backend with {@link setSanitizerBackend}. The package ships
+ * Swap the backend per render via `MarkdownConfig.sanitizerBackend`, or
+ * process-wide with `setDefaultConfig({ sanitizerBackend })`. The package ships
  * {@link browserSanitizerBackend} (native Sanitizer API, the default) and, behind
  * the `@copse/streaming-markdown/sanitizers/dompurify` entry point, a DOMPurify
  * backend for environments without the native API.

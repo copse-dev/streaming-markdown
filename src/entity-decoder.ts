@@ -10,13 +10,14 @@
  * (which need no table — they are algorithmic). That covers essentially every
  * entity real markdown contains at ~1 KB instead of ~23 KB.
  *
- * Hosts that need the full HTML5 set register a decoder with {@link setEntityDecoder}:
- *   - `@copse/streaming-markdown/entities/full` — one call, backed by `entities`
+ * Hosts that need the full HTML5 set pass a decoder via `MarkdownConfig.entityDecoder`
+ * (or install one process-wide with `setDefaultConfig({ entityDecoder })`):
+ *   - `@copse/streaming-markdown/entities/full` — backed by `entities`
  *     (adds the full table to the bundle; opt in when you want it).
  *   - {@link browserEntityDecoder} — borrows the browser's own parser table via a
  *     detached `<textarea>`, so full coverage costs zero bundle bytes in the DOM.
  * Hosts that just need a few extra names extend the built-in map with
- * {@link addNamedEntities} — no full decoder required.
+ * `MarkdownConfig.namedEntities` — no full decoder required.
  *
  * The named map values are the HTML5 code points (so `&lang;`/`&rang;` decode to
  * the mathematical angle brackets the full table produces, not their HTML4
@@ -40,7 +41,7 @@ export type EntityDecoder = (text: string) => string
  *
  * @experimental Internal data table, exported from the main entry but not part of
  * the stable v1 surface (#147). Its shape/contents may change; extend the decoder
- * with `addNamedEntities` / `setNamedEntities` rather than reading this directly.
+ * with `MarkdownConfig.namedEntities` rather than reading this directly.
  */
 export const BUILTIN_NAMED_ENTITIES: Readonly<Record<string, string>> = Object.freeze({
   aacute: "á",
@@ -434,7 +435,8 @@ function decodeNamedViaDom(name: string): string | undefined {
 /**
  * A full-HTML5 decoder that borrows the browser's built-in character-reference
  * table through a detached `<textarea>` — full named coverage at zero bundle
- * cost, for DOM hosts. Register it with `setEntityDecoder(browserEntityDecoder)`.
+ * cost, for DOM hosts. Pass it via `MarkdownConfig.entityDecoder` (or
+ * `setDefaultConfig({ entityDecoder: browserEntityDecoder })`).
  * It stays strict because only complete `&name;` tokens are handed to the parser,
  * so the browser's semicolon-less legacy decoding never triggers. Throws if
  * called without a `document`.

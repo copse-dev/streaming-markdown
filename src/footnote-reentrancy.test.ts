@@ -10,7 +10,7 @@ import { renderMarkdownUnsafe } from './renderer.ts'
 // pass rendering footnote-bearing content), so a nested render would strand the
 // OUTER document's context: every `[^ref]` after the nested render rendered
 // literal instead of a link. The fix saves and restores the prior context
-// (mirroring the scoped setHtmlPolicy `previous` pattern). These pin it.
+// (mirroring withConfig's save/restore pattern). These pin it.
 
 // A fence handler that recursively renders its own footnote-bearing content —
 // the exact reentrancy the extension API allows. It installs and (previously)

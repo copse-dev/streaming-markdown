@@ -2,7 +2,7 @@
 // rendered `<a href>`/`<img src>` is permitted to point at (issue #83). It
 // composes with, and never replaces, the two gates that already ship:
 //
-//   - the scheme allowlist (`setSafeHrefSchemes`), which decides which URL
+//   - the scheme allowlist (`MarkdownConfig.safeHrefSchemes`), which decides which URL
 //     *schemes* are inert enough to render (`javascript:`/`data:` are dropped
 //     upstream by `safeLinkHref` before an `<a>` is ever built), and
 //   - the sink sanitizer (`sanitize.ts`), the narrow tag/attribute allowlist.
@@ -18,11 +18,11 @@
 // byte-identical to today (the package invariant).
 
 /**
- * Origin allowlist for rendered links and images. Install with
- * {@link setLinkImagePolicy}; `null` (the default) disables it entirely.
+ * Origin allowlist for rendered links and images. Supply per render via
+ * `MarkdownConfig.linkImagePolicy`; `null` (the default) disables it entirely.
  *
  * Prefix matching is performed on the WHATWG-canonical serialization of each URL
- * (see {@link setLinkImagePolicy}), so it is robust against the usual
+ * (see {@link getLinkImagePolicy}), so it is robust against the usual
  * allowlist-bypass tricks — case-folding, `\` vs `/`, embedded credentials
  * (`https://good.com@evil.com`), scheme-relative `//evil.com`, leading/trailing
  * whitespace, and unicode host confusables (folded to punycode). Scheme safety

@@ -21,7 +21,7 @@ import {
 //   Hosts whose CSP restricts policy names must allowlist `streaming-markdown`
 //   (`Content-Security-Policy: trusted-types streaming-markdown ...`) or
 //   inject their own policy below.
-// - a host-injected policy registered with {@link setTrustedTypesPolicy}. It
+// - a host-injected policy passed via `MarkdownConfig.trustedTypesPolicy`. It
 //   receives *already sanitized* markup, so an identity `createHTML` is fine —
 //   the injection point exists to satisfy CSP policy-name allowlists, not to
 //   replace the sanitizer.
@@ -76,7 +76,8 @@ function resolvePolicy(): TrustedTypesPolicy | null {
         // Policy name not allowlisted by the page's CSP. Fall back to plain
         // string assignment; under enforcement the sink itself will then
         // throw, which is the CSP-intended failure mode — the host must
-        // allowlist `streaming-markdown` or call setTrustedTypesPolicy().
+        // allowlist `streaming-markdown` or pass its own policy via
+        // `MarkdownConfig.trustedTypesPolicy`.
       }
     }
   }

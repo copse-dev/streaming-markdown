@@ -14,7 +14,7 @@ import { mathBlockHtml, syncFormingMathBlockDom } from './math-block.ts'
 // separate hydration step — `hydratePendingDiagrams` for mermaid, or a
 // host-owned equivalent — upgrades it after sanitization. Scaffolding therefore
 // MUST stay inside the sanitizer allowlist (`sanitize.ts`), or the handler's
-// author widens it via `setSanitizeExtension`; hydration output injected after
+// author widens it via `MarkdownConfig.sanitizeExtension`; hydration output injected after
 // the sink is the trusted escape hatch (see the mermaid design invariant in
 // docs/ARCHITECTURE.md).
 
@@ -47,12 +47,12 @@ export interface FenceHandlerForming {
 /**
  * Pluggable renderer for a fenced code block with a specific info-string
  * language — the seam behind ```` ```mermaid ````-style custom blocks
- * (math, graphviz, vega, …). Register with {@link setFenceHandler}.
+ * (math, graphviz, vega, …). Supply per render via `MarkdownConfig.fenceHandlers`.
  *
  * `render` returns the at-rest HTML for a completed fence. The code is
  * verbatim fence content (trailing newline included when present); the output
  * is later sanitized at the host's sink like all renderer output, so emit only
- * allowlisted tags/attributes or widen the allowlist via `setSanitizeExtension`.
+ * allowlisted tags/attributes or widen the allowlist via `MarkdownConfig.sanitizeExtension`.
  */
 export interface FenceHandler {
   render(code: string, lang: string): string
