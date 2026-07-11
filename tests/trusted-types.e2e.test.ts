@@ -37,6 +37,10 @@ type SMApi = typeof import('../src/index.ts') & {
   sanitizeRenderedMarkdownInto: (typeof import('../src/sanitize.ts'))['sanitizeRenderedMarkdownInto']
   setPresanitizedHtml: (typeof import('../src/html-sink.ts'))['setPresanitizedHtml']
   dompurifyBackend: (typeof import('../src/sanitize-dompurify.ts'))['dompurifyBackend']
+  // Internal backend registrations exposed by the harness bundle (no longer on
+  // the public API — the sink helpers read the process-wide backend).
+  setSanitizerBackend: (typeof import('../src/sanitize.ts'))['setSanitizerBackend']
+  setDiagramRenderer: (typeof import('../src/mermaid.ts'))['setDiagramRenderer']
 }
 declare const SM: SMApi
 

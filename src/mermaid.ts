@@ -69,6 +69,14 @@ export function getDiagramRenderer(): DiagramRenderer | null {
 /** Options for {@link hydratePendingDiagrams}. */
 export interface HydrateDiagramsOptions {
   /**
+   * The {@link DiagramRenderer} to hydrate with — obtain one from `loadMermaid()`
+   * (`@copse/streaming-markdown/diagrams/mermaid`). This is the config-injected
+   * path that replaces the old global `setDiagramRenderer` registration: pass the
+   * renderer per hydration call. When omitted, falls back to a renderer
+   * registered internally (e.g. by `installMermaid`).
+   */
+  renderer?: DiagramRenderer | null
+  /**
    * Post-process the backend's SVG before it is injected. Mermaid SVG is produced
    * by the trusted library *after* sink sanitization and is not re-sanitized by
    * default (see the design invariant); a safety-conscious host can pass a
@@ -113,7 +121,7 @@ export async function hydratePendingDiagrams(
   root: Element,
   options: HydrateDiagramsOptions = {},
 ): Promise<number> {
-  const renderer = diagramRenderer
+  const renderer = options.renderer ?? diagramRenderer
   if (!renderer) return 0
 
   const containers: Element[] = []

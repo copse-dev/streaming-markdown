@@ -37,8 +37,11 @@ import {
 import { getBareUrlCjkBoundary, setBareUrlCjkBoundary } from './inline-spans.ts'
 import { getInlinePasses, setInlinePasses, type InlinePass } from './inline-passes.ts'
 import { getRawImageRenderer, setRawImageRenderer, type RawImageRenderer } from './raw-images.ts'
+import { getSanitizerBackend, setSanitizerBackend, type SanitizerBackend } from './sanitize.ts'
 import { isEmailAutolinksEnabled, setEmailAutolinks } from './autolink-syntax.ts'
 import { getLinkDecorator, setLinkDecorator, type LinkDecorator } from './inline-links.ts'
+import type { MathRenderer } from './math.ts'
+import type { DiagramRenderer } from './mermaid.ts'
 import {
   type FenceHandler,
   restoreFenceHandlers,
@@ -130,6 +133,27 @@ export interface MarkdownConfig extends RenderPolicyOptions {
    * (only affects the built-in decoder). See entity-decoder.ts.
    */
   namedEntities?: Record<string, string>
+  /**
+   * Sanitizer backend for the sink (`null` uses the native browser Sanitizer).
+   * Scoped per render like the rest of the synchronous tier. See sanitize.ts.
+   */
+  sanitizerBackend?: SanitizerBackend | null
+  /**
+   * Math renderer used by {@link StreamingMarkdownRenderer.hydrate} to fill
+   * pending math scaffolding. Unlike the synchronous fields, this is read during
+   * *async* hydration (after the render returns), so it is carried on the config
+   * for `hydrate()` rather than scoped around the synchronous render. Obtain one
+   * from `loadKatex()` (`@copse/streaming-markdown/math/katex`). Pair with
+   * `mathSyntax: true` to also turn on the prose `$…$` grammar. See math.ts.
+   */
+  mathRenderer?: MathRenderer | null
+  /**
+   * Diagram renderer used by {@link StreamingMarkdownRenderer.hydrate} to fill
+   * pending mermaid scaffolding. Read during async hydration (see
+   * {@link mathRenderer}). Obtain one from `loadMermaid()`
+   * (`@copse/streaming-markdown/diagrams/mermaid`). See mermaid.ts.
+   */
+  diagramRenderer?: DiagramRenderer | null
 }
 
 /**
@@ -224,6 +248,17 @@ export function withConfig<T>(config: MarkdownConfig, fn: () => T): T {
         setNamedEntities(previous)
       })
     }
+    if (config.sanitizerBackend !== undefined) {
+      const previous = getSanitizerBackend()
+      setSanitizerBackend(config.sanitizerBackend)
+      restores.push(() => {
+        setSanitizerBackend(previous)
+      })
+    }
+    // `mathRenderer`/`diagramRenderer` are intentionally NOT scoped here: they are
+    // read during async hydration, after this synchronous block returns, so a
+    // save/restore around `fn()` would be undone before hydration runs. They ride
+    // the config for `StreamingMarkdownRenderer.hydrate()` / the hydrate options.
 
     if (restores.length === 0) return fn()
     try {

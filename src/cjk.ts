@@ -25,8 +25,6 @@
  * host's CSS to own, not the renderer's — see `styles/cjk.css` and the CJK
  * section of `docs/EXTENDING.md`.
  */
-import { setFlankingPunctuationExclusion } from './inline-emphasis.ts'
-import { setBareUrlCjkBoundary } from './inline-spans.ts'
 
 /**
  * Full-width / ideographic punctuation, i.e. the East-Asian-width punctuation
@@ -43,18 +41,6 @@ const CJK_PUNCTUATION_RE =
 /** True for a single full-width / ideographic punctuation character. */
 export function isCjkPunctuation(ch: string): boolean {
   return ch !== '' && CJK_PUNCTUATION_RE.test(ch)
-}
-
-/**
- * Enable (default) or disable CJK-friendly emphasis and autolink boundaries.
- * Set once, before the first render — the registries it flips are shared by the
- * at-rest and streaming emitters, like the other opt-in backends. Pass `false`
- * to restore stock CommonMark flanking (also the right teardown for tests).
- */
-export function setCjkFriendly(enabled = true): void {
-  const fn = enabled ? isCjkPunctuation : null
-  setFlankingPunctuationExclusion(fn)
-  setBareUrlCjkBoundary(fn)
 }
 
 /**

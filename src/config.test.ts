@@ -1,6 +1,8 @@
+import '../tests/setup-dom-jsdom.ts'
 import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderMarkdownUnsafe } from './renderer.ts'
+import { StreamingMarkdownRenderer } from './streaming.ts'
 import {
   getLinkDecorator,
   setLinkDecorator,
@@ -8,9 +10,11 @@ import {
   neutralLinkDecorator,
 } from './inline-links.ts'
 import { getFenceHandler, setFenceHandler, type FenceHandler } from './fence-handlers.ts'
+import { getCodeHighlighter, setCodeHighlighter, type CodeHighlighter } from './highlight.ts'
 import { getMathSyntax, setMathSyntax } from './math-syntax.ts'
+import type { MathRenderer } from './math.ts'
 
-// SPIKE demo (#145/#137/#147): the config-injected API replaces the config-epoch.
+// The config-injected API (#145/#137/#147) replaces the config-epoch mechanism.
 // Two renders with different `MarkdownConfig` produce their own output in one
 // process — no `set*`, no epoch — and every global slot is left untouched after.
 describe('config-injected render (spike for #145)', () => {
@@ -83,5 +87,57 @@ describe('config-injected render (spike for #145)', () => {
     assert.equal(ra, ra2)
     assert.doesNotMatch(ra, /data-b/)
     assert.doesNotMatch(rb, /data-a/)
+  })
+})
+
+describe('config-injected backends (spike for #145)', () => {
+  afterEach(() => {
+    setCodeHighlighter(null)
+  })
+
+  const shouty: CodeHighlighter = {
+    highlight: (code) => `<span class="hi">${code.toUpperCase()}</span>`,
+    highlightAuto: (code) => `<span class="hi">${code.toUpperCase()}</span>`,
+  }
+
+  it('applies a per-call code highlighter, then restores the global slot', () => {
+    const before = getCodeHighlighter()
+    const highlighted = renderMarkdownUnsafe('```js\nhello\n```', { codeHighlighter: shouty })
+    assert.match(highlighted, /HELLO/)
+    // Global slot untouched afterwards.
+    assert.equal(getCodeHighlighter(), before)
+    // A plain render falls back to escaped plain text.
+    assert.doesNotMatch(renderMarkdownUnsafe('```js\nhello\n```'), /HELLO/)
+  })
+})
+
+describe('StreamingMarkdownRenderer.hydrate (spike for #145)', () => {
+  // A fake KaTeX-shaped renderer; the point is that it arrives via config, not a
+  // global setMathRenderer, and hydrate() reads it off the instance.
+  const fakeMath: MathRenderer = {
+    render: (source) => Promise.resolve({ html: `<span class="k">${source.trim()}</span>` }),
+  }
+
+  it('hydrates pending math from the constructor config, no global registration', async () => {
+    const host = document.createElement('div')
+    const renderer = new StreamingMarkdownRenderer(host, {
+      mathSyntax: true,
+      mathRenderer: fakeMath,
+    })
+    renderer.update('$x+1$')
+    assert.match(host.innerHTML, /math-inline--pending/)
+    const counts = await renderer.hydrate()
+    assert.equal(counts.math, 1)
+    assert.match(host.innerHTML, /math-inline--rendered/)
+    assert.match(host.innerHTML, /class="k"/)
+  })
+
+  it('is a no-op for a tier whose renderer is not configured', async () => {
+    const host = document.createElement('div')
+    const renderer = new StreamingMarkdownRenderer(host, { mathSyntax: true })
+    renderer.update('$x+1$')
+    const counts = await renderer.hydrate()
+    assert.deepEqual(counts, { math: 0, diagrams: 0 })
+    assert.match(host.innerHTML, /math-inline--pending/)
   })
 })

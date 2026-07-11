@@ -177,6 +177,11 @@ export function setSanitizerBackend(backend: SanitizerBackend | null): void {
   sanitizerBackend = backend
 }
 
+/** The registered {@link SanitizerBackend}, or `null` (native default). Snapshot for `withConfig`. */
+export function getSanitizerBackend(): SanitizerBackend | null {
+  return sanitizerBackend
+}
+
 /**
  * Host extension to the sanitizer's allowlist. A host that injects a
  * {@link RawImageRenderer} (or otherwise emits tags/attributes outside the core

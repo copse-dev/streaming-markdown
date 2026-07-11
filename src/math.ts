@@ -79,6 +79,14 @@ export function getMathRenderer(): MathRenderer | null {
 /** Options for {@link hydratePendingMath}. */
 export interface HydrateMathOptions {
   /**
+   * The {@link MathRenderer} to hydrate with — obtain one from `loadKatex()`
+   * (`@copse/streaming-markdown/math/katex`). This is the config-injected path
+   * that replaces the old global `setMathRenderer` registration: pass the
+   * renderer per hydration call. When omitted, falls back to a renderer
+   * registered internally (e.g. by `installKatex`).
+   */
+  renderer?: MathRenderer | null
+  /**
    * Post-process the backend's HTML before it is injected. KaTeX HTML is
    * produced by the trusted library *after* sink sanitization and is not
    * re-sanitized by default (the same trust boundary as mermaid SVG); a
@@ -118,7 +126,7 @@ export async function hydratePendingMath(
   root: Element,
   options: HydrateMathOptions = {},
 ): Promise<number> {
-  const renderer = mathRenderer
+  const renderer = options.renderer ?? mathRenderer
   if (!renderer) return 0
 
   const targets: Element[] = []

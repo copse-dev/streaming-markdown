@@ -33,12 +33,11 @@ export {
   StreamingMarkdownRenderer,
   type StreamingMarkdownOptions,
 } from './streaming.ts'
-// `setSanitizerBackend` stays: the sanitizer is a pluggable backend registered
-// once (native browser Sanitizer by default, or the DOMPurify entry). The
-// per-render allowlist extension moved to `MarkdownConfig.sanitizeExtension`.
+// The sanitizer backend is scoped per render via `MarkdownConfig.sanitizerBackend`
+// (native browser Sanitizer by default, or the DOMPurify entry's `dompurifyBackend`),
+// as is the allowlist extension via `MarkdownConfig.sanitizeExtension`.
 export {
   sanitizeRenderedMarkdown,
-  setSanitizerBackend,
   type SanitizedHtml,
   type SanitizeExtension,
   type SanitizerBackend,
@@ -91,12 +90,11 @@ export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './e
 // `BUILTIN_NAMED_ENTITIES` (internal data table) and `resetEntityDecoder`
 // (test/reset helper) are marked `@experimental` (#147) — not part of the stable
 // v1 surface. Extend the decoder via `addNamedEntities` / `setNamedEntities`.
-// `setEntityDecoder` stays (the decoder is a pluggable backend — the full HTML5
-// table or `browserEntityDecoder`); `addNamedEntities` stays as the incremental
-// merge helper. A wholesale user table is scoped per render via
-// `MarkdownConfig.namedEntities`.
+// The entity decoder is scoped per render via `MarkdownConfig.entityDecoder`
+// (the full HTML5 table from the `entities/full` entry, or `browserEntityDecoder`);
+// a user named-reference table via `MarkdownConfig.namedEntities`. The built-in
+// carries the 252 classic HTML4 named references plus all numeric refs.
 export {
-  addNamedEntities,
   BUILTIN_NAMED_ENTITIES,
   browserEntityDecoder,
   decodeHtmlEntities,
@@ -104,29 +102,25 @@ export {
   getEntityDecoder,
   getNamedEntities,
   resetEntityDecoder,
-  setEntityDecoder,
 } from './entity-decoder.ts'
 // Syntax highlighting is a pluggable backend. The core (`highlight.ts`) carries
-// no highlight.js code and renders escaped plain text until a backend is
-// registered; the highlight.js backend stays behind the
-// `@copse/streaming-markdown/highlighters/highlightjs` entry so it is only bundled
-// (or lazily fetched) when a host opts in — see README / docs/LAZY-LOADING.md.
+// no highlight.js code and renders escaped plain text until a highlighter is
+// provided; the highlight.js/shiki backends stay behind their subpath entries so
+// they are only bundled (or lazily fetched) when a host opts in — obtain one from
+// their `load*` and pass it via `MarkdownConfig.codeHighlighter`.
 export {
   type CodeHighlighter,
   fenceCodeClass,
   getCodeHighlighter,
   highlightFenceCode,
   KNOWN_LANGUAGES,
-  setCodeHighlighter,
 } from './highlight.ts'
 // Fenced-block emission is a pluggable registry keyed by fence language (#53).
-// The built-in mermaid scaffolding is itself a registered FenceHandler; hosts
-// add their own (```math, ```graphviz, …) with setFenceHandler. Handlers emit
-// inert allowlisted scaffolding pre-sanitizer and hydrate after the sink —
-// widen the allowlist via setSanitizeExtension for anything beyond it.
-// Custom fence handlers are registered per render via
-// `MarkdownConfig.fenceHandlers` (the built-in mermaid/math handlers are always
-// present); `getFenceHandler` introspects the active registry.
+// The built-in mermaid/math scaffolding are themselves registered handlers; hosts
+// add their own (```graphviz, …) per render via `MarkdownConfig.fenceHandlers`.
+// Handlers emit inert allowlisted scaffolding pre-sanitizer and hydrate after the
+// sink — widen the allowlist via `MarkdownConfig.sanitizeExtension` for anything
+// beyond it. `getFenceHandler` introspects the active registry.
 export {
   type FenceHandler,
   type FenceHandlerForming,
@@ -136,9 +130,11 @@ export {
 export { mermaidSourceCandidates, prepareMermaidSource } from './mermaid-source.ts'
 // Diagram rendering is a pluggable backend, like highlighting. The core emits
 // inert `mermaid-diagram--pending` scaffolding and `hydratePendingDiagrams` swaps
-// in SVG once a renderer is registered; the mermaid backend stays behind the
+// in SVG once a renderer is supplied; the mermaid backend stays behind the
 // `@copse/streaming-markdown/diagrams/mermaid` entry so its library is only
-// fetched when a host opts in — see docs/LAZY-LOADING.md.
+// fetched when a host opts in. Obtain a renderer from `loadMermaid()` and pass it
+// via `MarkdownConfig.diagramRenderer` (streaming `hydrate()`) or the
+// `hydratePendingDiagrams(root, { renderer })` option — see docs/LAZY-LOADING.md.
 export {
   type DiagramRenderer,
   type DiagramRenderResult,
@@ -146,18 +142,17 @@ export {
   type HydrateDiagramsOptions,
   hydratePendingDiagrams,
   PENDING_DIAGRAM_SELECTOR,
-  setDiagramRenderer,
 } from './mermaid.ts'
 // Math rendering is a pluggable backend, like diagrams (#70). The core emits
 // inert `math-block--pending` / `math-inline--pending` scaffolding for
 // ```math fences, `$$…$$` / `\[…\]` display blocks, and `$…$` / `\(…\)` inline
-// math; `hydratePendingMath` swaps in rendered HTML once a renderer is
-// registered. Registering the renderer is also what turns the *prose* math
-// grammar on (#78) — without one, `$…$`-style text stays ordinary prose and
-// output is byte-identical to a math-free build; `setMathSyntax` overrides that
-// default in either direction (the ```math fence is always on). The KaTeX
-// backend stays behind the `@copse/streaming-markdown/math/katex` entry so its
-// library is only fetched when a host opts in — see docs/LAZY-LOADING.md.
+// math; `hydratePendingMath` swaps in rendered HTML once a renderer is supplied.
+// The `$…$`-style *prose* grammar (#78) is turned on with `MarkdownConfig.mathSyntax`
+// (the ```math fence is always on); without it those delimiters stay ordinary
+// prose and output is byte-identical to a math-free build. The KaTeX backend
+// stays behind the `@copse/streaming-markdown/math/katex` entry — obtain a renderer
+// from `loadKatex()` and pass it via `MarkdownConfig.mathRenderer` (streaming
+// `hydrate()`) or the `hydratePendingMath(root, { renderer })` option.
 export {
   getMathRenderer,
   type HydrateMathOptions,
@@ -166,10 +161,8 @@ export {
   type MathRenderOptions,
   type MathRenderResult,
   PENDING_MATH_SELECTOR,
-  setMathRenderer,
 } from './math.ts'
-// Prose math syntax is forced on/off per render via `MarkdownConfig.mathSyntax`;
-// with no override it follows math-renderer registration (see setMathRenderer).
+// Prose math syntax is forced on/off per render via `MarkdownConfig.mathSyntax`.
 export { getMathSyntax } from './math-syntax.ts'
 // Link decoration is a pluggable seam (#601). The built-in default is neutral
 // (#112): rendered `<a>` carries only `href`/`title`, with no `target`, `rel`,
@@ -192,13 +185,12 @@ export { isEmailAutolinksEnabled } from './autolink-syntax.ts'
 // Inline syntax is extensible via registered passes (#53): citations `[@key]`,
 // highlights `==x==`, and friends run inside the inline pipeline with code-span
 // shielding, escape-safe HTML emission (ctx.emit), and streaming-hold support.
-// `setInlinePasses` registers them globally; a per-render set is scoped via
-// `MarkdownConfig.inlinePasses`. Emitted HTML still passes the sanitizer sink —
-// widen via `MarkdownConfig.sanitizeExtension`.
+// Supply them per render via `MarkdownConfig.inlinePasses` (e.g. the `emojiInlinePass`
+// from `@copse/streaming-markdown/inline/emoji`). Emitted HTML still passes the
+// sanitizer sink — widen via `MarkdownConfig.sanitizeExtension`.
 export {
   getInlinePasses,
   type InlinePass,
   type InlinePassContext,
   type InlinePassStage,
-  setInlinePasses,
 } from './inline-passes.ts'

@@ -100,6 +100,12 @@ export async function buildBrowserBundle(): Promise<string> {
         "export { sanitizeRenderedMarkdownInto } from './src/sanitize.ts'",
         "export { setPresanitizedHtml } from './src/html-sink.ts'",
         "export { dompurifyBackend } from './src/sanitize-dompurify.ts'",
+        // Internal backend registrations the TT e2e drives directly. They left
+        // the public API (config-injected now), but the sanitizer sink helper
+        // `setSanitizedHtml` and standalone `hydratePendingDiagrams` read the
+        // process-wide backend, so the e2e still exercises them via these.
+        "export { setSanitizerBackend } from './src/sanitize.ts'",
+        "export { setDiagramRenderer } from './src/mermaid.ts'",
       ].join('\n'),
       resolveDir: pkgRoot,
       loader: 'ts',

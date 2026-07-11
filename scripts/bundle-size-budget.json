@@ -51,7 +51,7 @@
     },
     "./cjk": {
       "file": "dist/cjk.js",
-      "gzipBudget": 290
+      "gzipBudget": 240
     }
   }
 }
