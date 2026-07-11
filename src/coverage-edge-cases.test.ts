@@ -8,6 +8,7 @@ import { syncAttributes } from './streaming-dom-morph.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { renderEmphasisDelimiters } from './inline-emphasis.ts'
 import { tokenizeBlocks } from './block-tokenizer.ts'
+import { StreamingMarkdownRenderer } from './streaming.ts'
 
 // Targeted coverage for narrow edge branches that the broader suites don't reach.
 
@@ -16,14 +17,31 @@ describe('decodeSafeMarkdownEntities', () => {
     assert.equal(decodeSafeMarkdownEntities('a&amp;#160;b'), 'a b')
   })
 
-  it('runs the allowlist comparisons without decoding a non-nbsp hex form', () => {
-    // `&#xa;` matches the entity scanner but is not one of the nbsp spellings,
-    // so it falls through every allowlist arm and is returned verbatim.
+  it('decodes every non-breaking-space spelling, including hex #xa0 (#143)', () => {
+    // Regression: the hex arm was `#x0*a` (which matches the line-feed escape
+    // `&#xa;`), so `&#xa0;` never decoded. It must, alongside the other spellings.
+    for (const spelling of ['&#xa0;', '&#xA0;', '&#x0a0;', '&#x00a0;', '&nbsp;', '&#160;']) {
+      assert.equal(decodeSafeMarkdownEntities(`a${spelling}b`), 'a b', spelling)
+    }
+    assert.equal(decodeSafeMarkdownEntities('a&amp;#xa0;b'), 'a b')
+  })
+
+  it('leaves the line-feed escape &#xa; literal (it is not a non-breaking space)', () => {
+    // `&#xa;` (U+000A) must NOT decode — only the `#xa0` non-breaking space does.
     assert.equal(decodeSafeMarkdownEntities('a&#xa;b'), 'a&#xa;b')
   })
 
   it('leaves unrelated entities untouched', () => {
     assert.equal(decodeSafeMarkdownEntities('a&copy;b'), 'a&copy;b')
+  })
+
+  it('decodes a hex non-breaking space in the streaming pending tail (#143)', () => {
+    // The bug flashed a literal `&#xa0;` while streaming; the pending tail must
+    // show a real non-breaking space instead.
+    const host = document.createElement('div')
+    new StreamingMarkdownRenderer(host).update('foo&#xa0;bar')
+    assert.ok(host.textContent?.includes(' '), 'pending tail shows a non-breaking space')
+    assert.doesNotMatch(host.innerHTML, /&amp;#xa0;/i, 'no literal hex entity in the pending tail')
   })
 })
 
