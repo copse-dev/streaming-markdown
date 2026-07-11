@@ -68,8 +68,9 @@ describe('mid-stream string/DOM emitter parity (#150)', () => {
       assert.equal(
         leak,
         null,
-        leak &&
-          `cut ${leak.cut}: DOM committed ${JSON.stringify(leak.committed)} but the string emitter only shows ${JSON.stringify(leak.shown)}`,
+        leak
+          ? `cut ${leak.cut}: DOM committed ${JSON.stringify(leak.committed)} but the string emitter only shows ${JSON.stringify(leak.shown)}`
+          : 'parity held',
       )
     })
   }
