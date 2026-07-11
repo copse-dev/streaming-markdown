@@ -144,6 +144,8 @@ variables, and native-nesting note — are in [`docs/EXTENDING.md`](docs/EXTENDI
   buttons (and similar widgets) to code blocks without fighting the streaming morph.
 - **[`docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md)** — why the heavy deps are
   optional and lazy, and how the code-split loading works.
+- **[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)** — what we measure (streaming
+  scaling, bundle size), how to reproduce it, and our own numbers.
 - **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — design invariants, the
   two-emitter streaming architecture, and the regression/conformance suite.
 
