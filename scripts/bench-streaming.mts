@@ -84,6 +84,19 @@ function termsOfService(): string {
   return readFileSync(resolve(pkgRoot, 'tests/fixtures/terms-of-service-streaming.md'), 'utf8')
 }
 
+// Real-document corpus (#154): hand-collected markdown that mirrors the content
+// this library actually streams — an LLM technical answer, a README section, and
+// a changelog (mixed prose, code, tables, task lists, footnotes, blockquotes).
+// Used by the real-document scaling guard below (DOM path only) so the growth
+// guard is representative of real content, not only synthetic shapes. Deliberately
+// NOT run through the informational string+DOM table: the string path's O(n²)
+// re-render over several fixtures back-to-back is what dominates the CI bench heap.
+const CORPUS_FILES = ['llm-answer.md', 'readme-section.md', 'changelog.md'] as const
+
+function corpusDoc(file: string): string {
+  return readFileSync(resolve(pkgRoot, 'tests/fixtures/bench-corpus', file), 'utf8')
+}
+
 /**
  * Footnote-heavy fixture (#110): `paras` cited paragraphs followed by their
  * definitions — the shape LLM citations stream in. References are literal until
@@ -469,5 +482,46 @@ if (meanCodeGrowth >= 3.0) {
   throw new Error(
     `Code-block DOM streaming scaled ${meanCodeGrowth.toFixed(2)}×/doubling with a highlighter — expected ~O(n) ` +
       `(< 3×; see #155). A regression to re-highlighting closed/frozen code blocks per update is the likely cause.`,
+  )
+}
+
+// Real-document scaling (#154): make the per-doubling growth guard representative
+// of REAL content, not only synthetic prose. Concatenate the hand-collected
+// corpus (mixed prose/code/tables/task-lists/footnotes/blockquotes) and stream it
+// at growing repetitions through the DOM path at a fixed chunk, so the update
+// count grows with size. Frozen-tail commit is O(tail), so doubling the document
+// should ~double the work; a regression to O(prefix)-per-commit re-render pushes
+// this toward 4×. DOM path only (the string path's O(n²) is guarded elsewhere and
+// would dominate the CI bench heap on a large concatenation).
+const corpusUnit = CORPUS_FILES.map(corpusDoc).join('\n\n')
+console.log('\nreal-document scaling — DOM path, fixed 64-byte chunk (corpus repeated, updates grow with size)\n')
+const realScaleCols = [pad('×corpus', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
+console.log(realScaleCols.join('  '))
+console.log('-'.repeat(realScaleCols.join('  ').length))
+let prevRealMs = 0
+const realGrowth: number[] = []
+for (const reps of [1, 2, 4]) {
+  const text = Array.from({ length: reps }, () => corpusUnit).join('\n\n')
+  const updates = chunkBoundaries(text.length, 64).length
+  const domMs = measure(() => benchDomPath(text, 64), Math.min(args.iters, 3), args.warmup)
+  const factor = prevRealMs > 0 ? domMs / prevRealMs : 0
+  if (factor > 0) realGrowth.push(factor)
+  console.log(
+    [
+      pad(`${String(reps)}×`, 8),
+      padLeft(String(text.length), 8),
+      padLeft(String(updates), 9),
+      padLeft(domMs.toFixed(2), 10),
+      padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
+    ].join('  '),
+  )
+  prevRealMs = domMs
+}
+const meanRealGrowth = realGrowth.reduce((a, x) => a + x, 0) / realGrowth.length
+console.log(`\nreal-document mean growth per doubling: ${meanRealGrowth.toFixed(2)}× (regression guard: < 3.0×)`)
+if (meanRealGrowth >= 3.0) {
+  throw new Error(
+    `Real-document DOM streaming scaled ${meanRealGrowth.toFixed(2)}×/doubling — expected ~O(n) (< 3×; see #154). ` +
+      `An O(prefix)-per-commit committed-re-render regression is the likely cause.`,
   )
 }
