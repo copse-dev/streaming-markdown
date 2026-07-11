@@ -56,3 +56,25 @@ export function setCjkFriendly(enabled = true): void {
   setFlankingPunctuationExclusion(fn)
   setBareUrlCjkBoundary(fn)
 }
+
+/**
+ * The CJK-friendly preset as a `MarkdownConfig` fragment — spread it into a
+ * render config to enable markdown-cjk-friendly emphasis + autolink boundaries
+ * without a process-wide setter:
+ *
+ * ```ts
+ * import { cjkFriendlyConfig } from '@copse/streaming-markdown/cjk'
+ * renderMarkdown(md, { ...cjkFriendlyConfig })
+ * ```
+ *
+ * Both hooks point at the built-in {@link isCjkPunctuation} predicate. The range
+ * table lives in this opt-in entry, so the core bundle stays byte-identical for
+ * Latin-only hosts (see the module note).
+ */
+export const cjkFriendlyConfig: {
+  flankingPunctuationExclusion: (ch: string) => boolean
+  bareUrlCjkBoundary: (ch: string) => boolean
+} = {
+  flankingPunctuationExclusion: isCjkPunctuation,
+  bareUrlCjkBoundary: isCjkPunctuation,
+}

@@ -422,6 +422,15 @@ export function getNamedEntities(): Readonly<Record<string, string>> {
 }
 
 /**
+ * The raw *user* layer registered via {@link setNamedEntities} (without the
+ * built-ins folded in) — the value to snapshot and pass back to
+ * {@link setNamedEntities} for a scoped `withConfig` save/restore.
+ */
+export function getUserNamedEntities(): Record<string, string> {
+  return { ...userNamed }
+}
+
+/**
  * Restore the default decoder and clear user-added names (test/host reset).
  *
  * @experimental Test/reset helper, exported from the main entry but not part of

@@ -1,8 +1,8 @@
-// Config-injected renderer API (SPIKE for #145/#137/#147).
+// Config-injected renderer API (#145/#137/#147).
 //
-// This is the replacement for the config-epoch mechanism. Instead of ~20
+// This is the replacement for the config-epoch mechanism. Instead of the
 // process-wide `set*` functions plus a global epoch counter that streaming
-// caches watch for changes, a host passes a `MarkdownConfig` object to the
+// caches watched for changes, a host passes a `MarkdownConfig` object to the
 // entry point (`renderMarkdown(raw, config)`, `new StreamingMarkdownRenderer(
 // host, config)`). The config is applied to the module-global slots for the
 // duration of one *synchronous* render via the same save-set-restore seam that
@@ -12,17 +12,33 @@
 // invalidation, and no bleed: each render reads the slots while they hold its
 // own values, and restores them before yielding.
 //
-// SPIKE SCOPE: this widens the scoped seam from the 5 policy fields to also
-// cover the three *grammar* setters that #177's tests exercise — math prose
-// syntax, the link decorator, and the fence-handler registry. These are the
-// setters whose mid-stream mutation the config-epoch was built to survive, so
-// they are the ones worth proving. The heavy backend tier (sanitizer, KaTeX,
-// mermaid, highlighter) stays on its existing global registration for now; those
-// hydrate *asynchronously* after the scoped block and so can't ride a synchronous
-// save/restore (the same reason ADR 0003 left them global). The full sweep —
-// removing the setters and folding the remaining fields in — follows once this
-// shape is approved.
-import { type LinkDecorator, getLinkDecorator, setLinkDecorator } from './inline-links.ts'
+// SCOPE: this covers every setting that is read *synchronously* during a
+// render/sink pass — the security/behavioural policy tier plus the grammar and
+// inline-pipeline tier. The heavy *async backend* tier (sanitizer backend,
+// KaTeX/mermaid/highlighter registration) is deliberately NOT here: those
+// backends hydrate asynchronously *after* the scoped block returns
+// (`hydratePendingMath`/`hydratePendingDiagrams` read the global registries once
+// the microtask runs), so they cannot ride a synchronous save/restore. They stay
+// on their `set*`/`load*`/`install*` registration seam — see ADR 0003 and each
+// backend module. `codeHighlighter` and `rawImageRenderer` *are* here because
+// they run inside the synchronous render, not in async hydration.
+import { getCodeHighlighter, setCodeHighlighter, type CodeHighlighter } from './highlight.ts'
+import {
+  getEntityDecoder,
+  getUserNamedEntities,
+  setEntityDecoder,
+  setNamedEntities,
+  type EntityDecoder,
+} from './entity-decoder.ts'
+import {
+  getFlankingPunctuationExclusion,
+  setFlankingPunctuationExclusion,
+} from './inline-emphasis.ts'
+import { getBareUrlCjkBoundary, setBareUrlCjkBoundary } from './inline-spans.ts'
+import { getInlinePasses, setInlinePasses, type InlinePass } from './inline-passes.ts'
+import { getRawImageRenderer, setRawImageRenderer, type RawImageRenderer } from './raw-images.ts'
+import { isEmailAutolinksEnabled, setEmailAutolinks } from './autolink-syntax.ts'
+import { getLinkDecorator, setLinkDecorator, type LinkDecorator } from './inline-links.ts'
 import {
   type FenceHandler,
   restoreFenceHandlers,
@@ -37,15 +53,20 @@ import { type RenderPolicyOptions, withRenderPolicies } from './render-policies.
  *
  * Extends {@link RenderPolicyOptions} (the security/behavioural policy tier —
  * `htmlPolicy`, `safeHrefSchemes`, `sanitizeExtension`, `linkImagePolicy`,
- * `trustedTypesPolicy`) with the grammar tier below. Every field is optional and
- * inherits the process-wide default when omitted; a field set to `null` scopes
- * that setting back to its built-in default for this render only.
+ * `trustedTypesPolicy`) with the grammar and inline-pipeline tier below. Every
+ * field is optional and inherits the process-wide default when omitted; a field
+ * set to `null` scopes that setting back to its built-in default for this render
+ * only.
  *
  * A host injects this once — at construction for `StreamingMarkdownRenderer`, or
  * per call for `renderMarkdown` — instead of mutating process-wide state with the
  * `set*` functions. Because the config is a snapshot applied and restored around
  * each synchronous render, two renderers with different config coexist without
- * interfering (the motivation that the config-epoch mechanism previously served).
+ * interfering (the motivation the config-epoch mechanism previously served).
+ *
+ * The heavy *async backend* tier (KaTeX/mermaid/highlighter/sanitizer backend
+ * registration) is not configured here — those hydrate after the synchronous
+ * render and stay on their `load*`/`install*`/`set*Backend` registration seam.
  */
 export interface MarkdownConfig extends RenderPolicyOptions {
   /**
@@ -53,6 +74,25 @@ export interface MarkdownConfig extends RenderPolicyOptions {
    * defers to math-renderer registration (the default). See math-syntax.ts.
    */
   mathSyntax?: boolean | null
+  /**
+   * Recognize bare `user@host` addresses as `mailto:` autolinks (GFM extension,
+   * on by default). See autolink-syntax.ts.
+   */
+  emailAutolinks?: boolean
+  /**
+   * Exclude characters from the emphasis flanking *punctuation* class — the seam
+   * markdown-cjk-friendly uses to pair emphasis around full-width punctuation.
+   * For the CJK preset, spread `cjkFriendlyConfig` from
+   * `@copse/streaming-markdown/cjk` rather than hardcoding the range table here
+   * (it stays in that opt-in bundle). See inline-emphasis.ts / cjk.ts.
+   */
+  flankingPunctuationExclusion?: ((ch: string) => boolean) | null
+  /**
+   * Flag characters as a bare-autolink boundary — the CJK seam that stops a
+   * run-together `https://example.com。次` at the `。`. See the note on
+   * {@link flankingPunctuationExclusion} for the CJK preset. See inline-spans.ts.
+   */
+  bareUrlCjkBoundary?: ((ch: string) => boolean) | null
   /**
    * Host {@link LinkDecorator} applied to rendered `<a>` output; `null` restores
    * the neutral built-in. See inline-links.ts.
@@ -64,12 +104,38 @@ export interface MarkdownConfig extends RenderPolicyOptions {
    * that language's handler for the render. See fence-handlers.ts.
    */
   fenceHandlers?: Record<string, FenceHandler | null>
+  /**
+   * Synchronous syntax highlighter for fenced code; `null` falls back to escaped
+   * plain text. This is the *synchronous* highlighter seam — an async highlighter
+   * backend still registers via its `load*` entry. See highlight.ts.
+   */
+  codeHighlighter?: CodeHighlighter | null
+  /**
+   * Host renderer for raw `<img>` tags found in prose; `null` escapes them (the
+   * default). Runs inside the synchronous render. See raw-images.ts.
+   */
+  rawImageRenderer?: RawImageRenderer | null
+  /**
+   * The active inline passes (execution order = array order within each stage);
+   * `null`/`[]` clears them. See inline-passes.ts.
+   */
+  inlinePasses?: readonly InlinePass[] | null
+  /**
+   * Replace the reference HTML-entity decoder wholesale; `null` uses the built-in
+   * numeric + HTML4-named decoder. See entity-decoder.ts.
+   */
+  entityDecoder?: EntityDecoder | null
+  /**
+   * User-defined named entity references layered over the built-in HTML4 set
+   * (only affects the built-in decoder). See entity-decoder.ts.
+   */
+  namedEntities?: Record<string, string>
 }
 
 /**
  * Run `fn` with `config` applied to the module-global slots, then restore every
  * touched slot (in reverse) in a `finally`. Returns `fn`'s result. The policy
- * tier is scoped by {@link withRenderPolicies}; the grammar tier is scoped here.
+ * tier is scoped by {@link withRenderPolicies}; the grammar/inline tier here.
  *
  * The render + sink pass must be synchronous for the isolation to hold — each
  * slot is set before `fn()` and restored after, and nested synchronous renders
@@ -86,6 +152,27 @@ export function withConfig<T>(config: MarkdownConfig, fn: () => T): T {
         setMathSyntax(previous)
       })
     }
+    if (config.emailAutolinks !== undefined) {
+      const previous = isEmailAutolinksEnabled()
+      setEmailAutolinks(config.emailAutolinks)
+      restores.push(() => {
+        setEmailAutolinks(previous)
+      })
+    }
+    if (config.flankingPunctuationExclusion !== undefined) {
+      const previous = getFlankingPunctuationExclusion()
+      setFlankingPunctuationExclusion(config.flankingPunctuationExclusion)
+      restores.push(() => {
+        setFlankingPunctuationExclusion(previous)
+      })
+    }
+    if (config.bareUrlCjkBoundary !== undefined) {
+      const previous = getBareUrlCjkBoundary()
+      setBareUrlCjkBoundary(config.bareUrlCjkBoundary)
+      restores.push(() => {
+        setBareUrlCjkBoundary(previous)
+      })
+    }
     if (config.linkDecorator !== undefined) {
       const previous = getLinkDecorator()
       setLinkDecorator(config.linkDecorator)
@@ -100,6 +187,41 @@ export function withConfig<T>(config: MarkdownConfig, fn: () => T): T {
       }
       restores.push(() => {
         restoreFenceHandlers(previous)
+      })
+    }
+    if (config.codeHighlighter !== undefined) {
+      const previous = getCodeHighlighter()
+      setCodeHighlighter(config.codeHighlighter)
+      restores.push(() => {
+        setCodeHighlighter(previous)
+      })
+    }
+    if (config.rawImageRenderer !== undefined) {
+      const previous = getRawImageRenderer()
+      setRawImageRenderer(config.rawImageRenderer)
+      restores.push(() => {
+        setRawImageRenderer(previous)
+      })
+    }
+    if (config.inlinePasses !== undefined) {
+      const previous = getInlinePasses()
+      setInlinePasses(config.inlinePasses)
+      restores.push(() => {
+        setInlinePasses(previous)
+      })
+    }
+    if (config.entityDecoder !== undefined) {
+      const previous = getEntityDecoder()
+      setEntityDecoder(config.entityDecoder)
+      restores.push(() => {
+        setEntityDecoder(previous)
+      })
+    }
+    if (config.namedEntities !== undefined) {
+      const previous = getUserNamedEntities()
+      setNamedEntities(config.namedEntities)
+      restores.push(() => {
+        setNamedEntities(previous)
       })
     }
 

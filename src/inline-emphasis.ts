@@ -33,6 +33,11 @@ export function setFlankingPunctuationExclusion(fn: ((ch: string) => boolean) | 
   flankingPunctuationExclusion = fn
 }
 
+/** The active flanking-punctuation exclusion, or `null`. Snapshot for `withConfig`. */
+export function getFlankingPunctuationExclusion(): ((ch: string) => boolean) | null {
+  return flankingPunctuationExclusion
+}
+
 function isFlankingWhitespace(ch: string): boolean {
   return ch === '' || /\s/.test(ch)
 }

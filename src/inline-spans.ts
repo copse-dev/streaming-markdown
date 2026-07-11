@@ -148,6 +148,11 @@ export function setBareUrlCjkBoundary(fn: ((ch: string) => boolean) | null): voi
   bareUrlCjkBoundary = fn
 }
 
+/** The active bare-autolink CJK boundary, or `null`. Snapshot for `withConfig`. */
+export function getBareUrlCjkBoundary(): ((ch: string) => boolean) | null {
+  return bareUrlCjkBoundary
+}
+
 /** Split a captured bare URL at the first CJK-punctuation boundary, if any. */
 function splitBareUrlAtCjkBoundary(rawUrl: string): { url: string; tail: string } {
   const boundary = bareUrlCjkBoundary

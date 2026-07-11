@@ -26,6 +26,11 @@ export function setRawImageRenderer(renderer: RawImageRenderer | null): void {
   activeRawImageRenderer = renderer
 }
 
+/** The active {@link RawImageRenderer}, or `null`. Snapshot for `withConfig`. */
+export function getRawImageRenderer(): RawImageRenderer | null {
+  return activeRawImageRenderer
+}
+
 function parseHtmlAttributes(tag: string): Record<string, string> {
   const attrs: Record<string, string> = {}
   const decodedTag = decodeEscapedHref(tag)
