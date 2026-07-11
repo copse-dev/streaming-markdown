@@ -1,7 +1,6 @@
 export {
   renderStreamingMarkdown,
   StreamingMarkdownRenderer,
-  setSanitizerBackend,
   isBrowserSanitizerSupported,
   hydratePendingDiagrams,
   hydratePendingMath,

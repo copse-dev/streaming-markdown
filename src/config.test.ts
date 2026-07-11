@@ -12,6 +12,12 @@ import {
 import { getFenceHandler, setFenceHandler, type FenceHandler } from './fence-handlers.ts'
 import { getCodeHighlighter, setCodeHighlighter, type CodeHighlighter } from './highlight.ts'
 import { getMathSyntax, setMathSyntax } from './math-syntax.ts'
+import { withConfig, type MarkdownConfig } from './config.ts'
+import { isEmailAutolinksEnabled } from './autolink-syntax.ts'
+import { getEntityDecoder, getNamedEntities } from './entity-decoder.ts'
+import { getRawImageRenderer } from './raw-images.ts'
+import { getInlinePasses } from './inline-passes.ts'
+import { getSanitizerBackend } from './sanitize.ts'
 import type { MathRenderer } from './math.ts'
 
 // The config-injected API (#145/#137/#147) replaces the config-epoch mechanism.
@@ -108,6 +114,75 @@ describe('config-injected backends (spike for #145)', () => {
     assert.equal(getCodeHighlighter(), before)
     // A plain render falls back to escaped plain text.
     assert.doesNotMatch(renderMarkdownUnsafe('```js\nhello\n```'), /HELLO/)
+  })
+})
+
+describe('withConfig scopes and restores every synchronous field', () => {
+  it('applies each field then restores the prior module state in a finally', () => {
+    const full: MarkdownConfig = {
+      htmlPolicy: 'escape',
+      safeHrefSchemes: ['https'],
+      sanitizeExtension: null,
+      linkImagePolicy: null,
+      trustedTypesPolicy: null,
+      mathSyntax: true,
+      emailAutolinks: false,
+      flankingPunctuationExclusion: () => false,
+      bareUrlCjkBoundary: () => false,
+      linkDecorator: () => '',
+      fenceHandlers: { spikelang: { render: (c) => c } },
+      codeHighlighter: { highlight: (c) => c, highlightAuto: (c) => c },
+      rawImageRenderer: () => null,
+      inlinePasses: [],
+      entityDecoder: (t) => t,
+      namedEntities: { spikeent: 'X' },
+      sanitizerBackend: null,
+    }
+    // Snapshot the fields that have observable getters.
+    const before = {
+      math: getMathSyntax(),
+      email: isEmailAutolinksEnabled(),
+      decorator: getLinkDecorator(),
+      highlighter: getCodeHighlighter(),
+      raw: getRawImageRenderer(),
+      passes: getInlinePasses(),
+      decoder: getEntityDecoder(),
+      sanitizer: getSanitizerBackend(),
+      fence: getFenceHandler('spikelang'),
+    }
+
+    let sawInside = false
+    const out = withConfig(full, () => {
+      // Inside the scope every field is applied.
+      sawInside = true
+      assert.equal(getMathSyntax(), true)
+      assert.equal(isEmailAutolinksEnabled(), false)
+      assert.notEqual(getEntityDecoder(), before.decoder)
+      assert.equal(getNamedEntities()['spikeent'], 'X')
+      assert.notEqual(getFenceHandler('spikelang'), null)
+      return 'ran'
+    })
+
+    assert.ok(sawInside)
+    assert.equal(out, 'ran')
+    // Every touched slot is restored.
+    assert.equal(getMathSyntax(), before.math)
+    assert.equal(isEmailAutolinksEnabled(), before.email)
+    assert.equal(getLinkDecorator(), before.decorator)
+    assert.equal(getCodeHighlighter(), before.highlighter)
+    assert.equal(getRawImageRenderer(), before.raw)
+    // setInlinePasses copies its input, so compare by content not reference.
+    assert.deepEqual(getInlinePasses(), before.passes)
+    assert.equal(getEntityDecoder(), before.decoder)
+    assert.equal(getSanitizerBackend(), before.sanitizer)
+    assert.equal(getFenceHandler('spikelang'), before.fence)
+  })
+
+  it('is a straight fn() call with zero touched slots for an empty config', () => {
+    assert.equal(
+      withConfig({}, () => 7),
+      7,
+    )
   })
 })
 
