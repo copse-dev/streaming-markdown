@@ -22,7 +22,7 @@ import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from '.
 import { IncrementalSourceScanner } from './incremental-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
-import { type RenderPolicyOptions, withRenderPolicies } from './render-policies.ts'
+import { type MarkdownConfig, withConfig } from './config.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml } from './html-sink.ts'
 import {
@@ -587,7 +587,7 @@ function renderPendingTail(
  * process-wide default when omitted. For `StreamingMarkdownRenderer` the
  * overrides are captured at construction and re-applied around every `update()`.
  */
-export interface StreamingMarkdownOptions extends RenderPolicyOptions {}
+export interface StreamingMarkdownOptions extends MarkdownConfig {}
 
 /**
  * Render assistant text while it is still streaming.
@@ -605,7 +605,7 @@ export function renderStreamingMarkdown(
   content: string,
   options: StreamingMarkdownOptions = {},
 ): SanitizedHtml {
-  return withRenderPolicies(options, () => asSanitizedHtml(renderStreamingMarkdownCore(content)))
+  return withConfig(options, () => asSanitizedHtml(renderStreamingMarkdownCore(content)))
 }
 
 function renderStreamingMarkdownCore(content: string): string {
@@ -693,20 +693,22 @@ export class StreamingMarkdownRenderer {
   private readonly completeScanner = new IncrementalSourceScanner()
   private readonly host: HTMLElement
   /**
-   * Per-render policy overrides captured at construction (#137) and re-applied
-   * around every commit — so this instance renders under its own html/scheme/
-   * origin/sanitize policy regardless of the process-wide defaults.
+   * Full {@link MarkdownConfig} captured at construction and re-applied around
+   * every commit — so this instance renders under its own policy *and* grammar
+   * config (html/scheme/origin/sanitize, plus math syntax, link decorator, fence
+   * handlers) regardless of the process-wide defaults. Two renderers with
+   * different config coexist without an epoch or cache invalidation.
    */
-  private readonly policyOptions: RenderPolicyOptions
+  private readonly config: MarkdownConfig
 
   constructor(host: HTMLElement, options: StreamingMarkdownOptions = {}) {
     this.host = host
-    this.policyOptions = options
+    this.config = options
   }
 
   /** Render `content` (the full message text so far) into the host incrementally. */
   update(content: string): void {
-    withRenderPolicies(this.policyOptions, () => {
+    withConfig(this.config, () => {
       this.updateWithPolicy(content)
     })
   }

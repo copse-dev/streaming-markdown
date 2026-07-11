@@ -9,7 +9,7 @@ import {
   getActiveFootnoteContext,
   setActiveFootnoteContext,
 } from './footnotes.ts'
-import { type RenderPolicyOptions, withRenderPolicies } from './render-policies.ts'
+import { type MarkdownConfig, withConfig } from './config.ts'
 import { renderBlocks, renderFootnoteSection } from './render-blocks.ts'
 import { sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 
@@ -25,7 +25,7 @@ export { escapeHtml } from './escape.ts'
  */
 export const TOP_LEVEL_RENDER_OPTS = { htmlFromIndent: true, indentedCode: true } as const
 
-export interface RenderMarkdownOptions extends RenderPolicyOptions {
+export interface RenderMarkdownOptions extends MarkdownConfig {
   /**
    * Recognize 4-column (space or tab) indented lines as CommonMark indented code
    * blocks. Defaults to `true` — indented code is supported and conforms (#9).
@@ -60,7 +60,7 @@ export interface RenderMarkdownOptions extends RenderPolicyOptions {
 export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {}): SanitizedHtml {
   // The scope covers the sink too (sanitizeExtension / linkImagePolicy /
   // trustedTypesPolicy are read during sanitize), so wrap the whole thing.
-  return withRenderPolicies(options, () =>
+  return withConfig(options, () =>
     sanitizeRenderedMarkdown(renderMarkdownCore(raw, options)),
   )
 }
@@ -79,7 +79,7 @@ export function renderMarkdown(raw: string, options: RenderMarkdownOptions = {})
  * their sinks) and by hosts that own their own sanitization boundary.
  */
 export function renderMarkdownUnsafe(raw: string, options: RenderMarkdownOptions = {}): string {
-  return withRenderPolicies(options, () => renderMarkdownCore(raw, options))
+  return withConfig(options, () => renderMarkdownCore(raw, options))
 }
 
 function renderMarkdownCore(raw: string, options: RenderMarkdownOptions): string {

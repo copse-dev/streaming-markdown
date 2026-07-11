@@ -145,3 +145,19 @@ export function setFenceHandler(lang: string, handler: FenceHandler | null): voi
 export function getFenceHandler(lang: string): FenceHandler | null {
   return fenceHandlers.get(normalizeFenceLang(lang)) ?? null
 }
+
+/**
+ * Snapshot the whole fence-handler registry so a scoped config can install its
+ * own handlers for one render and restore the prior set afterwards (see
+ * `withConfig`). The value is opaque — pass it back to
+ * {@link restoreFenceHandlers}.
+ */
+export function snapshotFenceHandlers(): Map<string, FenceHandler> {
+  return new Map(fenceHandlers)
+}
+
+/** Restore a registry snapshot taken by {@link snapshotFenceHandlers}. */
+export function restoreFenceHandlers(snapshot: Map<string, FenceHandler>): void {
+  fenceHandlers.clear()
+  for (const [lang, handler] of snapshot) fenceHandlers.set(lang, handler)
+}

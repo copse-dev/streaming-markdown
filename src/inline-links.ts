@@ -180,6 +180,16 @@ export function setLinkDecorator(decorator: LinkDecorator | null): void {
   activeLinkDecorator = decorator ?? neutralLinkDecorator
 }
 
+/**
+ * The currently active {@link LinkDecorator} (the neutral built-in when none is
+ * set). Exposed so a scoped config can snapshot and restore it around one render
+ * (see `withConfig`); pass the returned value straight back to
+ * {@link setLinkDecorator}.
+ */
+export function getLinkDecorator(): LinkDecorator {
+  return activeLinkDecorator
+}
+
 /** Render an `<a>` for a resolved link, applying the active {@link LinkDecorator}. */
 export function renderAnchor(label: string, href: string, title?: string): string {
   // Compute `isWorkspace` lazily (#146): it is workspace-host-specific residue in
