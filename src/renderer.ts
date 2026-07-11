@@ -4,7 +4,11 @@ import {
   tokenizeBlocks,
   type BlockToken,
 } from './block-tokenizer.ts'
-import { createFootnoteContext, setActiveFootnoteContext } from './footnotes.ts'
+import {
+  createFootnoteContext,
+  getActiveFootnoteContext,
+  setActiveFootnoteContext,
+} from './footnotes.ts'
 import { type RenderPolicyOptions, withRenderPolicies } from './render-policies.ts'
 import { renderBlocks, renderFootnoteSection } from './render-blocks.ts'
 import { sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
@@ -93,6 +97,12 @@ function renderMarkdownCore(raw: string, options: RenderMarkdownOptions): string
   const footnoteDefs = collectFootnoteDefinitions(raw, tokens)
   if (footnoteDefs.size === 0) return renderBlocks(raw, tokens, renderOpts)
   const footnotes = createFootnoteContext(footnoteDefs)
+  // Save/restore the prior context rather than clearing to null: the extension
+  // API (fence handlers, inline passes) invites recursive renderMarkdownUnsafe
+  // calls, and a footnote-bearing inner render must not strand the outer
+  // document's context — every later `[^ref]` in the outer doc would otherwise
+  // render literal (#144). Mirrors the scoped setHtmlPolicy `previous` pattern.
+  const previousFootnotes = getActiveFootnoteContext()
   setActiveFootnoteContext(footnotes)
   try {
     const body = renderBlocks(raw, tokens, renderOpts)
@@ -100,6 +110,6 @@ function renderMarkdownCore(raw: string, options: RenderMarkdownOptions): string
     if (section === '') return body
     return body === '' ? section : `${body}\n${section}`
   } finally {
-    setActiveFootnoteContext(null)
+    setActiveFootnoteContext(previousFootnotes)
   }
 }
