@@ -22,7 +22,7 @@ import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from '.
 import { IncrementalSourceScanner } from './incremental-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
-import { type HtmlPolicy, setHtmlPolicy } from './html-policy.ts'
+import { type RenderPolicyOptions, withRenderPolicies } from './render-policies.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml } from './html-sink.ts'
 import {
@@ -574,15 +574,14 @@ function renderPendingTail(
   return { pendingInner, pendingVisible }
 }
 
-/** Options shared by the streaming emitters. */
-export interface StreamingMarkdownOptions {
-  /**
-   * Raw-HTML handling (#600), matching `renderMarkdown`'s option: `'passthrough'`
-   * (default) emits well-formed tags for the sink sanitizer to arbitrate;
-   * `'escape'` literalizes them. Omit to inherit the process-wide default.
-   */
-  htmlPolicy?: HtmlPolicy
-}
+/**
+ * Options shared by the streaming emitters. Extends the per-render policy
+ * overrides (#137) — `htmlPolicy`, `safeHrefSchemes`, `sanitizeExtension`,
+ * `linkImagePolicy`, `trustedTypesPolicy` — each optional and inheriting the
+ * process-wide default when omitted. For `StreamingMarkdownRenderer` the
+ * overrides are captured at construction and re-applied around every `update()`.
+ */
+export interface StreamingMarkdownOptions extends RenderPolicyOptions {}
 
 /**
  * Render assistant text while it is still streaming.
@@ -593,13 +592,7 @@ export function renderStreamingMarkdown(
   content: string,
   options: StreamingMarkdownOptions = {},
 ): string {
-  if (options.htmlPolicy === undefined) return renderStreamingMarkdownCore(content)
-  const previous = setHtmlPolicy(options.htmlPolicy)
-  try {
-    return renderStreamingMarkdownCore(content)
-  } finally {
-    setHtmlPolicy(previous)
-  }
+  return withRenderPolicies(options, () => renderStreamingMarkdownCore(content))
 }
 
 function renderStreamingMarkdownCore(content: string): string {
@@ -686,26 +679,23 @@ export class StreamingMarkdownRenderer {
   private readonly contentScanner = new IncrementalSourceScanner()
   private readonly completeScanner = new IncrementalSourceScanner()
   private readonly host: HTMLElement
-  /** Raw-HTML policy applied around every commit (#600); default passthrough. */
-  private readonly htmlPolicy: HtmlPolicy | undefined
+  /**
+   * Per-render policy overrides captured at construction (#137) and re-applied
+   * around every commit — so this instance renders under its own html/scheme/
+   * origin/sanitize policy regardless of the process-wide defaults.
+   */
+  private readonly policyOptions: RenderPolicyOptions
 
   constructor(host: HTMLElement, options: StreamingMarkdownOptions = {}) {
     this.host = host
-    this.htmlPolicy = options.htmlPolicy
+    this.policyOptions = options
   }
 
   /** Render `content` (the full message text so far) into the host incrementally. */
   update(content: string): void {
-    if (this.htmlPolicy === undefined) {
+    withRenderPolicies(this.policyOptions, () => {
       this.updateWithPolicy(content)
-      return
-    }
-    const previous = setHtmlPolicy(this.htmlPolicy)
-    try {
-      this.updateWithPolicy(content)
-    } finally {
-      setHtmlPolicy(previous)
-    }
+    })
   }
 
   private updateWithPolicy(content: string): void {

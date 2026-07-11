@@ -138,6 +138,23 @@ export function getLinkImagePolicy(): LinkImagePolicy | null {
   }
 }
 
+/** @internal Opaque handle for {@link snapshotLinkImagePolicy}. */
+export type LinkImagePolicySnapshot = ResolvedPolicy | null
+
+/**
+ * @internal Snapshot the resolved active policy slot for a scoped per-render
+ * override (see `withRenderPolicies`). The value is opaque — pass it back to
+ * {@link restoreLinkImagePolicy} to restore, without re-canonicalizing.
+ */
+export function snapshotLinkImagePolicy(): LinkImagePolicySnapshot {
+  return activePolicy
+}
+
+/** @internal Restore a snapshot from {@link snapshotLinkImagePolicy}. */
+export function restoreLinkImagePolicy(snapshot: LinkImagePolicySnapshot): void {
+  activePolicy = snapshot
+}
+
 /**
  * Canonicalize a URL for prefix comparison: resolve it (optionally against
  * `base`) with the WHATWG URL parser, drop any embedded credentials, and return

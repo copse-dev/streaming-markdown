@@ -181,9 +181,17 @@ export interface SanitizeExtension {
 
 let sanitizeExtension: SanitizeExtension | null = null
 
-/** Inject a host {@link SanitizeExtension}; pass `null` to restore the core allowlist. */
-export function setSanitizeExtension(extension: SanitizeExtension | null): void {
+/**
+ * Inject a host {@link SanitizeExtension}; pass `null` to restore the core
+ * allowlist. Returns the previous value so a caller can scope a per-render
+ * override and restore it in a `finally` (see `withRenderPolicies`).
+ */
+export function setSanitizeExtension(
+  extension: SanitizeExtension | null,
+): SanitizeExtension | null {
+  const previous = sanitizeExtension
   sanitizeExtension = extension
+  return previous
 }
 
 // The single per-element gate the active backend runs for every kept element.
