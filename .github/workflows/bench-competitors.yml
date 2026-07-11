@@ -27,9 +27,10 @@ jobs:
     # routing note). Scheduled/manual runs only ever execute trusted main-
     # branch content, so the self-hosted pool is safe here.
     runs-on: ${{ vars.CHECKS_RUNNER || 'ubuntu-latest' }}
-    # Competitor installs + the capped bench run finish well inside this; the
-    # timeout exists so a hung competitor install can't pin the runner.
-    timeout-minutes: 45
+    # The full corpus takes ~30-40 min (the long-transcript full-re-render
+    # cells dominate); the timeout exists so a hung competitor install or a
+    # wedged child process can't pin the runner.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
 

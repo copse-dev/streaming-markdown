@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 // Pinned to the commit that introduced benchmark-compare/ upstream.
 const INCREMARK_COMMIT = '765e77b135eb48082060ac58919811d9599136a5'
@@ -56,24 +56,32 @@ async function download(url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer())
 }
 
-const refresh = process.argv.includes('--refresh')
-mkdirSync(CORPUS_DIR, { recursive: true })
+// Fetch/verify only when executed directly — bench-compare.mts imports this
+// module for CORPUS_DIR/INCREMARK_CORPUS and must not re-run (or re-print)
+// the verification in every measurement child process.
+const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
+if (isMain) await main()
 
-for (const file of INCREMARK_CORPUS) {
-  const path = resolve(CORPUS_DIR, file.name)
-  if (!refresh && existsSync(path)) {
-    const actual = sha256(readFileSync(path))
-    if (actual === file.sha256) {
-      console.log(`fetch-corpus: ${file.name} matches the pinned SHA-256.`)
-      continue
+async function main(): Promise<void> {
+  const refresh = process.argv.includes('--refresh')
+  mkdirSync(CORPUS_DIR, { recursive: true })
+
+  for (const file of INCREMARK_CORPUS) {
+    const path = resolve(CORPUS_DIR, file.name)
+    if (!refresh && existsSync(path)) {
+      const actual = sha256(readFileSync(path))
+      if (actual === file.sha256) {
+        console.log(`fetch-corpus: ${file.name} matches the pinned SHA-256.`)
+        continue
+      }
+      die(`${file.name} SHA-256 mismatch\n  expected ${file.sha256}\n  actual   ${actual}\nRun with --refresh to re-download.`)
     }
-    die(`${file.name} SHA-256 mismatch\n  expected ${file.sha256}\n  actual   ${actual}\nRun with --refresh to re-download.`)
+    const bytes = await download(`${RAW_BASE}/${file.name}`)
+    const actual = sha256(bytes)
+    if (actual !== file.sha256) {
+      die(`SHA-256 mismatch for ${file.name}\n  expected ${file.sha256}\n  actual   ${actual}`)
+    }
+    writeFileSync(path, bytes)
+    console.log(`fetch-corpus: wrote corpus/${file.name} (verified sha256 ${file.sha256.slice(0, 12)}…).`)
   }
-  const bytes = await download(`${RAW_BASE}/${file.name}`)
-  const actual = sha256(bytes)
-  if (actual !== file.sha256) {
-    die(`SHA-256 mismatch for ${file.name}\n  expected ${file.sha256}\n  actual   ${actual}`)
-  }
-  writeFileSync(path, bytes)
-  console.log(`fetch-corpus: wrote corpus/${file.name} (verified sha256 ${file.sha256.slice(0, 12)}…).`)
 }

@@ -744,13 +744,14 @@ function measureFixture(
   console.log()
 }
 
-// Child mode: measure the (already --fixture-filtered) fixtures in THIS
+// Child mode: measure the (already --fixture/--only-filtered) work in THIS
 // process and emit raw results as JSON for the parent. Exists because
 // DOMPurify's string path retains ~1-2 MB per sanitize under jsdom (surviving
 // GC and even window teardown — an upstream jsdom retention, not present in
 // real browsers), so a whole-corpus run in one process eventually OOMs no
-// matter the heap. One process per fixture caps the damage and also means a
-// competitor crash only loses that fixture.
+// matter the heap. The parent spawns one child per (fixture × contestant)
+// cell, capping retention at a single contestant's runs — and a competitor
+// crash loses one cell, not the run.
 if (args.childOut) {
   const childResults = new Map<string, Map<string, RunStats | { error: string }>>()
   for (const fixture of fixtures) measureFixture(fixture, childResults)
@@ -779,38 +780,44 @@ if (args.isolate) {
   for (let i = 0; i < fixtures.length; i++) {
     const fixture = fixtures[i]
     if (!fixture) continue
-    const partial = resolve(benchDir, `results/.partial-${String(i)}.json`)
-    const child = spawnSync(
-      process.execPath,
-      [
-        tsxCli,
-        script,
-        '--fixture',
-        `^${escapeRegExp(fixture.name)}$`,
-        '--child-out',
-        partial,
-        ...['--iters', String(args.iters), '--warmup', String(args.warmup), '--chunk', String(args.chunk)],
-        ...['--max-updates', String(args.maxUpdates)],
-        ...(args.parity ? ['--parity'] : []),
-        ...(args.only ? ['--only', args.only.source] : []),
-      ],
-      { stdio: ['ignore', 'inherit', 'inherit'], cwd: benchDir },
-    )
-    if (child.status === 0 && existsSync(partial)) {
-      const partialJson = JSON.parse(readFileSync(partial, 'utf8')) as {
-        results: Record<string, Record<string, RunStats | { error: string }>>
-        skipped: string[]
+    const perLib = new Map<string, RunStats | { error: string }>()
+    results.set(fixture.name, perLib)
+    console.log(`fixture ${fixture.name} — one child process per contestant`)
+    for (const contestant of contestants) {
+      const partial = resolve(benchDir, `results/.partial-${String(i)}.json`)
+      const child = spawnSync(
+        process.execPath,
+        [
+          tsxCli,
+          script,
+          '--fixture',
+          `^${escapeRegExp(fixture.name)}$`,
+          '--only',
+          `^${escapeRegExp(contestant.name)}$`,
+          '--child-out',
+          partial,
+          ...['--iters', String(args.iters), '--warmup', String(args.warmup), '--chunk', String(args.chunk)],
+          ...['--max-updates', String(args.maxUpdates)],
+          ...(args.parity ? ['--parity'] : []),
+        ],
+        { stdio: ['ignore', 'inherit', 'inherit'], cwd: benchDir },
+      )
+      if (child.status === 0 && existsSync(partial)) {
+        const partialJson = JSON.parse(readFileSync(partial, 'utf8')) as {
+          results: Record<string, Record<string, RunStats | { error: string }>>
+          skipped: string[]
+        }
+        const cell = partialJson.results[fixture.name]?.[contestant.name]
+        perLib.set(contestant.name, cell ?? { error: 'child produced no result' })
+        skipped.push(...partialJson.skipped)
+        rmSync(partial, { force: true })
+      } else {
+        console.error(`  ${contestant.name} on ${fixture.name}: child exited ${String(child.status)} — recorded as skipped`)
+        skipped.push(`${contestant.name} on ${fixture.name}: child process exited ${String(child.status)} (crash/OOM)`)
+        perLib.set(contestant.name, { error: 'child crashed' })
       }
-      for (const [name, perLib] of Object.entries(partialJson.results)) {
-        results.set(name, new Map(Object.entries(perLib)))
-      }
-      skipped.push(...partialJson.skipped)
-      rmSync(partial, { force: true })
-    } else {
-      console.error(`fixture ${fixture.name}: child exited ${String(child.status)} — recorded as skipped`)
-      skipped.push(`${fixture.name}: fixture child process exited ${String(child.status)} (crash/OOM)`)
-      results.set(fixture.name, new Map(contestants.map((c) => [c.name, { error: 'fixture child crashed' }])))
     }
+    console.log()
   }
 } else {
   for (const fixture of fixtures) measureFixture(fixture, results)

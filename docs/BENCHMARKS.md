@@ -30,12 +30,12 @@ actually does:
   memory quirk — see below); pass `--parity` for Incremark's exact uncapped
   5-character methodology (best combined with `--only` to compare the
   pipeline-tier parsers, which is all Incremark's own table compares).
-- **One process per fixture.** DOMPurify's string-return mode retains ~1–2 MB
-  per call under jsdom — surviving GC and window teardown; an upstream jsdom
-  retention that real browsers don't exhibit (`bench/competitors/dom-setup.ts`
-  documents the probes). Each fixture therefore runs in a child process so
-  retention can never accumulate across the corpus, and a competitor crash
-  loses one fixture, not the run.
+- **One process per (fixture × library) cell.** DOMPurify's string-return
+  mode retains ~1–2 MB per call under jsdom — surviving GC and window
+  teardown; an upstream jsdom retention that real browsers don't exhibit
+  (`bench/competitors/dom-setup.ts` documents the probes). Each cell
+  therefore runs in its own child process so retention can never accumulate
+  across the corpus, and a competitor crash loses one cell, not the run.
 - **Median of runs.** Every (library, fixture) cell is the median-by-total of
   3 measured runs after 1 warmup, with per-update p50/p95/max recorded.
 - **Two execution tiers, reported separately:**
