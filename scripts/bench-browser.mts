@@ -77,7 +77,7 @@ async function benchOpenPage(page: PwPage): Promise<Record<string, OpenRow>> {
       runs.sort((a, b) => a - b)
       return runs[2] as number
     }
-    if (!SM.isBrowserSanitizerSupported()) SM.setSanitizerBackend(SM.dompurifyBackend)
+    if (!SM.isBrowserSanitizerSupported()) SM.setDefaultConfig({ sanitizerBackend: SM.dompurifyBackend })
     const el = document.createElement('div')
     document.body.append(el)
     const out: Record<string, OpenRow> = {}
@@ -123,7 +123,7 @@ async function benchEnforcedPage(page: PwPage): Promise<{ enforced: boolean; row
     } catch {
       enforced = true
     }
-    if (!SM.isBrowserSanitizerSupported()) SM.setSanitizerBackend(SM.dompurifyBackend)
+    if (!SM.isBrowserSanitizerSupported()) SM.setDefaultConfig({ sanitizerBackend: SM.dompurifyBackend })
     const el = document.createElement('div')
     document.body.append(el)
     const rows: Record<string, number> = {}
