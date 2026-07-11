@@ -229,12 +229,15 @@ layer.
 
 ## Decision
 
-C is adopted, shipping **phase 1 (the security tier) for v1** —
-`sanitizeExtension`, `linkImagePolicy`, `safeHrefSchemes`, and
-`trustedTypesPolicy` as per-render options, closing the multi-tenant security
-footgun before hosts build on the global-only model. The behavioral tier
-(`mathSyntax`, `linkDecorator`, `rawImageRenderer`, `emailAutolinks`, CJK) and the
-`reset*` ergonomics stay as additive follow-ups, safe to land any time because C
-is non-breaking. Option B (the fuller instance/context model) is not pursued: its
-pipeline-wide threading of the hot inline paths is disproportionate to the
-reentrancy guarantee a synchronous renderer needs.
+C's **synchronous save-set-restore mechanism** is adopted and is what shipped —
+first as `withRenderPolicies` over the security tier, then generalized to
+`withConfig` over the whole synchronous config tier. Its *additive* half (keeping
+the `set*` globals as default movers) was **not** kept: once every slot was
+expressible per render, the setters were removed and the injected `MarkdownConfig`
+object became the single configuration mechanism (2026-07-11). The only slots that
+remain outside the per-render scope are the genuinely async `mathRenderer` /
+`diagramRenderer`, which run in post-render hydration and flow via `hydrate()` /
+`hydratePending*` options. Option B (the fuller instance/context model) is not
+pursued: its pipeline-wide threading of the hot inline paths is disproportionate
+to the reentrancy guarantee a synchronous renderer needs — the config captured on
+the instance and re-applied around each `update()` gives the same isolation.
