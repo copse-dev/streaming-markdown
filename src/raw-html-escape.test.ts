@@ -58,9 +58,12 @@ describe('raw-HTML escaping boundary (htmlPolicy: escape)', () => {
     assert.match(escaped('![moon](moon.jpg)'), /<img src="moon\.jpg" alt="moon" data-md-rendered="1" \/>/)
   })
 
-  it('preserves autolinks with uncommon-but-inert schemes', () => {
+  it('links allowlisted-scheme autolinks and drops unlisted ones (#139)', () => {
+    // ftp is on the default scheme allowlist, so it still links…
     assert.match(escaped('<ftp://example.com/x>'), /<a href="ftp:\/\/example\.com\/x">/)
-    assert.match(escaped('<foo://bar>'), /<a href="foo:\/\/bar">/)
+    // …but an arbitrary scheme now fails closed (autolinks share the markdown-link
+    // allowlist) rather than rendering a live `<a href>`.
+    assert.doesNotMatch(escaped('<foo://bar>'), /<a /)
   })
 
   it('preserves benign attribute-less inline HTML', () => {
