@@ -1,13 +1,8 @@
 import '../tests/setup-dom-jsdom.ts'
-import { describe, it, afterEach } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { tokenizeBlocks } from './block-tokenizer.ts'
-import {
-  getMathRenderer,
-  hydratePendingMath,
-  type MathRenderer,
-  setMathRenderer,
-} from './math.ts'
+import { hydratePendingMath, type MathRenderer } from './math.ts'
 import { setMathSyntax } from './math-syntax.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
@@ -224,9 +219,7 @@ describe('inline math at rest', () => {
   })
 })
 
-describe('math hydration (registry + hydratePendingMath)', () => {
-  afterEach(() => setMathRenderer(null))
-
+describe('math hydration (hydratePendingMath)', () => {
   /** Build a detached DOM subtree from the generator's math scaffolding. */
   function renderToDom(md: string): HTMLElement {
     const host = document.createElement('div')
@@ -236,9 +229,7 @@ describe('math hydration (registry + hydratePendingMath)', () => {
 
   const MATH_MD = '$$\nE = mc^2\n$$\n\nInline $a+b$ here.'
 
-  it('is a no-op without a registered renderer', async () => {
-    setMathRenderer(null)
-    assert.equal(getMathRenderer(), null)
+  it('is a no-op without a renderer', async () => {
     const host = renderToDom(MATH_MD)
     const count = await hydratePendingMath(host)
     assert.equal(count, 0)
@@ -254,10 +245,8 @@ describe('math hydration (registry + hydratePendingMath)', () => {
         return Promise.resolve({ html: `<span class="katex">${source.length}</span>` })
       },
     }
-    setMathRenderer(stub)
-
     const host = renderToDom(MATH_MD)
-    const count = await hydratePendingMath(host)
+    const count = await hydratePendingMath(host, { renderer: stub })
 
     assert.equal(count, 2)
     assert.deepEqual(calls, [
@@ -274,21 +263,21 @@ describe('math hydration (registry + hydratePendingMath)', () => {
 
   it('reads entity-decoded source back from the scaffolding', async () => {
     const sources: string[] = []
-    setMathRenderer({
+    const fake: MathRenderer = {
       render: (source) => {
         sources.push(source)
         return Promise.resolve({ html: '<span class="katex">ok</span>' })
       },
-    })
+    }
     const host = renderToDom('$$\na < b & c\n$$')
-    await hydratePendingMath(host)
+    await hydratePendingMath(host, { renderer: fake })
     assert.deepEqual(sources, ['a < b & c'])
   })
 
   it('marks elements errored (source kept visible) when the backend throws', async () => {
-    setMathRenderer({ render: () => Promise.reject(new Error('bad TeX')) })
+    const fake: MathRenderer = { render: () => Promise.reject(new Error('bad TeX')) }
     const host = renderToDom(MATH_MD)
-    const count = await hydratePendingMath(host)
+    const count = await hydratePendingMath(host, { renderer: fake })
     assert.equal(count, 0)
     const block = host.querySelector('.math-block')
     assert.ok(block?.classList.contains('math-block--error'))
@@ -298,11 +287,12 @@ describe('math hydration (registry + hydratePendingMath)', () => {
   })
 
   it('applies a transformHtml hook (host sanitizer seam)', async () => {
-    setMathRenderer({
+    const fake: MathRenderer = {
       render: () => Promise.resolve({ html: '<span class="katex"><script>evil()</script></span>' }),
-    })
+    }
     const host = renderToDom('$$\nx\n$$')
     await hydratePendingMath(host, {
+      renderer: fake,
       transformHtml: (html) => html.replace(/<script>[\s\S]*?<\/script>/g, ''),
     })
     assert.ok(!host.querySelector('script'), 'transformHtml ran before injection')
@@ -311,14 +301,15 @@ describe('math hydration (registry + hydratePendingMath)', () => {
 
   it('marks the element errored when injection fails (Trusted Types seam)', async () => {
     let renders = 0
-    setMathRenderer({
+    const fake: MathRenderer = {
       render: () => {
         renders++
         return Promise.resolve({ html: '<span class="katex">x</span>' })
       },
-    })
+    }
     const host = renderToDom('$$\nx\n$$')
     const count = await hydratePendingMath(host, {
+      renderer: fake,
       transformHtml: () => {
         throw new TypeError('TrustedHTML required')
       },
@@ -331,26 +322,28 @@ describe('math hydration (registry + hydratePendingMath)', () => {
   })
 
   it('hydrates a root that is itself the pending element', async () => {
-    setMathRenderer({ render: () => Promise.resolve({ html: '<span class="katex">ok</span>' }) })
+    const fake: MathRenderer = {
+      render: () => Promise.resolve({ html: '<span class="katex">ok</span>' }),
+    }
     const host = renderToDom('$$\nx\n$$')
     const block = host.querySelector<HTMLElement>('.math-block')
     assert.ok(block)
-    const count = await hydratePendingMath(block)
+    const count = await hydratePendingMath(block, { renderer: fake })
     assert.equal(count, 1)
     assert.ok(block.classList.contains('math-block--rendered'))
   })
 
   it('skips empty sources', async () => {
     let renders = 0
-    setMathRenderer({
+    const fake: MathRenderer = {
       render: () => {
         renders++
         return Promise.resolve({ html: '<span></span>' })
       },
-    })
+    }
     const host = document.createElement('div')
     host.innerHTML = '<div class="math-block math-block--pending"><pre class="math"> </pre></div>'
-    const count = await hydratePendingMath(host)
+    const count = await hydratePendingMath(host, { renderer: fake })
     assert.equal(count, 0)
     assert.equal(renders, 0)
   })

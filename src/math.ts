@@ -1,5 +1,4 @@
 import { setHostTrustedHtml, type TrustedHTMLValue } from './html-sink.ts'
-import { setMathSyntaxRendererRegistered } from './math-syntax.ts'
 
 // The math-renderer registry (#70): the KaTeX analogue of the pluggable diagram
 // renderer. Like mermaid, the KaTeX *library* is never bundled by this package —
@@ -11,7 +10,7 @@ import { setMathSyntaxRendererRegistered } from './math-syntax.ts'
 //
 // The KaTeX backend lives in `math-katex.ts` behind the
 // `@copse/streaming-markdown/math/katex` entry (`katexMathRenderer`,
-// `installKatex`, `loadKatex`), which dynamically imports `katex` — fetched only
+// `loadKatex`), which dynamically imports `katex` — fetched only
 // when a host opts in.
 
 /** Result of rendering one math expression: trusted HTML produced by the backend. */
@@ -31,8 +30,10 @@ export interface MathRenderOptions {
  * container errored and leaves the escaped source visible. Rendering is async
  * so a backend can lazy-load its library on first use.
  *
- * Register one with {@link setMathRenderer}, or lazily via `loadKatex()` /
- * `installKatex()` from `@copse/streaming-markdown/math/katex`.
+ * Obtain one from `loadKatex()` (`@copse/streaming-markdown/math/katex`) and pass
+ * it via `MarkdownConfig.mathRenderer` (streaming `hydrate()`) or the
+ * {@link HydrateMathOptions.renderer} option. Pair with `mathSyntax: true` to
+ * turn on the prose `$…$` grammar.
  */
 export interface MathRenderer {
   render(source: string, options: MathRenderOptions): Promise<MathRenderResult>
@@ -42,48 +43,12 @@ export interface MathRenderer {
 export const PENDING_MATH_SELECTOR =
   '.math-block.math-block--pending, .math-inline.math-inline--pending'
 
-let mathRenderer: MathRenderer | null = null
-
-/**
- * Register the active {@link MathRenderer} (or `null` to disable). Set it once,
- * before the first render: registration is also what activates the `$…$` /
- * `$$…$$` / `\(…\)` / `\[…\]` *prose syntax* (#78) — without a backend (or an
- * explicit `setMathSyntax(true)` override) those delimiters stay ordinary prose
- * and output is byte-identical to a math-free build, so non-math hosts never
- * accumulate pending scaffolding that nothing will hydrate. Passing `null`
- * restores that state. From `@copse/streaming-markdown/math/katex`:
- *
- * ```ts
- * import { setMathRenderer } from '@copse/streaming-markdown'
- * import { katexMathRenderer } from '@copse/streaming-markdown/math/katex'
- * setMathRenderer(katexMathRenderer)
- * ```
- *
- * or lazily (the KaTeX library is fetched as a separate chunk only then):
- *
- * ```ts
- * import { loadKatex } from '@copse/streaming-markdown/math/katex'
- * await loadKatex() // internally calls setMathRenderer
- * ```
- */
-export function setMathRenderer(renderer: MathRenderer | null): void {
-  mathRenderer = renderer
-  setMathSyntaxRendererRegistered(renderer !== null)
-}
-
-/** The active {@link MathRenderer}, or `null` when none has been registered. */
-export function getMathRenderer(): MathRenderer | null {
-  return mathRenderer
-}
-
 /** Options for {@link hydratePendingMath}. */
 export interface HydrateMathOptions {
   /**
    * The {@link MathRenderer} to hydrate with — obtain one from `loadKatex()`
-   * (`@copse/streaming-markdown/math/katex`). This is the config-injected path
-   * that replaces the old global `setMathRenderer` registration: pass the
-   * renderer per hydration call. When omitted, falls back to a renderer
-   * registered internally (e.g. by `installKatex`).
+   * (`@copse/streaming-markdown/math/katex`) and pass it per hydration call.
+   * When omitted (or `null`), hydration is a no-op returning 0.
    */
   renderer?: MathRenderer | null
   /**
@@ -120,13 +85,14 @@ function markError(el: Element, kind: string): void {
  * (`math-inline`) without. Each element is flipped to `--rendered` (HTML
  * injected) or `--error` (escaped source left visible — the graceful
  * fallback for TeX the backend rejects). Returns the number of expressions
- * successfully rendered. A no-op returning 0 when no backend is registered.
+ * successfully rendered. A no-op returning 0 when no {@link HydrateMathOptions.renderer}
+ * is supplied.
  */
 export async function hydratePendingMath(
   root: Element,
   options: HydrateMathOptions = {},
 ): Promise<number> {
-  const renderer = options.renderer ?? mathRenderer
+  const renderer = options.renderer
   if (!renderer) return 0
 
   const targets: Element[] = []

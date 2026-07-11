@@ -138,7 +138,6 @@ export { mermaidSourceCandidates, prepareMermaidSource } from './mermaid-source.
 export {
   type DiagramRenderer,
   type DiagramRenderResult,
-  getDiagramRenderer,
   type HydrateDiagramsOptions,
   hydratePendingDiagrams,
   PENDING_DIAGRAM_SELECTOR,
@@ -154,7 +153,6 @@ export {
 // from `loadKatex()` and pass it via `MarkdownConfig.mathRenderer` (streaming
 // `hydrate()`) or the `hydratePendingMath(root, { renderer })` option.
 export {
-  getMathRenderer,
   type HydrateMathOptions,
   hydratePendingMath,
   type MathRenderer,

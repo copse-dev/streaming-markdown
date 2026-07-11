@@ -1,9 +1,7 @@
 import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { getDiagramRenderer, setDiagramRenderer } from './mermaid.ts'
 import {
   __setMermaidImporterForTests,
-  installMermaid,
   loadMermaid,
   mermaidDiagramRenderer,
 } from './mermaid-mermaidjs.ts'
@@ -11,7 +9,7 @@ import {
 // The mermaid backend is a thin lazy adapter over the optional `mermaid` peer
 // dependency, which needs a browser-grade DOM and can't render under Node. These
 // tests inject a fake mermaid module via the test seam to exercise the wiring:
-// registration, lazy load-and-initialize (once), and id sequencing.
+// the renderer value, lazy load-and-initialize (once), and id sequencing.
 
 /** A fake `mermaid` module: records calls and returns deterministic SVG. */
 function fakeMermaidModule() {
@@ -31,23 +29,17 @@ function fakeMermaidModule() {
 describe('mermaid backend adapter', () => {
   afterEach(() => {
     __setMermaidImporterForTests(null)
-    setDiagramRenderer(null)
   })
 
-  it('installMermaid registers the mermaid-backed diagram renderer', () => {
-    setDiagramRenderer(null)
-    const renderer = installMermaid()
-    assert.equal(renderer, mermaidDiagramRenderer)
-    assert.equal(getDiagramRenderer(), mermaidDiagramRenderer)
+  it('loadMermaid returns the mermaid-backed diagram renderer', async () => {
+    assert.equal(await loadMermaid(), mermaidDiagramRenderer)
   })
 
-  it('loadMermaid resolves to the registered renderer (idempotent)', async () => {
-    setDiagramRenderer(null)
+  it('loadMermaid resolves to the same renderer (idempotent)', async () => {
     const a = await loadMermaid()
     const b = await loadMermaid()
     assert.equal(a, mermaidDiagramRenderer)
     assert.equal(b, mermaidDiagramRenderer)
-    assert.equal(getDiagramRenderer(), mermaidDiagramRenderer)
   })
 
   it('render lazily loads and initializes mermaid, then returns its SVG', async () => {

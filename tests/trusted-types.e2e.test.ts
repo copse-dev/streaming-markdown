@@ -37,10 +37,9 @@ type SMApi = typeof import('../src/index.ts') & {
   sanitizeRenderedMarkdownInto: (typeof import('../src/sanitize.ts'))['sanitizeRenderedMarkdownInto']
   setPresanitizedHtml: (typeof import('../src/html-sink.ts'))['setPresanitizedHtml']
   dompurifyBackend: (typeof import('../src/sanitize-dompurify.ts'))['dompurifyBackend']
-  // Internal backend registrations exposed by the harness bundle (no longer on
-  // the public API — the sink helpers read the process-wide backend).
+  // Internal sanitizer registration exposed by the harness bundle (no longer on
+  // the public API — the sink helper reads the process-wide backend).
   setSanitizerBackend: (typeof import('../src/sanitize.ts'))['setSanitizerBackend']
-  setDiagramRenderer: (typeof import('../src/mermaid.ts'))['setDiagramRenderer']
 }
 declare const SM: SMApi
 
@@ -134,16 +133,16 @@ describe('Trusted Types enforcement e2e (real Chromium)', { skip }, () => {
   it('mermaid hydration accepts host TrustedHTML and fails closed on plain strings', async () => {
     const result = await page.evaluate(async () => {
       SM.setSanitizerBackend(SM.dompurifyBackend)
-      SM.setDiagramRenderer({
+      const diagramRenderer = {
         render: () => Promise.resolve({ svg: '<svg data-diagram="ok"><g></g></svg>' }),
-      })
+      }
       const host = document.createElement('div')
       document.body.append(host)
       SM.setSanitizedHtml(host, SM.renderMarkdownUnsafe('```mermaid\ngraph TD\nA --> B\n```'))
 
       // Plain-string SVG: the injection sink rejects it; the diagram must fail
       // closed (marked --error, nothing injected) rather than crash.
-      const plainCount = await SM.hydratePendingDiagrams(host)
+      const plainCount = await SM.hydratePendingDiagrams(host, { renderer: diagramRenderer })
       const failedClosed =
         plainCount === 0 &&
         host.querySelector('.mermaid-diagram--error') !== null &&
@@ -164,12 +163,12 @@ describe('Trusted Types enforcement e2e (real Chromium)', { skip }, () => {
         }
       ).trustedTypes.createPolicy('mermaid-svg', { createHTML: (s: string) => s })
       const trustedCount = await SM.hydratePendingDiagrams(host2, {
+        renderer: diagramRenderer,
         transformSvg: (svg: string) => policy.createHTML(svg),
       })
       const rendered =
         trustedCount === 1 &&
         host2.querySelector('.mermaid-diagram--rendered svg[data-diagram="ok"]') !== null
-      SM.setDiagramRenderer(null)
       return { failedClosed, rendered }
     }, null)
     assert.ok(result.failedClosed, 'plain-string SVG fails closed under enforcement')

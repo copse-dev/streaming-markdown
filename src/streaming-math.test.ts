@@ -1,7 +1,8 @@
 import '../tests/setup-dom-jsdom.ts'
-import { describe, it, afterEach } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { hydratePendingMath, setMathRenderer } from './math.ts'
+import { hydratePendingMath } from './math.ts'
+import type { MathRenderer } from './math.ts'
 import { setMathSyntax } from './math-syntax.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
@@ -15,7 +16,7 @@ import {
 // forming pending-math state instead of raw delimiters; half-open inline `$x+`
 // holds via pendingHoldIndex; and both emitters converge on the at-rest render.
 //
-// Math prose syntax is gated on renderer registration (#78); this file tests
+// Math prose syntax is gated on `setMathSyntax` (#78); this file tests
 // streaming behaviour with the grammar active, so force it on for the whole
 // file. The gate itself (holds off, byte-identical output) is covered by
 // math-syntax.test.ts.
@@ -171,19 +172,17 @@ describe('inline math streaming hold', () => {
 })
 
 describe('re-render upgrade in place (hydration after streaming)', () => {
-  afterEach(() => setMathRenderer(null))
-
   it('committed scaffolding hydrates without re-rendering the markdown', async () => {
-    setMathRenderer({
+    const fake: MathRenderer = {
       render: (source, { displayMode }) =>
         Promise.resolve({
           html: `<span class="katex" data-display="${String(displayMode)}">${source}</span>`,
         }),
-    })
+    }
     const doc = '$$\nE = mc^2\n$$\n\nInline $a+b$ done.\n'
     const host = streamCharByChar(doc)
 
-    const count = await hydratePendingMath(host)
+    const count = await hydratePendingMath(host, { renderer: fake })
 
     assert.equal(count, 2)
     assert.ok(host.querySelector('.math-block--rendered [data-display="true"]'))

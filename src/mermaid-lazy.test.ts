@@ -1,11 +1,9 @@
 import '../tests/setup-dom-jsdom.ts'
-import { describe, it, afterEach } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   type DiagramRenderer,
-  getDiagramRenderer,
   hydratePendingDiagrams,
-  setDiagramRenderer,
 } from './mermaid.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 
@@ -24,12 +22,7 @@ function renderToDom(md: string): HTMLElement {
 const MERMAID_MD = '```mermaid\ngraph TD\nA[Start] --> B[End]\n```'
 
 describe('lazy diagram hydration (prototype)', () => {
-  afterEach(() => setDiagramRenderer(null))
-
   it('emits inert pending scaffolding and hydrates to nothing with no backend', async () => {
-    setDiagramRenderer(null)
-    assert.equal(getDiagramRenderer(), null)
-
     const host = renderToDom(MERMAID_MD)
     const diagram = host.querySelector('.mermaid-diagram')
     assert.ok(diagram, 'diagram container is emitted')
@@ -47,10 +40,8 @@ describe('lazy diagram hydration (prototype)', () => {
       render: (source) =>
         Promise.resolve({ svg: `<svg data-src="${source.includes('graph TD') ? 'ok' : 'no'}"></svg>` }),
     }
-    setDiagramRenderer(stub)
-
     const host = renderToDom(MERMAID_MD)
-    const count = await hydratePendingDiagrams(host)
+    const count = await hydratePendingDiagrams(host, { renderer: stub })
 
     assert.equal(count, 1)
     const diagram = host.querySelector('.mermaid-diagram')
@@ -72,12 +63,10 @@ describe('lazy diagram hydration (prototype)', () => {
         return Promise.resolve({ svg: '<svg data-ok="1"></svg>' })
       },
     }
-    setDiagramRenderer(stub)
-
     // One line-leading node so the aggressive pass fully quotes it (`Start[Begin]`
     // → `Start["Begin"]`); the gentle pass leaves the plain label unquoted.
     const host = renderToDom('```mermaid\ngraph TD\nStart[Begin]\n```')
-    const count = await hydratePendingDiagrams(host)
+    const count = await hydratePendingDiagrams(host, { renderer: stub })
 
     assert.equal(count, 1, 'aggressive candidate rendered after the gentle one failed')
     assert.equal(attempts.length, 2, 'gentle then aggressive candidate attempted')
@@ -87,10 +76,9 @@ describe('lazy diagram hydration (prototype)', () => {
 
   it('marks the diagram as errored when every candidate throws', async () => {
     const stub: DiagramRenderer = { render: () => Promise.reject(new Error('boom')) }
-    setDiagramRenderer(stub)
 
     const host = renderToDom(MERMAID_MD)
-    const count = await hydratePendingDiagrams(host)
+    const count = await hydratePendingDiagrams(host, { renderer: stub })
 
     assert.equal(count, 0)
     const diagram = host.querySelector('.mermaid-diagram')
@@ -102,10 +90,9 @@ describe('lazy diagram hydration (prototype)', () => {
     const stub: DiagramRenderer = {
       render: () => Promise.resolve({ svg: '<svg><script>evil()</script></svg>' }),
     }
-    setDiagramRenderer(stub)
-
     const host = renderToDom(MERMAID_MD)
     await hydratePendingDiagrams(host, {
+      renderer: stub,
       transformSvg: (svg) => svg.replace(/<script>[\s\S]*?<\/script>/g, ''),
     })
 
@@ -124,10 +111,9 @@ describe('lazy diagram hydration (prototype)', () => {
         return Promise.resolve({ svg: '<svg></svg>' })
       },
     }
-    setDiagramRenderer(stub)
-
     const host = renderToDom(MERMAID_MD)
     const count = await hydratePendingDiagrams(host, {
+      renderer: stub,
       transformSvg: () => {
         throw new TypeError('TrustedHTML required')
       },
