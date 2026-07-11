@@ -35,6 +35,10 @@ export type EntityDecoder = (text: string) => string
  * The 252 classic HTML4 named references, mapped to their HTML5 code points.
  * This is the default decoder's named set — a spec-defined boundary that covers
  * Latin-1, Greek, and the common typographic/math/currency symbols.
+ *
+ * @experimental Internal data table, exported from the main entry but not part of
+ * the stable v1 surface (#147). Its shape/contents may change; extend the decoder
+ * with `addNamedEntities` / `setNamedEntities` rather than reading this directly.
  */
 export const BUILTIN_NAMED_ENTITIES: Readonly<Record<string, string>> = Object.freeze({
   aacute: "á",
@@ -417,7 +421,13 @@ export function getNamedEntities(): Readonly<Record<string, string>> {
   return { ...effectiveNamed }
 }
 
-/** Restore the default decoder and clear user-added names (test/host reset). */
+/**
+ * Restore the default decoder and clear user-added names (test/host reset).
+ *
+ * @experimental Test/reset helper, exported from the main entry but not part of
+ * the stable v1 surface (#147). May move behind a test-utilities subpath or be
+ * removed in a minor release.
+ */
 export function resetEntityDecoder(): void {
   userNamed = {}
   customDecoder = null
