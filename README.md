@@ -140,6 +140,8 @@ variables, and native-nesting note — are in [`docs/EXTENDING.md`](docs/EXTENDI
 
 ## Documentation
 
+- **[`docs/REACT.md`](docs/REACT.md)** — using it from React: at-rest and
+  incremental-streaming components, SSR, and migrating from `react-markdown`.
 - **[`docs/EXTENDING.md`](docs/EXTENDING.md)** — every plug point (sanitizer,
   highlighter, custom fenced blocks, link routing, images, scheme allowlist) and styling.
 - **[`docs/RECIPES.md`](docs/RECIPES.md)** — UI recipes: how to add copy
