@@ -120,6 +120,19 @@ export interface SanitizerConfig {
  * {@link browserSanitizerBackend} (native Sanitizer API, the default) and, behind
  * the `@copse/streaming-markdown/sanitizers/dompurify` entry point, a DOMPurify
  * backend for environments without the native API.
+ *
+ * **Serialization contract.** The streaming emitters splice pending-tail markup
+ * into `sanitize`'s output *as a string* — inserting a forming `<li>` before the
+ * trailing `</ul>`/`</ol>`, a paragraph-continuation before `</p>`, or a pending
+ * row before `</tbody>` (`appendListPendingHtml`, `insertBeforeTrailingListClose`,
+ * `appendParagraphContinuationHtml` in `streaming.ts`; `appendPendingTableRowHtml`
+ * in `streaming-table-dom.ts`). This assumes the backend emits HTML5-standard
+ * serialization: allowlisted block elements closed with their literal end tag
+ * (`</ul>`, `</ol>`, `</p>`, `</tbody>`), lowercase tag names, and no gratuitous
+ * whitespace or attribute reordering inside those tags. Both bundled backends
+ * satisfy this. A custom backend that reserializes differently (self-closing
+ * forms, uppercased tags, injected whitespace) can misplace the pending tail —
+ * keep serialization HTML5-standard, or the string-surgery seams won't match.
  */
 export interface SanitizerBackend {
   sanitize(html: string, config: SanitizerConfig): string
