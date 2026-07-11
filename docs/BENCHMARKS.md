@@ -25,9 +25,17 @@ actually does:
 - **Chunked replay.** Each fixture is streamed in small fixed-size chunks
   (default 5 characters, matching Incremark's harness), appending to an
   accumulated document exactly the way LLM deltas arrive. By default the
-  chunk size grows so no fixture exceeds 600 updates (keeps the O(n²)
-  full-re-render competitors from dominating wall-clock); pass `--parity` for
-  Incremark's exact uncapped 5-character methodology.
+  chunk size grows so no fixture exceeds 200 updates (keeps the O(n²)
+  full-re-render competitors from dominating wall-clock, and bounds a jsdom
+  memory quirk — see below); pass `--parity` for Incremark's exact uncapped
+  5-character methodology (best combined with `--only` to compare the
+  pipeline-tier parsers, which is all Incremark's own table compares).
+- **One process per fixture.** DOMPurify's string-return mode retains ~1–2 MB
+  per call under jsdom — surviving GC and window teardown; an upstream jsdom
+  retention that real browsers don't exhibit (`bench/competitors/dom-setup.ts`
+  documents the probes). Each fixture therefore runs in a child process so
+  retention can never accumulate across the corpus, and a competitor crash
+  loses one fixture, not the run.
 - **Median of runs.** Every (library, fixture) cell is the median-by-total of
   3 measured runs after 1 warmup, with per-update p50/p95/max recorded.
 - **Two execution tiers, reported separately:**
@@ -102,9 +110,10 @@ npm run bench:competitors   # fetches the pinned corpus, runs, writes results/
 
 Useful flags (append after `--`): `--parity` (exact Incremark methodology),
 `--fixture <regex>`, `--only <regex>` (contestant filter), `--iters N`,
-`--chunk N`, `--skip-bundle`, `--update-docs` (rewrites the results section
-below). Output lands in `bench/competitors/results/latest.{json,md}` — the
-same files the scheduled workflow uploads as its artifact.
+`--chunk N`, `--skip-bundle`, `--no-isolate` (single-process, for debugging),
+`--update-docs` (rewrites the results section below). Output lands in
+`bench/competitors/results/latest.{json,md}` — the same files the scheduled
+workflow uploads as its artifact.
 
 ## Results
 

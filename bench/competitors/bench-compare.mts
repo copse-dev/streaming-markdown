@@ -24,15 +24,19 @@
  * fails to import is reported as skipped, which is also why this harness is
  * NOT a CI gate (see .github/workflows/bench-competitors.yml).
  *
- * Flags: --iters N (3) --warmup N (1) --chunk N (5) --max-updates N (600)
+ * Each fixture is measured in its own child process (see the child-mode note
+ * at the bottom); `--no-isolate` runs everything in-process for debugging.
+ *
+ * Flags: --iters N (3) --warmup N (1) --chunk N (5) --max-updates N (200)
  *        --parity (exact Incremark methodology: 5-char chunks, no update cap)
- *        --fixture REGEX --only REGEX --skip-bundle --update-docs
+ *        --fixture REGEX --only REGEX --skip-bundle --update-docs --no-isolate
  *
  * Numbers are machine-dependent; compare libraries within one run only.
  */
 import './dom-setup.ts'
 import { performance } from 'node:perf_hooks'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { cpus } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -56,6 +60,8 @@ interface Args {
   only: RegExp | null
   skipBundle: boolean
   updateDocs: boolean
+  isolate: boolean
+  childOut: string | null
 }
 
 function parseArgs(argv: string[]): Args {
@@ -63,12 +69,14 @@ function parseArgs(argv: string[]): Args {
     iters: 3,
     warmup: 1,
     chunk: 5,
-    maxUpdates: 600,
+    maxUpdates: 200,
     parity: false,
     fixture: null,
     only: null,
     skipBundle: false,
     updateDocs: false,
+    isolate: true,
+    childOut: null,
   }
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]
@@ -82,6 +90,8 @@ function parseArgs(argv: string[]): Args {
     else if (flag === '--only') args.only = new RegExp(next())
     else if (flag === '--skip-bundle') args.skipBundle = true
     else if (flag === '--update-docs') args.updateDocs = true
+    else if (flag === '--no-isolate') args.isolate = false
+    else if (flag === '--child-out') args.childOut = next()
     else if (flag !== undefined) {
       console.error(`unknown flag: ${flag}`)
       process.exit(2)
@@ -709,17 +719,13 @@ function renderBundles(bundles: BundleResult[]): string[] {
 const fixtures = loadFixtures()
 const { contestants, skipped } = await buildContestants()
 
-console.log(
-  `cross-library streaming bench (#157) — iters=${String(args.iters)} warmup=${String(args.warmup)} ` +
-    `chunk=${String(args.chunk)}${args.parity ? ' (parity: uncapped)' : ` max-updates=${String(args.maxUpdates)}`} ` +
-    `(node ${process.version}, ${cpus()[0]?.model ?? 'unknown cpu'})\n`,
-)
-
-const results = new Map<string, Map<string, RunStats | { error: string }>>()
-for (const fixture of fixtures) {
+function measureFixture(
+  fixture: Fixture,
+  into: Map<string, Map<string, RunStats | { error: string }>>,
+): void {
   const chunks = chunksOf(fixture.text)
   const perLib = new Map<string, RunStats | { error: string }>()
-  results.set(fixture.name, perLib)
+  into.set(fixture.name, perLib)
   console.log(`fixture ${fixture.name} — ${String(fixture.text.length)} chars, ${String(chunks.length)} updates`)
   for (const contestant of contestants) {
     const stats = measure(contestant, chunks, fixture.text.length)
@@ -736,6 +742,78 @@ for (const fixture of fixtures) {
     }
   }
   console.log()
+}
+
+// Child mode: measure the (already --fixture-filtered) fixtures in THIS
+// process and emit raw results as JSON for the parent. Exists because
+// DOMPurify's string path retains ~1-2 MB per sanitize under jsdom (surviving
+// GC and even window teardown — an upstream jsdom retention, not present in
+// real browsers), so a whole-corpus run in one process eventually OOMs no
+// matter the heap. One process per fixture caps the damage and also means a
+// competitor crash only loses that fixture.
+if (args.childOut) {
+  const childResults = new Map<string, Map<string, RunStats | { error: string }>>()
+  for (const fixture of fixtures) measureFixture(fixture, childResults)
+  writeFileSync(
+    args.childOut,
+    JSON.stringify({
+      results: Object.fromEntries([...childResults].map(([f, m]) => [f, Object.fromEntries(m)])),
+      skipped,
+    }),
+  )
+  process.exit(0)
+}
+
+console.log(
+  `cross-library streaming bench (#157) — iters=${String(args.iters)} warmup=${String(args.warmup)} ` +
+    `chunk=${String(args.chunk)}${args.parity ? ' (parity: uncapped)' : ` max-updates=${String(args.maxUpdates)}`} ` +
+    `isolate=${args.isolate ? 'per-fixture' : 'off'} (node ${process.version}, ${cpus()[0]?.model ?? 'unknown cpu'})\n`,
+)
+
+const results = new Map<string, Map<string, RunStats | { error: string }>>()
+if (args.isolate) {
+  mkdirSync(resolve(benchDir, 'results'), { recursive: true })
+  const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const tsxCli = resolve(benchDir, 'node_modules/tsx/dist/cli.mjs')
+  const script = fileURLToPath(import.meta.url)
+  for (let i = 0; i < fixtures.length; i++) {
+    const fixture = fixtures[i]
+    if (!fixture) continue
+    const partial = resolve(benchDir, `results/.partial-${String(i)}.json`)
+    const child = spawnSync(
+      process.execPath,
+      [
+        tsxCli,
+        script,
+        '--fixture',
+        `^${escapeRegExp(fixture.name)}$`,
+        '--child-out',
+        partial,
+        ...['--iters', String(args.iters), '--warmup', String(args.warmup), '--chunk', String(args.chunk)],
+        ...['--max-updates', String(args.maxUpdates)],
+        ...(args.parity ? ['--parity'] : []),
+        ...(args.only ? ['--only', args.only.source] : []),
+      ],
+      { stdio: ['ignore', 'inherit', 'inherit'], cwd: benchDir },
+    )
+    if (child.status === 0 && existsSync(partial)) {
+      const partialJson = JSON.parse(readFileSync(partial, 'utf8')) as {
+        results: Record<string, Record<string, RunStats | { error: string }>>
+        skipped: string[]
+      }
+      for (const [name, perLib] of Object.entries(partialJson.results)) {
+        results.set(name, new Map(Object.entries(perLib)))
+      }
+      skipped.push(...partialJson.skipped)
+      rmSync(partial, { force: true })
+    } else {
+      console.error(`fixture ${fixture.name}: child exited ${String(child.status)} — recorded as skipped`)
+      skipped.push(`${fixture.name}: fixture child process exited ${String(child.status)} (crash/OOM)`)
+      results.set(fixture.name, new Map(contestants.map((c) => [c.name, { error: 'fixture child crashed' }])))
+    }
+  }
+} else {
+  for (const fixture of fixtures) measureFixture(fixture, results)
 }
 
 const bundleReport = args.skipBundle ? { bundles: [], skipped: [] } : await measureBundles()

@@ -58,5 +58,23 @@ if (typeof win.matchMedia !== 'function') {
 // jsdom has no native Sanitizer API, so register the DOMPurify backend (the
 // same fallback a real deployment uses on non-Chromium engines). Imported only
 // after the DOM globals exist — DOMPurify binds `window` at module evaluation.
+//
+// One bench-local twist: DOMPurify's string-return mode retains ~2 MB per call
+// under jsdom (surviving explicit GC — the fragment path does not), which OOMs
+// a full corpus run at thousands of sanitizes. Override `sanitize` to route
+// through the bundled fragment-mode node path (same allowlist and onElement
+// gate — the SanitizerBackend contract requires the two paths to produce
+// identically-serializing trees) and serialize from a reused scratch element.
+// Real browsers don't exhibit the retention; this changes bench memory, not
+// sanitize semantics.
 const { dompurifyBackend } = await import('../../src/sanitize-dompurify.ts')
-setSanitizerBackend(dompurifyBackend)
+const scratch = win.document.createElement('div')
+setSanitizerBackend({
+  ...dompurifyBackend,
+  sanitize(html, config): string {
+    dompurifyBackend.sanitizeInto?.(scratch, html, config)
+    const out = scratch.innerHTML
+    scratch.replaceChildren()
+    return out
+  },
+})
