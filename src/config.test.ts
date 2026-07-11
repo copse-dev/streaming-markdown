@@ -207,6 +207,45 @@ describe('StreamingMarkdownRenderer.hydrate (spike for #145)', () => {
     assert.match(host.innerHTML, /class="k"/)
   })
 
+  it('hydrates pending diagrams from the constructor config, no global registration', async () => {
+    const host = document.createElement('div')
+    const renderer = new StreamingMarkdownRenderer(host, {
+      diagramRenderer: {
+        render: () => Promise.resolve({ svg: '<svg data-demo="ok"></svg>' }),
+      },
+    })
+    renderer.update('```mermaid\ngraph TD; A-->B\n```')
+    assert.match(host.innerHTML, /mermaid-diagram--pending/)
+    const counts = await renderer.hydrate()
+    assert.equal(counts.diagrams, 1)
+    assert.match(host.innerHTML, /mermaid-diagram--rendered/)
+    assert.match(host.innerHTML, /data-demo="ok"/)
+  })
+
+  it('forwards transformHtml / transformSvg through hydrate()', async () => {
+    const host = document.createElement('div')
+    const renderer = new StreamingMarkdownRenderer(host, {
+      mathSyntax: true,
+      mathRenderer: fakeMath,
+      diagramRenderer: { render: () => Promise.resolve({ svg: '<svg></svg>' }) },
+    })
+    renderer.update('$x$\n\n```mermaid\ngraph TD; A-->B\n```')
+    let mathSeen = false
+    let svgSeen = false
+    await renderer.hydrate({
+      transformHtml: (h) => {
+        mathSeen = true
+        return h
+      },
+      transformSvg: (s) => {
+        svgSeen = true
+        return s
+      },
+    })
+    assert.ok(mathSeen, 'transformHtml forwarded')
+    assert.ok(svgSeen, 'transformSvg forwarded')
+  })
+
   it('is a no-op for a tier whose renderer is not configured', async () => {
     const host = document.createElement('div')
     const renderer = new StreamingMarkdownRenderer(host, { mathSyntax: true })
