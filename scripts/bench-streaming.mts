@@ -176,7 +176,6 @@ const fixtures: { name: string; text: string }[] = [
   { name: 'terms-of-service', text: termsOfService() },
   { name: 'synthetic-table+list', text: syntheticTableAndList() },
   { name: 'footnotes-heavy', text: footnoteDoc(80) },
-  { name: 'code-blocks-heavy', text: codeBlocksDoc(40) },
 ]
 
 console.log(
@@ -429,11 +428,12 @@ if (meanLazyGrowth >= 3.0) {
 // the block count should ~double the work, not square it. A regression that stops
 // freezing closed code blocks (re-highlighting the whole growing prefix on every
 // update) is the super-linear cost this guards. Measured WITH a highlighter
-// registered because re-highlight cost is what dominates real code-heavy traces
-// (the main fixtures table above runs the same shape with no highlighter, for the
-// frozen-tail-structure-only cost). This also produces the number the eventual
-// published benchmark reports for code-heavy content. Kept deliberately light
-// (few blocks, coarse chunk) since it runs last in an already memory-heavy process.
+// registered because re-highlight cost is what dominates real code-heavy traces,
+// and it produces the number the eventual published benchmark reports for
+// code-heavy content. Kept deliberately light (few blocks, coarse chunk, DOM path
+// only) since it runs last in an already memory-heavy process — the string-path
+// O(n²) re-render over code blocks is intentionally NOT measured here (it
+// dominates peak heap and isn't what the frozen-tail guard is about).
 console.log('\ncode-block scaling — DOM path + highlight.js, fixed 64-byte chunk (closed blocks grow with size)\n')
 const codeScaleCols = [pad('blocks', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
 console.log(codeScaleCols.join('  '))
