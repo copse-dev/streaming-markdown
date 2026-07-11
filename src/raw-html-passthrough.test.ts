@@ -208,6 +208,25 @@ describe('raw-HTML passthrough: forming <details> (#600)', () => {
     const pending = host.querySelector('.stream-pending-block, .stream-pending:not([hidden])')
     assert.match(pending?.textContent ?? '', /after tai/)
   })
+
+  it('DOM emitter holds the tail when the open <details> is the unsettled tail (#138)', () => {
+    setSanitizeExtension({ allowedTags: ['details', 'summary'] })
+    // The <details> is open and the whole run (soft-broken, single newlines) is
+    // still the unsettled tail, so nothing has frozen and the incremental fast
+    // path runs with an empty delta. It previously left the open-`<details>` flag
+    // unset — so the DOM emitter flashed the collapsed body even though the
+    // string emitter held it. Both must hold it now.
+    const cut = '<details>\n<summary>x</summary>\nsecret pending tail'
+    const host = document.createElement('div')
+    new StreamingMarkdownRenderer(host).update(cut)
+    const pendingEls = host.querySelectorAll('.stream-pending-block, .stream-pending:not([hidden])')
+    for (const el of pendingEls) {
+      assert.doesNotMatch(el.textContent ?? '', /secret pending tail/)
+    }
+    // No desync: the DOM committed subtree equals the string emitter's output.
+    const domCommitted = host.querySelector('.stream-complete')?.innerHTML ?? ''
+    assert.equal(domCommitted, sanitizeRenderedMarkdown(renderStreamingMarkdown(cut)).toString())
+  })
 })
 
 // A realistic agent-style document that embeds raw HTML — the at-rest
