@@ -482,8 +482,15 @@ is the sole arbiter (allowlisted → element; otherwise stripped/unwrapped). The
 security posture is unchanged — the sink allowlist is the boundary and stays
 narrow — but the renderer no longer does a *second, redundant* escape. The
 `'escape'` opt-out is retained for a host that consumes the renderer string
-without a sink. **Measuring the true passthrough spec ceiling** (re-baselining the
-harnesses in passthrough mode) is a deliberate follow-up, not done here. HTML
+without a sink. **The true passthrough spec ceiling is now measured** (#141):
+each harness pins a *second* baseline under the shipping `passthrough` default
+(`conformance-baseline-passthrough.json`, `gfm-conformance-baseline-passthrough.json`),
+regenerated with `UPDATE_COMMONMARK_PASSTHROUGH_BASELINE=1` /
+`UPDATE_GFM_PASSTHROUGH_BASELINE=1`. Passthrough passes a few more of the 652
+(CommonMark **587**, GFM **595** vs escape's 583 / 591) — raw HTML flows to the
+sink instead of being escaped, so several Raw-HTML / HTML-block examples match the
+spec verbatim while a handful of escape-mode-only shapes drop. The escape baseline
+stays the canonical passing-example corpus the streaming/bench suites reuse. HTML
 **block recognition** in `block-tokenizer.ts` is still not a distinct token —
 block HTML tokenizes as prose and follows the inline policy. An element that pairs
 across blank-line block boundaries (`<details>`, a hand-typed `<div>`) can't be

@@ -18,9 +18,22 @@ const BASELINE_PATH = resolve(
   '../fixtures/commonmark/conformance-baseline.json',
 )
 
-/** Pinned CommonMark conformance baseline (see `conformance-baseline.json`). */
+// Companion baseline measuring the shipping `passthrough` default (#141). The
+// escape baseline above stays the canonical passing-example corpus for the
+// streaming/bench suites (stable, historical); this one is measured separately.
+const PASSTHROUGH_BASELINE_PATH = resolve(
+  import.meta.dirname,
+  '../fixtures/commonmark/conformance-baseline-passthrough.json',
+)
+
+/** Pinned CommonMark conformance baseline (escape mode; see `conformance-baseline.json`). */
 export function loadConformanceBaseline(): ConformanceBaseline {
   return JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) as ConformanceBaseline
+}
+
+/** Pinned CommonMark conformance baseline under the shipping `passthrough` default (#141). */
+export function loadPassthroughConformanceBaseline(): ConformanceBaseline {
+  return JSON.parse(readFileSync(PASSTHROUGH_BASELINE_PATH, 'utf8')) as ConformanceBaseline
 }
 
 /** Spec examples that currently pass the at-rest conformance baseline. */

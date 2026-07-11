@@ -48,6 +48,10 @@ interface GfmConformanceBaseline {
 }
 
 const BASELINE_PATH = resolve(process.cwd(), 'tests/fixtures/gfm/gfm-conformance-baseline.json')
+const PASSTHROUGH_BASELINE_PATH = resolve(
+  process.cwd(),
+  'tests/fixtures/gfm/gfm-conformance-baseline-passthrough.json',
+)
 
 // The GFM spec.txt is fetched on demand (not vendored — see tests/gfm/load-spec.ts),
 // so a bare offline `npm test` may not have it. Skip cleanly with a pointer rather
@@ -71,19 +75,54 @@ installFullEntityDecoder()
 const SPEC_VERSION = gfmSpecVersion()
 const spec = loadGfmSpec()
 
-function conforms(example: SpecExample): boolean {
-  // Pinned to the escape policy so the baseline stays stable now that
-  // passthrough is the default (#600); see the CommonMark harness for rationale.
+// Measured under both htmlPolicies: `escape` is the stable historical baseline,
+// `passthrough` is the shipping runtime default (#600 / #141). See the CommonMark
+// harness for the rationale behind pinning both.
+type HtmlPolicy = 'escape' | 'passthrough'
+
+function conforms(example: SpecExample, policy: HtmlPolicy): boolean {
   const html = stripAppCodeDecorations(
     stripAppImageAttributes(
-      stripAppLinkAttributes(renderMarkdownUnsafe(example.markdown, { htmlPolicy: 'escape' })),
+      stripAppLinkAttributes(renderMarkdownUnsafe(example.markdown, { htmlPolicy: policy })),
     ),
   )
   return normalizeHtml(html) === normalizeHtml(example.html)
 }
 
-function computePassing(): number[] {
-  return spec.filter(conforms).map((e) => e.example)
+function computePassing(policy: HtmlPolicy): number[] {
+  return spec.filter((e) => conforms(e, policy)).map((e) => e.example)
+}
+
+function assertMatchesBaseline(
+  passing: number[],
+  baselinePassing: number[],
+  updateEnv: string,
+): void {
+  const expected = new Set(baselinePassing)
+  const passingSet = new Set(passing)
+  const regressions = baselinePassing.filter((n) => !passingSet.has(n))
+  const improvements = passing.filter((n) => !expected.has(n))
+  const detail = (nums: number[]): string =>
+    nums
+      .map((n) => {
+        const ex = spec.find((e) => e.example === n)
+        return `#${String(n)} (${ex?.section ?? '?'})`
+      })
+      .join(', ')
+  assert.deepEqual(
+    passing,
+    baselinePassing,
+    [
+      regressions.length
+        ? `Regressions (examples that no longer conform): ${detail(regressions)}.`
+        : '',
+      improvements.length
+        ? `Improvements (newly conforming): ${detail(improvements)}. Re-run with ${updateEnv}=1 to record them.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  )
 }
 
 function summarize(
@@ -100,15 +139,15 @@ function summarize(
   return summary
 }
 
-describe('GFM conformance (at rest)', () => {
-  const passing = computePassing()
+describe('GFM conformance (at rest, htmlPolicy: escape)', () => {
+  const passing = computePassing('escape')
   const passingSet = new Set(passing)
 
   if (process.env['UPDATE_GFM_BASELINE'] === '1') {
     const baseline: GfmConformanceBaseline = {
       specVersion: SPEC_VERSION,
       source: `github/cmark-gfm spec.txt @ 0.29.0.gfm.13 (fetched to tests/fixtures/gfm/spec.txt)`,
-      note: 'Examples from the official GitHub Flavored Markdown spec that renderMarkdownUnsafe() satisfies at rest, after the spec normalizer. GFM is a superset of CommonMark, so the base sections mirror the CommonMark baseline; the GFM-only sections are broken out in extensionSummary. This is a regression baseline, not a conformance goal — the renderer escapes untrusted HTML (sanitize-at-the-sink) and implements a subset of the autolink/strikethrough grammar, so HTML blocks, Raw HTML, and parts of the extension sections fail by design.',
+      note: 'Examples from the official GitHub Flavored Markdown spec that renderMarkdownUnsafe({ htmlPolicy: "escape" }) satisfies at rest, after the spec normalizer. GFM is a superset of CommonMark, so the base sections mirror the CommonMark baseline; the GFM-only sections are broken out in extensionSummary. This is a regression baseline, not a conformance goal — the renderer, in escape mode, escapes untrusted HTML (sanitize-at-the-sink) and implements a subset of the autolink/strikethrough grammar, so HTML blocks, Raw HTML, and parts of the extension sections fail by design. The shipping default is passthrough — see gfm-conformance-baseline-passthrough.json (#141).',
       total: spec.length,
       passing,
       summaryBySection: summarize(passingSet),
@@ -129,30 +168,44 @@ describe('GFM conformance (at rest)', () => {
   })
 
   it('matches the recorded set of conforming spec examples', () => {
-    const expected = new Set(baseline.passing)
-    const regressions = baseline.passing.filter((n) => !passingSet.has(n))
-    const improvements = passing.filter((n) => !expected.has(n))
-    const detail = (nums: number[]): string =>
-      nums
-        .map((n) => {
-          const ex = spec.find((e) => e.example === n)
-          return `#${String(n)} (${ex?.section ?? '?'})`
-        })
-        .join(', ')
-    assert.deepEqual(
+    assertMatchesBaseline(passing, baseline.passing, 'UPDATE_GFM_BASELINE')
+  })
+})
+
+// Second baseline measuring the shipping `passthrough` default (#600 / #141), so
+// v1's GFM conformance numbers cover v1's actual behavior.
+describe('GFM conformance (at rest, htmlPolicy: passthrough — shipping default)', () => {
+  const passing = computePassing('passthrough')
+  const passingSet = new Set(passing)
+
+  if (process.env['UPDATE_GFM_PASSTHROUGH_BASELINE'] === '1') {
+    const baseline: GfmConformanceBaseline = {
+      specVersion: SPEC_VERSION,
+      source: `github/cmark-gfm spec.txt @ 0.29.0.gfm.13 (fetched to tests/fixtures/gfm/spec.txt)`,
+      note: 'Examples from the official GitHub Flavored Markdown spec that renderMarkdownUnsafe() satisfies at rest under the SHIPPING DEFAULT htmlPolicy: "passthrough" (#600 / #141), after the spec normalizer. Unlike the escape baseline, raw HTML is passed through (still sanitized at the host sink), so several Raw-HTML / HTML-block examples pass or fail differently. GFM-only sections are broken out in extensionSummary. Regression baseline, not a conformance goal.',
+      total: spec.length,
       passing,
-      baseline.passing,
-      [
-        regressions.length
-          ? `Regressions (examples that no longer conform): ${detail(regressions)}.`
-          : '',
-        improvements.length
-          ? `Improvements (newly conforming): ${detail(improvements)}. Re-run with UPDATE_GFM_BASELINE=1 to record them.`
-          : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    )
+      summaryBySection: summarize(passingSet),
+      extensionSummary: summarize(passingSet, (s) => GFM_EXTENSION_SECTIONS.has(s)),
+    }
+    writeFileSync(PASSTHROUGH_BASELINE_PATH, JSON.stringify(baseline, null, 2) + '\n')
+    it('regenerated the GFM passthrough conformance baseline', () => {
+      assert.ok(passing.length > 0, 'expected at least one conforming example')
+    })
+    return
+  }
+
+  const baseline = JSON.parse(
+    readFileSync(PASSTHROUGH_BASELINE_PATH, 'utf8'),
+  ) as GfmConformanceBaseline
+
+  it('pins the fetched GFM spec version', () => {
+    assert.equal(baseline.specVersion, SPEC_VERSION)
+    assert.equal(baseline.total, spec.length)
+  })
+
+  it('matches the recorded set of conforming spec examples', () => {
+    assertMatchesBaseline(passing, baseline.passing, 'UPDATE_GFM_PASSTHROUGH_BASELINE')
   })
 })
 }
