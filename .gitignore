@@ -15,3 +15,8 @@ tests/fixtures/gfm/spec.txt
 
 # built by `npm run build:demo`; published to GitHub Pages by deploy-demo.yml, not committed
 docs/streaming-markdown.*.mjs
+
+# fetched at bench time by bench/competitors/fetch-corpus.mts (pinned upstream fixtures)
+bench/competitors/corpus/
+# written by bench/competitors/bench-compare.mts; published as a workflow artifact
+bench/competitors/results/

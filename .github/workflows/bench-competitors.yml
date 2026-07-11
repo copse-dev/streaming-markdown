@@ -1,0 +1,67 @@
+name: Bench (cross-library)
+
+# Non-gating cross-library streaming benchmark (#157): streams a shared corpus
+# through this library and each competitor (Streamdown, react-markdown, smd,
+# Incremark) and publishes the results as a workflow artifact.
+#
+# Deliberately NOT a required check and NOT triggered by pull requests:
+# installing competitor packages on the runner is flaky, and a competitor
+# shipping a slower/faster release is not a failure we caused. Our own
+# relative regression guard (scripts/bench-streaming.mts, #154) is the CI
+# gate; this workflow only produces published numbers. See docs/BENCHMARKS.md
+# for methodology, and `npm run bench:competitors -- --update-docs` (run
+# locally) to refresh the published results table per release.
+on:
+  workflow_dispatch:
+  schedule:
+    # Monthly, off-peak: 04:17 UTC on the 3rd. Keeps the published numbers
+    # from going stale between releases without burning minutes per push.
+    - cron: '17 4 3 * *'
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    # Runner routing: same CHECKS_RUNNER variable scheme as ci.yml (see its
+    # routing note). Scheduled/manual runs only ever execute trusted main-
+    # branch content, so the self-hosted pool is safe here.
+    runs-on: ${{ vars.CHECKS_RUNNER || 'ubuntu-latest' }}
+    # The full corpus takes ~30-40 min (the long-transcript full-re-render
+    # cells dominate); the timeout exists so a hung competitor install or a
+    # wedged child process can't pin the runner.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      # Root install first: the harness imports this repo's src/ directly
+      # (tsx), which resolves dompurify/entities/esbuild from the root
+      # node_modules.
+      - name: Install (root)
+        run: npm ci
+
+      # Competitor deps are isolated in bench/competitors with their own
+      # lockfile so their churn never touches the main package. This is the
+      # flaky step the non-gating design absorbs — if it breaks, no PR is
+      # blocked; the run just fails and the previous artifact stands.
+      - name: Install (competitors)
+        run: npm ci --prefix bench/competitors
+
+      # No NODE_OPTIONS here: the harness sets an 8 GB ceiling on each
+      # measurement child itself (one child at a time; standard hosted
+      # runners have 16 GB), and the parent process stays small.
+      - name: Run cross-library bench
+        run: npm run bench:competitors
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-competitors-results
+          path: |
+            bench/competitors/results/latest.json
+            bench/competitors/results/latest.md
+          if-no-files-found: error

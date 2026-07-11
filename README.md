@@ -152,6 +152,9 @@ variables, and native-nesting note — are in [`docs/EXTENDING.md`](docs/EXTENDI
   optional and lazy, and how the code-split loading works.
 - **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — design invariants, the
   two-emitter streaming architecture, and the regression/conformance suite.
+- **[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)** — cross-library streaming
+  benchmarks (vs Streamdown, react-markdown, smd, Incremark): methodology,
+  caveats, and the latest published results.
 - **[`docs/SECURITY.md`](docs/SECURITY.md)** — the sanitize-at-the-sink security
   model, a threat model, trust boundaries, and hardening knobs.
 
