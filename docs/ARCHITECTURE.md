@@ -471,10 +471,20 @@ attribute-less inline allowlist** (`b i u s del ins sub sup kbd mark br`,
 Everything with attributes, and all block/structural raw HTML, stays escaped.
 
 So the realistic ceiling excludes those **64 HTML examples**: **588 in-scope
-examples**, of which the renderer currently satisfies **573 (~97%)**. Counting all
-652 examples the baseline is **583 (~89%)**. Both numbers move as non-HTML
+examples**, of which the renderer currently satisfies **569 (~97%)**. Counting all
+652 examples the baseline is **579 (~89%)**. Both numbers move as non-HTML
 conformance grows — `summaryBySection` in the baseline JSON carries the live
 per-section counts; treat the two headline figures here as approximate.
+
+**Deliberate autolink-scheme divergence (#139).** Angle autolinks (`<scheme:…>`)
+route through the same scheme allowlist as markdown links (`safeLinkHref` /
+`setSafeHrefSchemes`) rather than a `javascript:`/`data:`/`vbscript:` deny-list,
+so an unlisted scheme fails **closed** (stays literal) instead of rendering a
+live `<a href>`. This is the security posture — a deny-list is the only fail-open
+link path — at the cost of **4 CommonMark autolink examples** (`<irc://…>`,
+`<a+b+c:d>`, `<made-up-scheme://…>`, `<localhost:5001/…>`) that the spec links but
+carry non-allowlisted schemes. `http(s)`/`mailto`/`ftp(s)`/`tel`/`sms` autolinks
+are unaffected; a host widens the set with `setSafeHrefSchemes`.
 
 **Passthrough is now the runtime default** (`htmlPolicy: 'passthrough'`,
 `html-policy.ts`): the renderer emits well-formed raw HTML and the sink sanitizer
@@ -482,8 +492,15 @@ is the sole arbiter (allowlisted → element; otherwise stripped/unwrapped). The
 security posture is unchanged — the sink allowlist is the boundary and stays
 narrow — but the renderer no longer does a *second, redundant* escape. The
 `'escape'` opt-out is retained for a host that consumes the renderer string
-without a sink. **Measuring the true passthrough spec ceiling** (re-baselining the
-harnesses in passthrough mode) is a deliberate follow-up, not done here. HTML
+without a sink. **The true passthrough spec ceiling is now measured** (#141):
+each harness pins a *second* baseline under the shipping `passthrough` default
+(`conformance-baseline-passthrough.json`, `gfm-conformance-baseline-passthrough.json`),
+regenerated with `UPDATE_COMMONMARK_PASSTHROUGH_BASELINE=1` /
+`UPDATE_GFM_PASSTHROUGH_BASELINE=1`. Passthrough passes a few more of the 652
+(CommonMark **587**, GFM **595** vs escape's 583 / 591) — raw HTML flows to the
+sink instead of being escaped, so several Raw-HTML / HTML-block examples match the
+spec verbatim while a handful of escape-mode-only shapes drop. The escape baseline
+stays the canonical passing-example corpus the streaming/bench suites reuse. HTML
 **block recognition** in `block-tokenizer.ts` is still not a distinct token —
 block HTML tokenizes as prose and follows the inline policy. An element that pairs
 across blank-line block boundaries (`<details>`, a hand-typed `<div>`) can't be
@@ -527,14 +544,14 @@ counts). Current state:
 | Strikethrough           | 2/2      | Full — double-tilde `~~x~~` → `<del>`.                                                     |
 | Tables                  | 8/8      | Full — column alignment (`:-:`/`--:` → `align`, `parseTableAlignments`), escaped `\|` in cells (`splitTableRow`), column-count normalization and delimiter/header mismatch rejection (`tableColumnsMatch`) are all implemented. |
 | Task list items         | 0/2      | Renderer output diverges on purpose — it adds `class="task-list-item"`/`contains-task-list` and a `disabled` checkbox for app styling ([#614](https://github.com/copse-dev/agent-pane/issues/614)), which the spec's bare `<input>` output does not.  |
-| Autolinks (extension)   | 0/11     | Only bare `http(s)://` is linked (`inline-spans.ts`); no `www.`, no bare email. Trailing-punctuation trimming follows GFM's balanced-paren rule (a closing `)` that balances an earlier `(` stays in the link, #107) but not its entity rules.                 |
+| Autolinks (extension)   | 11/11    | Full (#125) — bare `http(s)://` plus `www.`, bare-URL, and email autolinks (`inline-autolinks.ts` / `inline-spans.ts`). Trailing-punctuation trimming follows GFM's balanced-paren rule (a closing `)` that balances an earlier `(` stays in the link, #107) and the extension's boundary/entity rules. |
 | Disallowed Raw HTML     | 0/1      | In the harness's pinned `'escape'` mode the renderer escapes *all* attributed/structural raw HTML, which is stricter than GFM's tag filter — so the filtered-passthrough output never matches. |
 
-Tables and Strikethrough are the fully-conforming extensions; the rest cap out on a
-real grammar gap (extended autolinks) or deliberate divergence (task-list classes,
-raw-HTML escaping). Closing the `www.`/bare-email extended-autolink gap (0/11) is
-the highest-value remaining follow-up — task-list `class`/`disabled` output and the
-disallowed-raw-HTML tag filter are intentional divergences, not gaps to close.
+Tables, Strikethrough, and Autolinks are the fully-conforming extensions. The
+remaining two cap out on **deliberate divergences, not gaps to close**: task-list
+items add `class="task-list-item"`/`contains-task-list` and a `disabled` checkbox
+for app styling, and Disallowed Raw HTML is escaped more strictly than GFM's tag
+filter under the harness's pinned `'escape'` mode.
 
 ### Streaming convergence fuzz (`streaming-convergence.test.ts`, via `npm test`)
 

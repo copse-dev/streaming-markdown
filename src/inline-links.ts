@@ -100,8 +100,12 @@ export function getSafeHrefSchemes(): string[] {
   return [...activeSafeHrefSchemes]
 }
 
-/** True when `href` is a relative destination or carries an allowlisted scheme. */
-function isAllowedHref(href: string): boolean {
+/**
+ * True when `href` is a relative destination or carries an allowlisted scheme.
+ * Exported so angle autolinks share the exact allowlist markdown links use
+ * (#139) — autolink destinations are verbatim (no escapes to decode first).
+ */
+export function isAllowedHref(href: string): boolean {
   const scheme = HREF_SCHEME_RE.exec(href)?.[1]
   return scheme === undefined || activeSafeHrefSchemes.has(scheme.toLowerCase())
 }
@@ -178,10 +182,20 @@ export function setLinkDecorator(decorator: LinkDecorator | null): void {
 
 /** Render an `<a>` for a resolved link, applying the active {@link LinkDecorator}. */
 export function renderAnchor(label: string, href: string, title?: string): string {
-  const isWorkspace = isWorkspaceMarkdownLinkHref(href)
-  // `exactOptionalPropertyTypes`: omit `title` rather than pass an explicit undefined.
-  const decoration: LinkDecoration =
-    title === undefined ? { href, isWorkspace } : { href, isWorkspace, title }
+  // Compute `isWorkspace` lazily (#146): it is workspace-host-specific residue in
+  // the neutral core — the built-in `neutralLinkDecorator` never reads it, so the
+  // per-anchor `isWorkspaceMarkdownLinkHref` URL scan runs only when a host
+  // decorator (e.g. `appLinkDecorator`) actually consults it. Memoized so a
+  // decorator reading it twice still scans once.
+  let workspace: boolean | undefined
+  const decoration: LinkDecoration = {
+    href,
+    get isWorkspace(): boolean {
+      return (workspace ??= isWorkspaceMarkdownLinkHref(href))
+    },
+    // `exactOptionalPropertyTypes`: omit `title` rather than pass an explicit undefined.
+    ...(title === undefined ? {} : { title }),
+  }
   const attrs = activeLinkDecorator(decoration)
   return `<a href="${escapeHtml(href)}"${attrs}>${label}</a>`
 }

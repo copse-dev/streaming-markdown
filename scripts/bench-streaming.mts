@@ -21,6 +21,8 @@ import { dirname, resolve } from 'node:path'
 import { renderStreamingMarkdown, StreamingMarkdownRenderer } from '../src/streaming.ts'
 import { IncrementalSourceScanner } from '../src/incremental-scan.ts'
 import { tokenizeBlocks } from '../src/block-tokenizer.ts'
+import { setCodeHighlighter } from '../src/highlight.ts'
+import { installHighlightjs } from '../src/highlight-hljs.ts'
 import { loadBaselinePassingExamples } from '../tests/commonmark/baseline-examples.ts'
 
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -82,6 +84,19 @@ function termsOfService(): string {
   return readFileSync(resolve(pkgRoot, 'tests/fixtures/terms-of-service-streaming.md'), 'utf8')
 }
 
+// Real-document corpus (#154): hand-collected markdown that mirrors the content
+// this library actually streams — an LLM technical answer, a README section, and
+// a changelog (mixed prose, code, tables, task lists, footnotes, blockquotes).
+// Used by the real-document scaling guard below (DOM path only) so the growth
+// guard is representative of real content, not only synthetic shapes. Deliberately
+// NOT run through the informational string+DOM table: the string path's O(n²)
+// re-render over several fixtures back-to-back is what dominates the CI bench heap.
+const CORPUS_FILES = ['llm-answer.md', 'readme-section.md', 'changelog.md'] as const
+
+function corpusDoc(file: string): string {
+  return readFileSync(resolve(pkgRoot, 'tests/fixtures/bench-corpus', file), 'utf8')
+}
+
 /**
  * Footnote-heavy fixture (#110): `paras` cited paragraphs followed by their
  * definitions — the shape LLM citations stream in. References are literal until
@@ -99,6 +114,29 @@ function footnoteDoc(paras: number): string {
     (_, i) => `[^${String(i)}]: Source number ${String(i)}.`,
   ).join('\n')
   return `${body}\n\n${defs}\n`
+}
+
+/**
+ * Code-block-heavy fixture (#155): `blocks` fenced code blocks, each `linesPer`
+ * lines, streamed token-by-token. Once a fence closes it becomes a committed
+ * block the frozen-tail path freezes, so it is highlighted (or escaped) exactly
+ * once; re-highlighting the growing set of *closed* blocks on every update is the
+ * super-linear cost a naive re-render incurs, and the case competitors benchmark
+ * on code-heavy LLM traces. Language `js` so a registered highlighter does real work.
+ */
+function codeBlocksDoc(blocks: number, linesPer = 8): string {
+  return (
+    Array.from(
+      { length: blocks },
+      (_, i) =>
+        '```js\n' +
+        Array.from(
+          { length: linesPer },
+          (_, j) => `const x_${String(i)}_${String(j)} = compute(${String(j)}) + ${String(i)};`,
+        ).join('\n') +
+        '\n```',
+    ).join('\n\n') + '\n'
+  )
 }
 
 function chunkBoundaries(length: number, chunk: number): number[] {
@@ -394,5 +432,96 @@ if (meanLazyGrowth >= 3.0) {
   throw new Error(
     `Lazy-blockquote tokenize scaled ${meanLazyGrowth.toFixed(2)}×/doubling — expected ~linear (< 3×). ` +
       `A per-candidate re-tokenize of the stripped quote prefix (#111) is the likely cause.`,
+  )
+}
+
+// Code-block scaling (#155): stream a document of many fenced code blocks at a
+// FIXED chunk so the number of *closed* (frozen) blocks grows with the input.
+// Each closed fence is frozen once, so it is highlighted a single time — doubling
+// the block count should ~double the work, not square it. A regression that stops
+// freezing closed code blocks (re-highlighting the whole growing prefix on every
+// update) is the super-linear cost this guards. Measured WITH a highlighter
+// registered because re-highlight cost is what dominates real code-heavy traces,
+// and it produces the number the eventual published benchmark reports for
+// code-heavy content. Kept deliberately light (few blocks, coarse chunk, DOM path
+// only) since it runs last in an already memory-heavy process — the string-path
+// O(n²) re-render over code blocks is intentionally NOT measured here (it
+// dominates peak heap and isn't what the frozen-tail guard is about).
+console.log('\ncode-block scaling — DOM path + highlight.js, fixed 64-byte chunk (closed blocks grow with size)\n')
+const codeScaleCols = [pad('blocks', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
+console.log(codeScaleCols.join('  '))
+console.log('-'.repeat(codeScaleCols.join('  ').length))
+installHighlightjs()
+const codeIters = Math.min(args.iters, 3)
+let prevCodeMs = 0
+const codeGrowth: number[] = []
+for (const blocks of [10, 20, 40]) {
+  const text = codeBlocksDoc(blocks)
+  const updates = chunkBoundaries(text.length, 64).length
+  const domMs = measure(() => benchDomPath(text, 64), codeIters, args.warmup)
+  const factor = prevCodeMs > 0 ? domMs / prevCodeMs : 0
+  if (factor > 0) codeGrowth.push(factor)
+  console.log(
+    [
+      pad(String(blocks), 8),
+      padLeft(String(text.length), 8),
+      padLeft(String(updates), 9),
+      padLeft(domMs.toFixed(2), 10),
+      padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
+    ].join('  '),
+  )
+  prevCodeMs = domMs
+}
+setCodeHighlighter(null)
+
+const meanCodeGrowth = codeGrowth.reduce((a, x) => a + x, 0) / codeGrowth.length
+console.log(
+  `\ncode-block mean growth per doubling (highlighter on): ${meanCodeGrowth.toFixed(2)}× (regression guard: < 3.0×; re-highlight-all ≈ 4×)`,
+)
+if (meanCodeGrowth >= 3.0) {
+  throw new Error(
+    `Code-block DOM streaming scaled ${meanCodeGrowth.toFixed(2)}×/doubling with a highlighter — expected ~O(n) ` +
+      `(< 3×; see #155). A regression to re-highlighting closed/frozen code blocks per update is the likely cause.`,
+  )
+}
+
+// Real-document scaling (#154): make the per-doubling growth guard representative
+// of REAL content, not only synthetic prose. Concatenate the hand-collected
+// corpus (mixed prose/code/tables/task-lists/footnotes/blockquotes) and stream it
+// at growing repetitions through the DOM path at a fixed chunk, so the update
+// count grows with size. Frozen-tail commit is O(tail), so doubling the document
+// should ~double the work; a regression to O(prefix)-per-commit re-render pushes
+// this toward 4×. DOM path only (the string path's O(n²) is guarded elsewhere and
+// would dominate the CI bench heap on a large concatenation).
+const corpusUnit = CORPUS_FILES.map(corpusDoc).join('\n\n')
+console.log('\nreal-document scaling — DOM path, fixed 64-byte chunk (corpus repeated, updates grow with size)\n')
+const realScaleCols = [pad('×corpus', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
+console.log(realScaleCols.join('  '))
+console.log('-'.repeat(realScaleCols.join('  ').length))
+let prevRealMs = 0
+const realGrowth: number[] = []
+for (const reps of [1, 2, 4]) {
+  const text = Array.from({ length: reps }, () => corpusUnit).join('\n\n')
+  const updates = chunkBoundaries(text.length, 64).length
+  const domMs = measure(() => benchDomPath(text, 64), Math.min(args.iters, 3), args.warmup)
+  const factor = prevRealMs > 0 ? domMs / prevRealMs : 0
+  if (factor > 0) realGrowth.push(factor)
+  console.log(
+    [
+      pad(`${String(reps)}×`, 8),
+      padLeft(String(text.length), 8),
+      padLeft(String(updates), 9),
+      padLeft(domMs.toFixed(2), 10),
+      padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
+    ].join('  '),
+  )
+  prevRealMs = domMs
+}
+const meanRealGrowth = realGrowth.reduce((a, x) => a + x, 0) / realGrowth.length
+console.log(`\nreal-document mean growth per doubling: ${meanRealGrowth.toFixed(2)}× (regression guard: < 3.0×)`)
+if (meanRealGrowth >= 3.0) {
+  throw new Error(
+    `Real-document DOM streaming scaled ${meanRealGrowth.toFixed(2)}×/doubling — expected ~O(n) (< 3×; see #154). ` +
+      `An O(prefix)-per-commit committed-re-render regression is the likely cause.`,
   )
 }

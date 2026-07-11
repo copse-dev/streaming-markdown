@@ -67,6 +67,10 @@ export {
   type NormalizedImagePath,
   type NormalizeImagePathOptions,
 } from './raw-images.ts'
+// `escapeHtml` is the stable helper. `escapeHtmlTextNodes` and
+// `decodeSafeMarkdownEntities` are low-level renderer internals marked
+// `@experimental` (#147) — not part of the stable v1 surface; prefer the render
+// entry points.
 export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './escape.ts'
 // HTML character-reference decoding is a pluggable backend (#594). The default
 // decoder carries the 252 classic HTML4 named references plus all numeric refs
@@ -75,6 +79,9 @@ export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './e
 // in the DOM) or the `@copse/streaming-markdown/entities/full` entry (backed by
 // the `entities` peer dependency) — or extend the built-in set with
 // `addNamedEntities`. See docs/ARCHITECTURE.md.
+// `BUILTIN_NAMED_ENTITIES` (internal data table) and `resetEntityDecoder`
+// (test/reset helper) are marked `@experimental` (#147) — not part of the stable
+// v1 surface. Extend the decoder via `addNamedEntities` / `setNamedEntities`.
 export {
   addNamedEntities,
   BUILTIN_NAMED_ENTITIES,

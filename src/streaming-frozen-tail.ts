@@ -67,6 +67,7 @@ import {
   type FootnoteContext,
   type FootnoteDefinitionMap,
   footnoteRefLabelsIn,
+  getActiveFootnoteContext,
   reseatFootnoteContext,
   setActiveFootnoteContext,
 } from './footnotes.ts'
@@ -351,11 +352,13 @@ export class FrozenTailRenderer {
   /** Serialized committed link-ref map at the last commit (invalidation guard). */
   private lastLinkRefKey = ''
   /**
-   * Whether the committed prefix leaves a `<details>` open (#600). Read by the
+   * Whether the committed render leaves a `<details>` open (#600). Read by the
    * streaming renderer to hold the pending tail so a collapsed body is not
-   * flashed as a sibling after the element. Set on every commit; a still-open
-   * `<details>` always takes the full-morph path (its unbalanced tag trips the
-   * freeze guard), so this is computed there from the unsanitized render.
+   * flashed as a sibling after the element. Recomputed on every commit path: the
+   * full-morph and footnote rebuilds compute it from the whole unsanitized
+   * render, and the incremental fast path computes it from the unsettled tail
+   * (the frozen prefix and delta are always balanced, so the tail carries any
+   * lone-open `<details>` — #138).
    */
   committedHasOpenDetails = false
   /**
@@ -575,6 +578,15 @@ export class FrozenTailRenderer {
       ? renderBlocks(complete, tailTokens, { linkRefs, ...RENDER_OPTS })
       : ''
     this.renderedChars += deltaHtml.length + tailHtml.length
+
+    // #138: hold the pending tail in the DOM emitter when a `<details>` is still
+    // open in the *unsettled tail* — matching the string emitter, which re-checks
+    // the whole render every frame. The earlier assumption that a still-open
+    // `<details>` always full-morphs is false when the delta is empty: the frozen
+    // prefix and delta are always balanced (an unbalanced tag never freezes — the
+    // guard above falls back), so the tail render is the only place a lone-open
+    // `<details>` can survive, and its open state is the whole render's.
+    this.committedHasOpenDetails = hasOpenDetailsElement(tailHtml)
 
     // Reconcile everything after the frozen prefix — newly-settled delta plus
     // tail — in ONE morph. Morphing (not re-parsing) means the blocks that are
@@ -821,6 +833,9 @@ export class FrozenTailRenderer {
     footnoteDefs: FootnoteDefinitionMap,
   ): { parts: RenderedPart[]; items: string[]; ctx: FootnoteContext } {
     const ctx = createFootnoteContext(footnoteDefs)
+    // Restore the prior context, not null, so a recursive render from a fence
+    // handler / inline pass can't strand an outer document's footnotes (#144).
+    const previous = getActiveFootnoteContext()
     setActiveFootnoteContext(ctx)
     try {
       // Body first (advances first-use numbering in document order), then the
@@ -829,7 +844,7 @@ export class FrozenTailRenderer {
       const items = renderFootnoteSectionItems(ctx, linkRefs)
       return { parts, items, ctx }
     } finally {
-      setActiveFootnoteContext(null)
+      setActiveFootnoteContext(previous)
     }
   }
 
@@ -1021,6 +1036,7 @@ export class FrozenTailRenderer {
     const ctx = reseatFootnoteContext(footnoteDefs, persisted)
     const newSet = new Set(newLabels)
     let appendedItems: string[]
+    const previous = getActiveFootnoteContext()
     setActiveFootnoteContext(ctx)
     try {
       for (let i = 0; i < this.fnPartLabels.length; i++) {
@@ -1038,7 +1054,7 @@ export class FrozenTailRenderer {
       }
       appendedItems = renderFootnoteSectionItems(ctx, linkRefs, this.fnSectionItems.length)
     } finally {
-      setActiveFootnoteContext(null)
+      setActiveFootnoteContext(previous)
     }
 
     if (!this.syncFootnoteSection(completedEl, [...this.fnSectionItems, ...appendedItems])) {

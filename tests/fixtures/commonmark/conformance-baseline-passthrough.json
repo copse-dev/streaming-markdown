@@ -1,7 +1,7 @@
 {
   "specVersion": "0.31.2",
   "source": "commonmark-spec@0.31.2 (devDependency)",
-  "note": "Examples from the official CommonMark spec that renderMarkdownUnsafe() satisfies at rest, after the spec normalizer. This is a regression baseline, not a conformance goal — the renderer is intentionally app-specific and escapes untrusted HTML rather than passing it through (sanitize-at-the-sink; see sanitize.ts and #600). The HTML blocks (44 examples) and Raw HTML (20 examples) sections fail by design, so 652/652 is not the target; excluding those 64 HTML examples the in-scope conformance ceiling is 588. Per-section current pass counts are in summaryBySection.",
+  "note": "Examples from the official CommonMark spec that renderMarkdownUnsafe() satisfies at rest under the SHIPPING DEFAULT htmlPolicy: \"passthrough\" (#600 / #141), after the spec normalizer. Unlike the escape baseline, raw HTML is passed through (still sanitized at the host sink), so several Raw-HTML / HTML-block examples pass or fail differently. Regression baseline, not a conformance goal. Per-section pass counts in summaryBySection.",
   "total": 652,
   "passing": [
     1,
@@ -150,6 +150,7 @@
     146,
     147,
     168,
+    175,
     187,
     192,
     193,
@@ -160,6 +161,7 @@
     198,
     199,
     200,
+    201,
     202,
     203,
     204,
@@ -430,6 +432,7 @@
     472,
     473,
     474,
+    475,
     478,
     479,
     480,
@@ -443,6 +446,7 @@
     488,
     489,
     490,
+    491,
     492,
     493,
     494,
@@ -556,12 +560,12 @@
     609,
     610,
     612,
+    613,
+    614,
+    615,
+    617,
     618,
-    619,
-    620,
-    621,
-    622,
-    624,
+    623,
     630,
     631,
     633,
@@ -622,11 +626,11 @@
       "total": 29
     },
     "HTML blocks": {
-      "pass": 2,
+      "pass": 3,
       "total": 44
     },
     "Link reference definitions": {
-      "pass": 26,
+      "pass": 27,
       "total": 27
     },
     "Paragraphs": {
@@ -658,11 +662,11 @@
       "total": 22
     },
     "Emphasis and strong emphasis": {
-      "pass": 129,
+      "pass": 130,
       "total": 132
     },
     "Links": {
-      "pass": 87,
+      "pass": 88,
       "total": 90
     },
     "Images": {

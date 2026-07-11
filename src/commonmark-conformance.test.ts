@@ -29,6 +29,7 @@ import { stripAppImageAttributes, stripAppLinkAttributes } from './inline-links.
 import { normalizeHtml } from '../tests/commonmark/normalize.ts'
 import {
   loadConformanceBaseline,
+  loadPassthroughConformanceBaseline,
   type ConformanceBaseline,
 } from '../tests/commonmark/baseline-examples.ts'
 import {
@@ -55,21 +56,58 @@ setEmailAutolinks(false)
 const SPEC_VERSION = commonMarkSpecVersion()
 const spec = loadCommonMarkSpec()
 
-function conforms(example: SpecExample): boolean {
-  // Pin the harness to the escape policy so the baseline measures the historical
-  // raw-HTML behavior and does not churn now that passthrough is the default
-  // (#600). Escape mode is guaranteed to reproduce today's output byte-for-byte;
-  // the true passthrough spec ceiling is a deliberate follow-up re-baseline.
+// Both htmlPolicies are measured: the `escape` baseline is the stable historical
+// reference (and the source of the streaming/bench passing-example corpus); the
+// `passthrough` baseline measures the shipping runtime default (#600 / #141), so
+// v1's advertised conformance also reflects v1's actual behavior. Escape mode is
+// guaranteed to reproduce the pre-#600 output byte-for-byte, so its baseline does
+// not churn; passthrough emits raw HTML rather than escaping it, which is why a
+// handful of Raw-HTML / HTML-block examples pass (or fail) differently.
+type HtmlPolicy = 'escape' | 'passthrough'
+
+function conforms(example: SpecExample, policy: HtmlPolicy): boolean {
   const html = stripAppCodeDecorations(
     stripAppImageAttributes(
-      stripAppLinkAttributes(renderMarkdownUnsafe(example.markdown, { htmlPolicy: 'escape' })),
+      stripAppLinkAttributes(renderMarkdownUnsafe(example.markdown, { htmlPolicy: policy })),
     ),
   )
   return normalizeHtml(html) === normalizeHtml(example.html)
 }
 
-function computePassing(): number[] {
-  return spec.filter(conforms).map((e) => e.example)
+function computePassing(policy: HtmlPolicy): number[] {
+  return spec.filter((e) => conforms(e, policy)).map((e) => e.example)
+}
+
+function assertMatchesBaseline(
+  passing: number[],
+  baselinePassing: number[],
+  updateEnv: string,
+): void {
+  const expected = new Set(baselinePassing)
+  const passingSet = new Set(passing)
+  const regressions = baselinePassing.filter((n) => !passingSet.has(n))
+  const improvements = passing.filter((n) => !expected.has(n))
+  const detail = (nums: number[]): string =>
+    nums
+      .map((n) => {
+        const ex = spec.find((e) => e.example === n)
+        return `#${String(n)} (${ex?.section ?? '?'})`
+      })
+      .join(', ')
+  assert.deepEqual(
+    passing,
+    baselinePassing,
+    [
+      regressions.length
+        ? `Regressions (examples that no longer conform): ${detail(regressions)}.`
+        : '',
+      improvements.length
+        ? `Improvements (newly conforming): ${detail(improvements)}. Re-run with ${updateEnv}=1 to record them.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  )
 }
 
 function summarize(passing: Set<number>): Record<string, { pass: number; total: number }> {
@@ -82,15 +120,15 @@ function summarize(passing: Set<number>): Record<string, { pass: number; total: 
   return summary
 }
 
-describe('CommonMark conformance (at rest)', () => {
-  const passing = computePassing()
+describe('CommonMark conformance (at rest, htmlPolicy: escape)', () => {
+  const passing = computePassing('escape')
   const passingSet = new Set(passing)
 
   if (process.env['UPDATE_COMMONMARK_BASELINE'] === '1') {
     const baseline: ConformanceBaseline = {
       specVersion: SPEC_VERSION,
       source: `commonmark-spec@${SPEC_VERSION} (devDependency)`,
-      note: 'Examples from the official CommonMark spec that renderMarkdownUnsafe() satisfies at rest, after the spec normalizer. This is a regression baseline, not a conformance goal — the renderer is intentionally app-specific and escapes untrusted HTML rather than passing it through (sanitize-at-the-sink; see sanitize.ts and #600). The HTML blocks (44 examples) and Raw HTML (20 examples) sections fail by design, so 652/652 is not the target; excluding those 64 HTML examples the in-scope conformance ceiling is 588. Per-section current pass counts are in summaryBySection.',
+      note: 'Examples from the official CommonMark spec that renderMarkdownUnsafe({ htmlPolicy: "escape" }) satisfies at rest, after the spec normalizer. This is a regression baseline, not a conformance goal — the renderer is intentionally app-specific and, in escape mode, escapes untrusted HTML rather than passing it through (sanitize-at-the-sink; see sanitize.ts and #600). The HTML blocks (44 examples) and Raw HTML (20 examples) sections fail by design, so 652/652 is not the target; excluding those 64 HTML examples the in-scope conformance ceiling is 588. Per-section current pass counts are in summaryBySection. The shipping default is passthrough — see conformance-baseline-passthrough.json (#141).',
       total: spec.length,
       passing,
       summaryBySection: summarize(passingSet),
@@ -116,29 +154,44 @@ describe('CommonMark conformance (at rest)', () => {
   })
 
   it('matches the recorded set of conforming spec examples', () => {
-    const expected = new Set(baseline.passing)
-    const regressions = baseline.passing.filter((n) => !passingSet.has(n))
-    const improvements = passing.filter((n) => !expected.has(n))
-    const detail = (nums: number[]): string =>
-      nums
-        .map((n) => {
-          const ex = spec.find((e) => e.example === n)
-          return `#${String(n)} (${ex?.section ?? '?'})`
-        })
-        .join(', ')
-    assert.deepEqual(
+    assertMatchesBaseline(passing, baseline.passing, 'UPDATE_COMMONMARK_BASELINE')
+  })
+})
+
+// The shipping runtime default is `passthrough` (#600). Pin a second baseline
+// measuring the spec ceiling under that policy so v1's conformance numbers cover
+// v1's actual behavior, not just the escape-mode reference (#141).
+describe('CommonMark conformance (at rest, htmlPolicy: passthrough — shipping default)', () => {
+  const passing = computePassing('passthrough')
+  const passingSet = new Set(passing)
+
+  if (process.env['UPDATE_COMMONMARK_PASSTHROUGH_BASELINE'] === '1') {
+    const baseline: ConformanceBaseline = {
+      specVersion: SPEC_VERSION,
+      source: `commonmark-spec@${SPEC_VERSION} (devDependency)`,
+      note: 'Examples from the official CommonMark spec that renderMarkdownUnsafe() satisfies at rest under the SHIPPING DEFAULT htmlPolicy: "passthrough" (#600 / #141), after the spec normalizer. Unlike the escape baseline, raw HTML is passed through (still sanitized at the host sink), so several Raw-HTML / HTML-block examples pass or fail differently. Regression baseline, not a conformance goal. Per-section pass counts in summaryBySection.',
+      total: spec.length,
       passing,
-      baseline.passing,
-      [
-        regressions.length
-          ? `Regressions (examples that no longer conform): ${detail(regressions)}.`
-          : '',
-        improvements.length
-          ? `Improvements (newly conforming): ${detail(improvements)}. Re-run with UPDATE_COMMONMARK_BASELINE=1 to record them.`
-          : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
+      summaryBySection: summarize(passingSet),
+    }
+    writeFileSync(
+      resolve(process.cwd(), 'tests/fixtures/commonmark/conformance-baseline-passthrough.json'),
+      JSON.stringify(baseline, null, 2) + '\n',
     )
+    it('regenerated the passthrough conformance baseline', () => {
+      assert.ok(passing.length > 0, 'expected at least one conforming example')
+    })
+    return
+  }
+
+  const baseline = loadPassthroughConformanceBaseline()
+
+  it('pins the spec fixture version', () => {
+    assert.equal(baseline.specVersion, SPEC_VERSION)
+    assert.equal(baseline.total, spec.length)
+  })
+
+  it('matches the recorded set of conforming spec examples', () => {
+    assertMatchesBaseline(passing, baseline.passing, 'UPDATE_COMMONMARK_PASSTHROUGH_BASELINE')
   })
 })

@@ -1107,6 +1107,7 @@
     <button class="preset-btn" data-preset="diagrams">Diagrams</button>
     <button class="preset-btn" data-preset="lists">Lists</button>
     <button class="preset-btn" data-preset="basic">Basic</button>
+    <button class="preset-btn" data-preset="failures" title="Canonical hard cases: unclosed emphasis, a half-formed table, an open code fence, and a late footnote definition — the shapes a naive re-render flashes on.">Edge cases</button>
   </div>
 
   <textarea class="compare-input" id="compare-input" spellcheck="false"></textarea>
@@ -1875,6 +1876,46 @@ below builds up as each definition streams in.
 
 [^chat]: Tokens arrive incrementally, so blocks must render before they finish.
 [^cite]: References are numbered in first-use order; unresolved ones stay literal text.
+`,
+
+  failures: `# Streaming edge cases
+
+These are the shapes a naive "re-render the string as HTML on every token"
+approach flashes or breaks on. Stream this slowly (turn **Fast** off) and watch
+the pending states settle instead of flickering raw syntax.
+
+## Unclosed emphasis
+
+A run like **this bold** only closes a few words later — while it is open the
+pending tail holds the \`**\` marker rather than flashing a literal asterisk pair,
+then upgrades in place the moment the closing delimiter arrives.
+
+## Half-formed table
+
+A GFM table is ambiguous until its delimiter row lands. As these rows stream the
+block shows as a *forming* table, not as a broken paragraph full of pipes:
+
+| Feature   | Status   | Owner |
+| --------- | -------- | ----- |
+| Streaming | shipping | core  |
+| Footnotes | shipping | core  |
+
+## Open code fence
+
+\`\`\`ts
+// The fence interior streams as inert, escaped text — never parsed as markdown,
+// so a stray *asterisk* or # here can't flash as emphasis or a heading — and the
+// closing fence upgrades the whole block to highlighted code in place.
+const answer = compute(42)
+\`\`\`
+
+## Late footnote definition
+
+A reference like this[^late] renders as literal \`[^late]\` text until its
+definition streams in below, then upgrades to a numbered link and grows the
+footnotes section — with no reflow of the surrounding prose.
+
+[^late]: Defined after the reference, exactly how LLM citations arrive.
 `
 };
 

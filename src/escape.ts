@@ -116,7 +116,14 @@ export function rawHtmlTagHoldStart(s: string, mask: boolean[]): number {
   return s.length
 }
 
-/** Escape literal text while preserving Copse-generated inline HTML tags. */
+/**
+ * Escape literal text while preserving Copse-generated inline HTML tags.
+ *
+ * @experimental Low-level renderer internal, exported from the main entry but not
+ * part of the stable v1 surface (#147). Prefer `renderMarkdown` /
+ * `renderMarkdownUnsafe`; this may move behind a subpath or be removed in a minor
+ * release. Depending on it directly is at your own risk.
+ */
 export function escapeHtmlTextNodes(html: string): string {
   return html
     .split(/(<code>[\s\S]*?<\/code>)/g)
@@ -150,7 +157,14 @@ export function decodeEscapedHref(raw: string): string {
     .replace(/&gt;/g, '>')
 }
 
-const SAFE_MARKDOWN_ENTITY_RE = /&(?:amp;)?(?:nbsp|#160|#x0*a);/gi
+// Hex non-breaking space is `#xa0` (U+00A0), not `#xa` (U+000A, a line feed) —
+// the arm must be `#x0*a0` so `&#xa0;` decodes and the LF escape does not. The
+// global scanner and the anchored completeness check below both derive from this
+// one source so the two can never drift apart — that drift (one copy fixed, one
+// not) was #143 itself.
+const SAFE_MARKDOWN_ENTITY_SOURCE = '&(?:amp;)?(?:nbsp|#160|#x0*a0);'
+const SAFE_MARKDOWN_ENTITY_RE = new RegExp(SAFE_MARKDOWN_ENTITY_SOURCE, 'gi')
+const COMPLETE_SAFE_MARKDOWN_ENTITY_RE = new RegExp(`^${SAFE_MARKDOWN_ENTITY_SOURCE}$`, 'i')
 
 const KNOWN_SAFE_ENTITIES = [
   '&nbsp;',
@@ -166,7 +180,7 @@ export function stripIncompleteSafeEntities(text: string): string {
   const amp = text.lastIndexOf('&')
   if (amp === -1) return text
   const suffix = text.slice(amp)
-  if (/^&(?:amp;)?(?:nbsp|#160|#x0*a);$/i.test(suffix)) return text
+  if (COMPLETE_SAFE_MARKDOWN_ENTITY_RE.test(suffix)) return text
   const lower = suffix.toLowerCase()
   if (
     KNOWN_SAFE_ENTITIES.some((entity) => entity.startsWith(lower) && lower.length < entity.length)
@@ -176,21 +190,17 @@ export function stripIncompleteSafeEntities(text: string): string {
   return text
 }
 
-/** Decode a small allowlist of HTML entities models emit in prose (e.g. &nbsp;). */
+/**
+ * Decode a small allowlist of HTML entities models emit in prose (e.g. &nbsp;).
+ *
+ * @experimental Low-level renderer internal, exported from the main entry but not
+ * part of the stable v1 surface (#147). It is called by the streaming pending
+ * paths; hosts should not need it. May move behind a subpath or be removed in a
+ * minor release.
+ */
 export function decodeSafeMarkdownEntities(text: string): string {
   const stripped = stripIncompleteSafeEntities(text)
-  return stripped.replace(SAFE_MARKDOWN_ENTITY_RE, (entity) => {
-    const lower = entity.toLowerCase()
-    if (
-      lower === '&nbsp;' ||
-      lower === '&#160;' ||
-      lower === '&#xa0;' ||
-      lower === '&amp;nbsp;' ||
-      lower === '&amp;#160;' ||
-      lower === '&amp;#xa0;'
-    ) {
-      return '\u00A0'
-    }
-    return entity
-  })
+  // Every spelling `SAFE_MARKDOWN_ENTITY_RE` matches \u2014 `nbsp`, decimal `#160`,
+  // hex `#x0*a0`, each optionally `&amp;`-escaped \u2014 is a non-breaking space.
+  return stripped.replace(SAFE_MARKDOWN_ENTITY_RE, () => '\u00A0')
 }
