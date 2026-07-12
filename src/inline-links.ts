@@ -93,7 +93,15 @@ function activeSafeHrefSchemes(): ReadonlySet<string> {
   return cachedSchemes
 }
 
-/** The scheme allowlist currently enforced by {@link safeLinkHref}. */
+/**
+ * The scheme allowlist currently enforced by {@link safeLinkHref}.
+ *
+ * @experimental Introspection getter that reads the ambient render config; outside
+ * a render it returns {@link DEFAULT_SAFE_HREF_SCHEMES}. Not part of the stable v1
+ * surface (#147) — scope behaviour via `MarkdownConfig.safeHrefSchemes` instead
+ * (the default constant stays stable). May move behind a subpath or be removed in
+ * a minor release.
+ */
 export function getSafeHrefSchemes(): string[] {
   return [...activeSafeHrefSchemes()]
 }

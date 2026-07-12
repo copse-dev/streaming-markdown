@@ -16,7 +16,14 @@
 
 import { activeConfig } from './config.ts'
 
-/** The current render's explicit `mathSyntax` config (`null`/absent when off). */
+/**
+ * The current render's explicit `mathSyntax` config (`null`/absent when off).
+ *
+ * @experimental Introspection getter that reads the ambient render config; outside
+ * a render it returns the defaults. Not part of the stable v1 surface (#147) —
+ * scope behaviour via `MarkdownConfig.mathSyntax` instead. May move behind a
+ * subpath or be removed in a minor release.
+ */
 export function getMathSyntax(): boolean | null {
   return activeConfig().mathSyntax ?? null
 }

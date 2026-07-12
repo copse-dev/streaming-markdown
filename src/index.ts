@@ -6,6 +6,18 @@
  * DOM-free path that returns untrusted HTML — hosts must sanitize it at their
  * `innerHTML` sinks (`sanitizeRenderedMarkdown` is the reference sanitizer).
  * See README.md for the design invariants and the streaming architecture.
+ *
+ * Surface tiers (#147): most exports are the stable v1 host API. A subset is
+ * tagged `@experimental` in its JSDoc — the ambient-config introspection getters
+ * (`getHtmlPolicy`, `getSafeHrefSchemes`, `getMathSyntax`, `getLinkImagePolicy`,
+ * `getEntityDecoder`, `getNamedEntities`, `getInlinePasses`, `getCodeHighlighter`,
+ * `isEmailAutolinksEnabled`; `getFenceHandler` and `DEFAULT_SAFE_HREF_SCHEMES`
+ * stay stable) plus low-level renderer internals (`splitForStreaming`,
+ * `escapeHtmlTextNodes`, `decodeSafeMarkdownEntities`) and the internal
+ * `BUILTIN_NAMED_ENTITIES` data table. `@experimental` symbols remain exported but
+ * are not covered by the v1 semver contract — prefer scoping behaviour through
+ * `MarkdownConfig` and the render entry points; they may move behind a subpath or
+ * be removed in a minor release.
  */
 export { renderMarkdown, renderMarkdownUnsafe, type RenderMarkdownOptions } from './renderer.ts'
 // Config-injected rendering (#145/#137/#147): pass a `MarkdownConfig` to
@@ -24,8 +36,12 @@ export { type MarkdownConfig, setDefaultConfig } from './config.ts'
 // Raw-HTML policy (#600). `'passthrough'` (default) emits well-formed raw HTML
 // for the sink sanitizer to arbitrate; `'escape'` literalizes it. Scope it with
 // `renderMarkdown`/streaming `htmlPolicy`. See
-// docs/decisions/0002-raw-html-passthrough-default.md.
+// docs/decisions/0002-raw-html-passthrough-default.md. `getHtmlPolicy` is an
+// ambient-config introspection getter marked `@experimental` (#147).
 export { getHtmlPolicy, type HtmlPolicy } from './html-policy.ts'
+// `splitForStreaming` is a low-level streaming-boundary helper marked
+// `@experimental` (#147) — prefer `renderStreamingMarkdown` /
+// `StreamingMarkdownRenderer`.
 export {
   renderStreamingMarkdown,
   splitForStreaming,
@@ -47,7 +63,8 @@ export {
 // Opt-in link/image origin allowlist (#83). Off by default (byte-identical
 // output until installed); composes with the scheme allowlist and sink
 // sanitizer rather than replacing them. Scope it via
-// `MarkdownConfig.linkImagePolicy`. See docs/EXTENDING.md.
+// `MarkdownConfig.linkImagePolicy`. See docs/EXTENDING.md. `getLinkImagePolicy`
+// is an ambient-config introspection getter marked `@experimental` (#147).
 export {
   getLinkImagePolicy,
   type LinkImagePolicy,
@@ -88,7 +105,8 @@ export { escapeHtml, escapeHtmlTextNodes, decodeSafeMarkdownEntities } from './e
 // in the DOM) or the `@copse/streaming-markdown/entities/full` entry (backed by
 // the `entities` peer dependency). See docs/ARCHITECTURE.md.
 // `BUILTIN_NAMED_ENTITIES` (internal data table) is marked `@experimental`
-// (#147) — not part of the stable v1 surface.
+// (#147) — not part of the stable v1 surface, as are the ambient-config
+// introspection getters `getEntityDecoder` / `getNamedEntities`.
 // The entity decoder is scoped per render via `MarkdownConfig.entityDecoder`
 // (the full HTML5 table from the `entities/full` entry, or `browserEntityDecoder`);
 // a user named-reference table via `MarkdownConfig.namedEntities`. The built-in
@@ -106,6 +124,8 @@ export {
 // provided; the highlight.js/shiki backends stay behind their subpath entries so
 // they are only bundled (or lazily fetched) when a host opts in — obtain one from
 // their `load*` and pass it via `MarkdownConfig.codeHighlighter`.
+// `getCodeHighlighter` is an ambient-config introspection getter marked
+// `@experimental` (#147).
 export {
   type CodeHighlighter,
   fenceCodeClass,
@@ -159,6 +179,8 @@ export {
   PENDING_MATH_SELECTOR,
 } from './math.ts'
 // Prose math syntax is forced on/off per render via `MarkdownConfig.mathSyntax`.
+// `getMathSyntax` is an ambient-config introspection getter marked
+// `@experimental` (#147).
 export { getMathSyntax } from './math-syntax.ts'
 // Link decoration is a pluggable seam (#601). The built-in default is neutral
 // (#112): rendered `<a>` carries only `href`/`title`, with no `target`, `rel`,
@@ -166,7 +188,9 @@ export { getMathSyntax } from './math-syntax.ts'
 // render via `MarkdownConfig.linkDecorator`; the Copse workspace/browser
 // decorator (`appLinkDecorator`) and the workspace path helpers live behind the
 // host-only entry `@copse/streaming-markdown/host/workspace`. The scheme
-// allowlist is scoped via `MarkdownConfig.safeHrefSchemes`.
+// allowlist is scoped via `MarkdownConfig.safeHrefSchemes`. `DEFAULT_SAFE_HREF_SCHEMES`
+// stays stable; `getSafeHrefSchemes` is an ambient-config introspection getter
+// marked `@experimental` (#147).
 export {
   DEFAULT_SAFE_HREF_SCHEMES,
   getSafeHrefSchemes,
@@ -176,14 +200,16 @@ export {
 } from './inline-links.ts'
 // GFM extended email autolinks (#115) are on by default; a host targeting base
 // CommonMark/GFM (a bare `user@host` stays plain text) turns them off per render
-// via `MarkdownConfig.emailAutolinks`.
+// via `MarkdownConfig.emailAutolinks`. `isEmailAutolinksEnabled` is an
+// ambient-config introspection getter marked `@experimental` (#147).
 export { isEmailAutolinksEnabled } from './autolink-syntax.ts'
 // Inline syntax is extensible via registered passes (#53): citations `[@key]`,
 // highlights `==x==`, and friends run inside the inline pipeline with code-span
 // shielding, escape-safe HTML emission (ctx.emit), and streaming-hold support.
 // Supply them per render via `MarkdownConfig.inlinePasses` (e.g. the `emojiInlinePass`
 // from `@copse/streaming-markdown/inline/emoji`). Emitted HTML still passes the
-// sanitizer sink — widen via `MarkdownConfig.sanitizeExtension`.
+// sanitizer sink — widen via `MarkdownConfig.sanitizeExtension`. `getInlinePasses`
+// is an ambient-config introspection getter marked `@experimental` (#147).
 export {
   getInlinePasses,
   type InlinePass,
