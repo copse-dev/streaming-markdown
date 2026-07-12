@@ -4,6 +4,18 @@ export {
   isBrowserSanitizerSupported,
   hydratePendingDiagrams,
   hydratePendingMath,
+  // The at-rest ("naive") renderer and the reference sanitized sink. The
+  // playground (docs/playground.html) drives the naive baseline pane with
+  // `setSanitizedHtml(el, renderMarkdown(prefix))` on every chunk — a
+  // full-subtree replace of the whole partial — to contrast the flash-of-raw
+  // -syntax / relayout jank against the incremental StreamingMarkdownRenderer.
+  renderMarkdown,
+  setSanitizedHtml,
+  // Registers a process-wide default config. The playground uses it to install
+  // the DOMPurify sanitizer backend once, up front, on engines without the
+  // native Sanitizer API — so `setSanitizedHtml` (which re-sanitizes at its own
+  // sink using the ambient config, not a per-call one) resolves a backend too.
+  setDefaultConfig,
 } from '../dist/index.js'
 
 export { dompurifyBackend } from '../dist/sanitize-dompurify.js'
