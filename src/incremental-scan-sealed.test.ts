@@ -166,6 +166,22 @@ describe('sealed-block event stream (ADR 0004 Phase 1)', () => {
     assert.deepEqual(step.sealed, step.tokens.slice(0, step.formingFrom))
   })
 
+  it('definition views fall back correctly for strings other than the last advance', () => {
+    const scanner = new IncrementalSourceScanner()
+    const doc = 'uses [r] and a note[^f]\n\n[r]: /url\n\nsettled paragraph\n\nafter\n\n'
+    scanner.advance(doc)
+    // Appended-but-not-yet-advanced snapshot: shares the safe prefix (sealed
+    // maps reusable) but the cached tokens are stale — the suffix must be
+    // scanned fresh, not read from tokens.
+    const extended = doc + '[^f]: late footnote\n\n[late]: /late\n\ncloser\n\n'
+    assert.deepEqual(new Map(scanner.linkRefs(extended)), new Map(collectLinkReferenceDefinitions(extended)))
+    assert.deepEqual(new Map(scanner.footnoteDefs(extended)), new Map(collectFootnoteDefinitions(extended)))
+    // A rewrite (different bytes in the cached prefix) gets a full scan.
+    const rewritten = 'other[^z] and [q]\n\n[^z]: zzz\n\n[q]: /q\n\nsettled paragraph\n\n'
+    assert.deepEqual(new Map(scanner.linkRefs(rewritten)), new Map(collectLinkReferenceDefinitions(rewritten)))
+    assert.deepEqual(new Map(scanner.footnoteDefs(rewritten)), new Map(collectFootnoteDefinitions(rewritten)))
+  })
+
   it('honours the grammar feature gates', () => {
     withConfig({ footnotes: false, linkReferences: false }, () => {
       const scanner = new IncrementalSourceScanner()
