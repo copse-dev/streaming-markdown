@@ -705,8 +705,11 @@ export class StreamingMarkdownRenderer {
 
   constructor(host: HTMLElement, options: StreamingMarkdownOptions = {}) {
     this.host = host
-    // Shallow snapshot so "captured at construction" holds: a host mutating its
-    // options object later must not silently change this instance's renders.
+    // Snapshot the config so it is frozen at construction (#153, option b): a
+    // shallow copy is enough because every field is replaced wholesale, never
+    // deep-mutated. Holding `options` by reference would let a host that mutates
+    // its object mid-stream leak the old mid-stream-config-flip failure class
+    // into the already-frozen prefix / cached tokens; the copy severs that.
     this.config = { ...options }
   }
 
