@@ -1,5 +1,6 @@
 import { parseOpenFenceContent } from './block-patterns.ts'
 import { FORMING_FENCE_PRE_CLASS, getFenceHandler } from './fence-handlers.ts'
+import { firstDirectChild } from './dom-scan.ts'
 import { fenceCodeClass, highlightFenceCode } from './highlight.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { setSanitizedHtml } from './html-sink.ts'
@@ -41,7 +42,10 @@ export function syncFormingFenceDom(container: HTMLElement, source: string): voi
     return
   }
 
-  let pre = container.querySelector<HTMLPreElement>(`pre.${FORMING_FENCE_PRE_CLASS}`)
+  // The forming <pre> is only ever created as a direct child (below), and its
+  // <code> as the <pre>'s first child — direct scans, no selector engine (the
+  // fence path runs per update while a code block streams).
+  let pre = firstDirectChild(container, 'PRE', FORMING_FENCE_PRE_CLASS) as HTMLPreElement | null
   if (!pre) {
     container.replaceChildren()
     pre = document.createElement('pre')
@@ -50,7 +54,8 @@ export function syncFormingFenceDom(container: HTMLElement, source: string): voi
     pre.append(codeEl)
     container.append(pre)
   }
-  const codeEl = pre.querySelector('code')
+  const first = pre.firstElementChild
+  const codeEl = first && first.tagName === 'CODE' ? first : null
   if (codeEl) {
     codeEl.className = fenceCodeClass(lang)
     setSanitizedHtml(codeEl, highlightFenceCode(code, lang))
