@@ -9,7 +9,7 @@
 // `pretendToBeVisual` provides requestAnimationFrame; the observer/matchMedia
 // shims below are no-ops that React-based competitors probe for at mount time.
 import { JSDOM } from 'jsdom'
-import { setSanitizerBackend } from '../../src/sanitize.ts'
+import { setDefaultConfig } from '../../src/config.ts'
 
 const win = new JSDOM('', { url: 'https://bench.invalid/', pretendToBeVisual: true }).window
 
@@ -80,7 +80,7 @@ export const benchSanitizerBackend: import('../../src/sanitize.ts').SanitizerBac
     return out
   },
 }
-setSanitizerBackend(benchSanitizerBackend)
+setDefaultConfig({ sanitizerBackend: benchSanitizerBackend })
 
 /**
  * Identity backend for the "unsafe" contestant: sanitization off, so our
