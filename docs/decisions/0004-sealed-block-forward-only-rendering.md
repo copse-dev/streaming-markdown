@@ -133,6 +133,17 @@ instead of re-deriving stability by rescanning.
 
 ### Phase 1 — Seal events from the incremental scanner
 
+**Status: landed** — `IncrementalSourceScanner.advance()` returns a
+`ScanAdvance` (sealed tokens fire-once in document order, the forming region,
+sealed link-ref/footnote-definition deltas, and an explicit `reset` on
+rewrite), verified headless against `tokenizeBlocks`/collector equivalence at
+every prefix (`incremental-scan-sealed.test.ts`). The scanner also maintains
+the footnote-definition map incrementally (`footnoteDefs()`), now threaded
+into the frozen-tail commit path — the footnote share of limitation K is
+O(tail) per update instead of O(all blocks). Remaining for Phase 2: patch
+*target* resolution (which committed blocks a new definition upgrades) and the
+event-driven emitter itself.
+
 `incremental-scan.ts` already computes the safe boundary (the sealing
 predicate: a complete blank after a non-extendable block, or a later terminated
 block after an extendable one, #111). Today it returns tokens; instead, let it

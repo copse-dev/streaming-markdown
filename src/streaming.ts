@@ -777,6 +777,7 @@ export class StreamingMarkdownRenderer {
         complete,
         this.committedTokens,
         this.completeScanner.linkRefs(complete),
+        this.completeScanner.footnoteDefs(complete),
       )
       this.lastComplete = complete
     }
