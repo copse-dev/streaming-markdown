@@ -6,6 +6,12 @@
  * allowlisted tags render as elements, everything else is stripped/unwrapped.
  * `'escape'` reproduces the historical behavior — every tag outside the benign
  * attribute-less inline allowlist is escaped into literal prose.
+ * `'escape-all'` literalizes every raw tag except the void `<br>`/`<br/>`:
+ * markdown text can never form an element at all, which also retires the raw
+ * tag-balance machinery for the render — no unbalanced-tag freeze guards, no
+ * re-root frames, no fallback cliffs (docs/decisions/0004). It matches how
+ * renderers without raw-HTML support (smd) treat tags, and is the natural
+ * posture for pure-LLM chat output.
  *
  * The choice is a process-wide slot rather than a threaded parameter, mirroring
  * the other module-scoped singletons the renderer already relies on (the
@@ -16,7 +22,7 @@
  * deep inline call stack (`escapeHtmlTextNodes`, `pendingHoldIndex`) reads it
  * without new parameters.
  */
-export type HtmlPolicy = 'passthrough' | 'escape'
+export type HtmlPolicy = 'passthrough' | 'escape' | 'escape-all'
 
 import { activeConfig } from './config.ts'
 

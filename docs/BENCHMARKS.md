@@ -92,7 +92,7 @@ repository plus the code-block-heavy case from #155:
   the tag as literal text and streams everything visibly. The row exists to
   regression-guard *our own* former O(n²) fallback (multi-second on this
   fixture before the ADR 0004 Phase 2 re-rooting); the parity row
-  (`htmlPolicy: 'escape'`, tag literalized, nothing held) is the only cell
+  (`htmlPolicy: 'escape-all'`, tag literalized, nothing held) is the only cell
   comparable with smd here, and it shows the usual ~2–4× architectural gap.
 
 ### Fairness caveats (read before quoting a number)
@@ -114,9 +114,11 @@ repository plus the code-block-heavy case from #155:
   turned off** via `MarkdownConfig` — GFM footnotes (`footnotes: false`) and
   link reference definitions (`linkReferences: false`), which also removes
   their per-update definition scans; email autolinks
-  (`emailAutolinks: false`); and raw HTML passthrough
-  (`htmlPolicy: 'escape'`, matching smd's render-tags-as-text behaviour).
-  What stays enabled matches [smd's own README
+  (`emailAutolinks: false`); and raw HTML (`htmlPolicy: 'escape-all'` —
+  every tag literalizes except the void `<br>`, exactly smd's
+  render-tags-as-text behaviour, and the policy under which the streaming
+  path runs no raw tag-balance guards at all). What stays enabled matches
+  [smd's own README
   checklist](https://github.com/thetarnav/streaming-markdown#markdown-features):
   tables, task lists, strikethrough, bare `http(s)` autolinks. (Residual
   asymmetries, all negligible on this corpus: smd tokenizes `$…$` math which

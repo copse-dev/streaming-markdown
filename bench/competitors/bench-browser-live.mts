@@ -160,7 +160,7 @@ const runInPage = (input: DriverInput): { durations: number[]; sanitizer: string
     } else if (input.contestant === 'ours DOM incremental (smd parity)') {
       config = {
         sanitizerBackend: passthrough,
-        htmlPolicy: 'escape',
+        htmlPolicy: 'escape-all',
         emailAutolinks: false,
         footnotes: false,
         linkReferences: false,

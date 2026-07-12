@@ -1,5 +1,5 @@
 import { decodeEscapedPunctuationRaw } from './backslash-escapes.ts'
-import { getHtmlPolicy } from './html-policy.ts'
+import { getHtmlPolicy, type HtmlPolicy } from './html-policy.ts'
 import { decodeHtmlCharRefs } from './link-references.ts'
 
 const HTML_ESCAPES: Record<string, string> = {
@@ -30,6 +30,13 @@ const SAFE_OUTER_TAG_RE =
  * sink allowlist (`sanitize.ts`) mirrors this set.
  */
 const BENIGN_RAW_INLINE_TAG_RE = /^<\/?(?:b|i|u|s|del|ins|sub|sup|kbd|mark|br)\s*\/?>$/i
+
+/**
+ * The only raw tag `'escape-all'` keeps: an explicit line break. Void, so it
+ * can never unbalance anything — which is what lets that policy skip the raw
+ * tag-balance machinery entirely (and it is the one tag smd passes through).
+ */
+const BR_TAG_RE = /^<br\s*\/?>$/i
 
 /** An event-handler attribute (`onclick=`, `onerror=`, …); never in renderer output. */
 const EVENT_HANDLER_ATTR_RE = /\son[a-z]+\s*=/i
@@ -74,21 +81,21 @@ function isSanctionedRendererTag(tag: string): boolean {
  */
 const PASSTHROUGH_TAG_RE = /^<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?\/?>$/
 
-function keepRawTag(part: string, passthrough: boolean): boolean {
-  if (passthrough) return PASSTHROUGH_TAG_RE.test(part)
-  // Escape policy: only renderer-generated tags (re-validated for forged
-  // content) and the benign attribute-less inline allowlist survive.
-  return (
-    (SAFE_OUTER_TAG_RE.test(part) && isSanctionedRendererTag(part)) ||
-    BENIGN_RAW_INLINE_TAG_RE.test(part)
-  )
+function keepRawTag(part: string, policy: HtmlPolicy): boolean {
+  if (policy === 'passthrough') return PASSTHROUGH_TAG_RE.test(part)
+  // Renderer-generated tags (re-validated for forged content) always survive —
+  // this escaper runs over the renderer's own output.
+  if (SAFE_OUTER_TAG_RE.test(part) && isSanctionedRendererTag(part)) return true
+  // Escape policy keeps the benign attribute-less inline allowlist;
+  // escape-all literalizes everything but the void <br>.
+  return policy === 'escape-all' ? BR_TAG_RE.test(part) : BENIGN_RAW_INLINE_TAG_RE.test(part)
 }
 
 function escapeHtmlOutsideSafeTags(html: string): string {
-  const passthrough = getHtmlPolicy() === 'passthrough'
+  const policy = getHtmlPolicy()
   return html
     .split(/(<[^>]+>)/g)
-    .map((part) => (part.startsWith('<') && keepRawTag(part, passthrough) ? part : escapeHtml(part)))
+    .map((part) => (part.startsWith('<') && keepRawTag(part, policy) ? part : escapeHtml(part)))
     .join('')
 }
 
