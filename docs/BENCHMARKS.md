@@ -6,8 +6,11 @@ streaming-markdown renderers people actually evaluate against
 [react-markdown](https://github.com/remarkjs/react-markdown) with and without
 the recommended block memoization,
 [smd / `streaming-markdown`](https://github.com/thetarnav/streaming-markdown),
-and [Incremark](https://github.com/kingshuaishuai/incremark)). Filed as #157;
-the harness lives in [`bench/competitors/`](../bench/competitors/).
+and [Incremark](https://github.com/kingshuaishuai/incremark), with
+[marked](https://github.com/markedjs/marked) as the full-re-parse baseline).
+Filed as #157; the harness lives in
+[`bench/competitors/`](../bench/competitors/). Every library name in the
+generated results tables links to its GitHub project.
 
 **These numbers are deliberately not a CI gate.** Competitor installs are
 flaky and competitor releases change speed without any action of ours, so the
@@ -90,10 +93,26 @@ repository plus the code-block-heavy case from #155:
   ours with sanitization disabled (`ours DOM incremental (unsafe)` via a
   passthrough backend, and the `renderMarkdownUnsafe` string export swapped
   in with `innerHTML`) — smd's configuration, since it has no sanitizer and
-  our highlighter/math/mermaid/emoji are likewise not loaded here. The
-  remaining gap to smd is architectural: smd appends tokens and never
-  revisits committed output, while our renderer re-tokenizes the stream and
-  morphs the pending tail (what buys mid-stream GFM correctness).
+  our highlighter/math/mermaid/emoji are likewise not loaded here. On top of
+  those, `ours DOM incremental (smd parity)` is the fully like-for-like row:
+  the unsafe configuration **plus every grammar feature smd does not support
+  turned off** via `MarkdownConfig` — GFM footnotes (`footnotes: false`) and
+  link reference definitions (`linkReferences: false`), which also removes
+  their per-update definition scans; email autolinks
+  (`emailAutolinks: false`); and raw HTML passthrough
+  (`htmlPolicy: 'escape'`, matching smd's render-tags-as-text behaviour).
+  What stays enabled matches [smd's own README
+  checklist](https://github.com/thetarnav/streaming-markdown#markdown-features):
+  tables, task lists, strikethrough, bare `http(s)` autolinks. (Residual
+  asymmetries, all negligible on this corpus: smd tokenizes `$…$` math which
+  our parity row leaves off, and we keep setext headings, GFM alerts, and
+  `www.` autolinks, which smd lacks.) The gap that remains in the parity row
+  is purely architectural: smd appends tokens and never revisits committed
+  output, while our renderer re-tokenizes the stream from the last safe
+  boundary and morphs the pending tail (what buys mid-stream GFM
+  correctness) — see
+  [`docs/decisions/0004`](decisions/0004-sealed-block-forward-only-rendering.md)
+  for the plan to close it.
 - **Highlighting:** no highlighter is registered for our renderer,
   react-markdown and smd render code as plain text, so those compare
   markdown work. Streamdown's and Incremark-react's built-in highlighting is
