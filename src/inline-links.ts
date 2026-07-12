@@ -124,8 +124,6 @@ export function safeLinkHref(raw: string): string | null {
 /** Resolved link the {@link LinkDecorator} decorates. `href` is already safe/encoded. */
 export interface LinkDecoration {
   href: string
-  /** True when the destination is an in-workspace path (not http/mailto). */
-  isWorkspace: boolean
   title?: string
 }
 
@@ -155,26 +153,25 @@ export const neutralLinkDecorator: LinkDecorator = ({ title }) =>
  * the pre-0.10 in-app behaviour restores it per render with
  * `{ linkDecorator: appLinkDecorator }`.
  */
-export const appLinkDecorator: LinkDecorator = ({ isWorkspace, title }) => {
+export const appLinkDecorator: LinkDecorator = ({ href, title }) => {
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
-  return isWorkspace
+  // Workspace-ness is host residue (#146): the neutral core no longer computes
+  // it. This opt-in host decorator derives it from the `href` it already
+  // receives, so the `isWorkspaceMarkdownLinkHref` URL scan stays behind the
+  // `@copse/streaming-markdown/host/workspace` entry and off the core path.
+  return isWorkspaceMarkdownLinkHref(href)
     ? ` class="workspace-markdown-link" data-workspace-link="true"${titleAttr}`
     : ` target="_blank" rel="noopener noreferrer" data-browser-link="true"${titleAttr}`
 }
 
 /** Render an `<a>` for a resolved link, applying the render's {@link LinkDecorator}. */
 export function renderAnchor(label: string, href: string, title?: string): string {
-  // Compute `isWorkspace` lazily (#146): it is workspace-host-specific residue in
-  // the neutral core — the built-in `neutralLinkDecorator` never reads it, so the
-  // per-anchor `isWorkspaceMarkdownLinkHref` URL scan runs only when a host
-  // decorator (e.g. `appLinkDecorator`) actually consults it. Memoized so a
-  // decorator reading it twice still scans once.
-  let workspace: boolean | undefined
+  // The neutral core hands the decorator only the resolved `href`/`title` (#146):
+  // workspace-ness is host residue, so a host decorator (e.g. `appLinkDecorator`)
+  // that wants it derives it from `href` itself rather than the core running the
+  // `isWorkspaceMarkdownLinkHref` URL scan on every anchor.
   const decoration: LinkDecoration = {
     href,
-    get isWorkspace(): boolean {
-      return (workspace ??= isWorkspaceMarkdownLinkHref(href))
-    },
     // `exactOptionalPropertyTypes`: omit `title` rather than pass an explicit undefined.
     ...(title === undefined ? {} : { title }),
   }

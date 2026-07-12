@@ -21,7 +21,7 @@ export function escapeHtml(text: string): string {
 }
 
 const SAFE_OUTER_TAG_RE =
-  /^(?:<a(?:\s+href="[^"]*")(?:\s+(?:title|target|rel|data-browser-link|data-workspace-link|class)="[^"]*")*\s*>|<\/(?:a|code|em|strong)>|<(?:code|em|strong)\b[^>]*>|<img\b[^>]*\bdata-md-rendered="1"[^>]*\/?>)$/i
+  /^(?:<a(?:\s+href="[^"]*")(?:\s+(?:title|target|rel|class)="[^"]*")*\s*>|<\/(?:a|code|em|strong)>|<(?:code|em|strong)\b[^>]*>|<img\b[^>]*\bdata-md-rendered="1"[^>]*\/?>)$/i
 
 /**
  * Benign raw inline HTML models emit in prose (strikethrough, sub/superscript,

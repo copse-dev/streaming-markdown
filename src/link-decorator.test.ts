@@ -35,7 +35,9 @@ describe('LinkDecorator hook (#601, #112)', () => {
 
   it('lets a host replace decoration at the renderAnchor seam', () => {
     // renderAnchor itself is unescaped assembly, so a host may emit any attrs.
-    const minimal: LinkDecorator = ({ isWorkspace }) => (isWorkspace ? ' data-ws' : ' data-ext')
+    // The neutral core hands the decorator only the resolved href (#146); a host
+    // that wants workspace-ness derives it from that href itself.
+    const minimal: LinkDecorator = ({ href }) => (href.includes('://') ? ' data-ext' : ' data-ws')
     withConfig({ linkDecorator: minimal }, () => {
       assert.equal(
         renderAnchor('label', 'https://example.com'),
@@ -68,12 +70,13 @@ describe('LinkDecorator hook (#601, #112)', () => {
   })
 
   it('exposes the app default decorator for composition', () => {
+    // appLinkDecorator derives workspace-ness from the href itself now (#146).
     assert.equal(
-      appLinkDecorator({ href: 'https://e.com', isWorkspace: false }),
+      appLinkDecorator({ href: 'https://e.com' }),
       ' target="_blank" rel="noopener noreferrer" data-browser-link="true"',
     )
     assert.equal(
-      appLinkDecorator({ href: 'a.ts', isWorkspace: true, title: 'T' }),
+      appLinkDecorator({ href: 'a.ts', title: 'T' }),
       ' class="workspace-markdown-link" data-workspace-link="true" title="T"',
     )
   })

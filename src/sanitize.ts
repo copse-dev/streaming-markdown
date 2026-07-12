@@ -71,15 +71,17 @@ const ALLOWED_TAGS = [
   'section',
 ]
 
-// `data-browser-link` flags links the renderer routes through the in-app browser
-// (see `browser-links.ts`); `class` carries highlight.js and mermaid hooks.
+// `class` carries highlight.js and mermaid hooks; `target`/`rel` support the
+// neutral `target="_blank"` decoration a host may opt into. Host-specific link
+// routing attributes (e.g. `data-browser-link` / `data-workspace-link`) are NOT
+// in the core allowlist (#146): a host that emits them via `appLinkDecorator`
+// (`@copse/streaming-markdown/host/workspace`) widens the sink itself through
+// `MarkdownConfig.sanitizeExtension` / `setDefaultConfig`.
 const ALLOWED_ATTR = [
   'href',
   'target',
   'rel',
   'class',
-  'data-browser-link',
-  'data-workspace-link',
   'data-ordered-marker',
   // GFM table column alignment (`<th align>`/`<td align>`) — presentational, no XSS surface.
   'align',
