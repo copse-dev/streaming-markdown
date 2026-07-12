@@ -107,7 +107,21 @@ const breaking: string[] = []
 const buckets = new Map<string, string[]>()
 const other: string[] = []
 
-const line = (commit: Commit, text: string): string => `- ${text} (\`${commit.hash}\`)`
+/**
+ * Commit subjects are prose, but a literal `<details>` (or any tag-shaped
+ * token) in one becomes a REAL element in the rendered changelog — GitHub then
+ * swallows everything after it into the (collapsed) element, and the streaming
+ * benchmark's CHANGELOG fixture degrades to per-commit full-morph fallbacks
+ * (the O(n²) trap documented in docs/decisions/0004). Wrap any bare tag in a
+ * code span; tags already inside backticks are left untouched.
+ */
+const neutralizeRawHtml = (text: string): string =>
+  text.replace(/(`+)[^`]*\1|<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?\/?>/g, (m) =>
+    m.startsWith('`') ? m : `\`${m}\``,
+  )
+
+const line = (commit: Commit, text: string): string =>
+  `- ${neutralizeRawHtml(text)} (\`${commit.hash}\`)`
 
 for (const commit of commits) {
   const parsed = parse(commit)

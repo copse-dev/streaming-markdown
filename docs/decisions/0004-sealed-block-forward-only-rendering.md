@@ -88,6 +88,30 @@ each byte is looked at once. The asymmetry is that our renderer re-derives
 "which blocks can no longer change" from scratch every update, when the
 tokenizer already knows.
 
+### Case study: the unbounded-fallback trap (found by this benchmark)
+
+The first full run of the #157 harness after v0.11.0 showed our sanitized and
+unsafe incremental rows ~13× slower on `CHANGELOG.md` — because a release
+entry contained the literal prose `an open <details> (#138)`. Under the
+default passthrough HTML policy that unclosed tag makes
+`hasUnfreezableRawHtml` reject the delta, and since the guard re-evaluates the
+same growing delta every commit, **every subsequent update full-morphs: one
+bare tag permanently degrades the rest of the stream to O(n²)** (measured:
+1.77M rendered chars for a 15 kB document, vs 53 k with the tag in a code
+span — and it swallowed the long-transcript fixture too, where CHANGELOG sits
+early in the concatenation). The parity row was immune only because
+`htmlPolicy: 'escape'` literalizes the tag.
+
+The content is fixed (`gen-changelog.mts` now code-spans bare tags), but the
+trap is real for LLM output, which emits `<details>`/`<div>` in prose
+routinely. It sharpens the Phase 2 requirement: in the whole-string render,
+content after an open raw element belongs *inside* it, so the sealed-mode
+emitter must support **re-rooting the append point into an open raw element**
+(an insertion-point stack) rather than treating the imbalance as
+unfreezable — turning today's permanent O(n²) fallback into ordinary O(tail)
+appends under a shifted root. Until then, the fallback cost is the single
+biggest real-world hazard this plan removes.
+
 ## Plan: sealed-block events
 
 Make the tokenizer emit **sealed-block events** — "this block can never change

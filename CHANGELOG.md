@@ -24,7 +24,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - brand renderStreamingMarkdown's return as SanitizedHtml (#140) (#171) (`be999ef`)
 - decode hex non-breaking space `&#xa0;` in the streaming pending tail (#143) (#163) (`f5a4229`)
 - restore the prior footnote context after a nested render (#144) (#170) (`9f2bdcb`)
-- hold the pending tail in the DOM emitter for an open <details> (#138) (#166) (`def43f4`)
+- hold the pending tail in the DOM emitter for an open `<details>` (#138) (#166) (`def43f4`)
 
 ### Performance
 
