@@ -62,6 +62,10 @@ describe('sanitizeRenderedMarkdown', () => {
   })
 
   it('preserves the renderer link shape (target, rel, data-browser-link)', () => {
+    // `target`/`rel`/`class` are core-allowed; host link-routing `data-*`
+    // attributes are no longer in the core allowlist (#146) but survive here
+    // because DOMPurify passes `data-*` through by default (a host on the native
+    // Sanitizer widens the sink itself via `sanitizeExtension`).
     const html = sanitizeRenderedMarkdown(
       '<a href="https://example.com" target="_blank" rel="noopener noreferrer" data-browser-link="true">x</a>',
     )

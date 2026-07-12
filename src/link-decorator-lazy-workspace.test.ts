@@ -1,22 +1,41 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { appLinkDecorator, type LinkDecorator, renderAnchor } from './inline-links.ts'
+import { appLinkDecorator, type LinkDecoration, renderAnchor } from './inline-links.ts'
 import { renderMarkdownUnsafe } from './renderer.ts'
 import { withConfig } from './config.ts'
 
-// #146: renderAnchor exposes `isWorkspace` on the LinkDecoration lazily — the
-// neutral default decorator never reads it, so the per-anchor
-// isWorkspaceMarkdownLinkHref scan is skipped in the common case. The lazy getter
-// must still deliver the correct value (and only when read). These pin that.
+// #146: workspace-ness is host residue and has been evicted from the neutral
+// core. `renderAnchor` no longer computes `isWorkspace` — the `LinkDecoration`
+// it hands a decorator carries only `href`/`title`, so the per-anchor
+// `isWorkspaceMarkdownLinkHref` URL scan no longer runs in the core path. The
+// opt-in `appLinkDecorator` (behind `@copse/streaming-markdown/host/workspace`)
+// derives workspace-ness from the `href` itself. These pin that split.
 
-describe('renderAnchor lazy isWorkspace (#146)', () => {
-  it('neutral default emits host-agnostic anchors (never reads isWorkspace)', () => {
+describe('workspace decoration lives in appLinkDecorator, not the core (#146)', () => {
+  it('the core hands decorators only href/title — no isWorkspace residue', () => {
+    let seen: LinkDecoration | undefined
+    withConfig(
+      {
+        linkDecorator: (decoration) => {
+          seen = decoration
+          return ''
+        },
+      },
+      () => renderAnchor('t', 'docs/guide.md'),
+    )
+    assert.deepEqual(Object.keys(seen ?? {}), ['href'])
+    assert.equal(seen?.href, 'docs/guide.md')
+    // The workspace-host flag is gone from the neutral core's decoration shape.
+    assert.equal((seen as unknown as Record<string, unknown>)['isWorkspace'], undefined)
+  })
+
+  it('neutral default emits host-agnostic anchors (no workspace URL scan runs)', () => {
     assert.equal(renderMarkdownUnsafe('[y](src/main.ts)'), '<p><a href="src/main.ts">y</a></p>')
     const html = renderMarkdownUnsafe('[x](https://example.com) and [y](docs/guide.md)')
     assert.doesNotMatch(html, /data-workspace-link|data-browser-link/)
   })
 
-  it('a decorator that reads isWorkspace still gets the correct value per anchor', () => {
+  it('appLinkDecorator derives workspace-ness from the href itself', () => {
     // A relative in-workspace path resolves as a workspace link…
     assert.match(
       renderMarkdownUnsafe('[a](docs/guide.md)', { linkDecorator: appLinkDecorator }),
@@ -35,15 +54,14 @@ describe('renderAnchor lazy isWorkspace (#146)', () => {
     assert.match(html, /https:\/\/example\.com"[^>]*data-browser-link="true"/)
   })
 
-  it('memoizes: a decorator reading isWorkspace twice sees one consistent value', () => {
-    const reads: boolean[] = []
-    const doubleReader: LinkDecorator = ({ isWorkspace }) => {
-      reads.push(isWorkspace, isWorkspace) // access the getter twice
-      return isWorkspace ? ' data-ws="1"' : ' data-ext="1"'
-    }
-    withConfig({ linkDecorator: doubleReader }, () => {
-      assert.equal(renderAnchor('t', 'docs/guide.md'), '<a href="docs/guide.md" data-ws="1">t</a>')
-    })
-    assert.deepEqual(reads, [true, true]) // consistent across repeated reads
+  it('appLinkDecorator called directly maps href to the right decoration', () => {
+    assert.equal(
+      appLinkDecorator({ href: 'https://e.com' }),
+      ' target="_blank" rel="noopener noreferrer" data-browser-link="true"',
+    )
+    assert.equal(
+      appLinkDecorator({ href: 'src/main.ts', title: 'T' }),
+      ' class="workspace-markdown-link" data-workspace-link="true" title="T"',
+    )
   })
 })
