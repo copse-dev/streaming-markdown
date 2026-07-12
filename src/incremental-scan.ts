@@ -207,6 +207,13 @@ export class IncrementalSourceScanner {
   /** Footnote definitions found in `[0, safeOffset)` (first-wins, #72). */
   private fnDefs = new Map<string, FootnoteDefinition>()
   /**
+   * The exact source of the latest {@link advance} — lets the definition views
+   * ({@link linkRefs} / {@link footnoteDefs}) reuse `tokens` for their suffix
+   * scans instead of re-tokenizing the tail a second (and third) time per
+   * commit, which showed up in the #154 code-block scaling guard.
+   */
+  private lastSource = ''
+  /**
    * Diagnostic: total characters actually re-tokenized across all calls. The
    * #30 invariant is that this stays O(n) over a whole append-only stream —
    * a deterministic, timing-free regression test reads it.
@@ -221,6 +228,7 @@ export class IncrementalSourceScanner {
     this.lastNonBlankKind = null
     this.refs = new Map()
     this.fnDefs = new Map()
+    this.lastSource = ''
   }
 
   /**
@@ -276,14 +284,17 @@ export class IncrementalSourceScanner {
     const sealedLinkRefs = new Map<string, LinkReference>()
     const sealedFootnoteDefs = new Map<string, FootnoteDefinition>()
     if (advanced.offset > this.safeOffset) {
-      const sealedSlice = source.slice(this.safeOffset, advanced.offset)
-      for (const [label, ref] of collectLinkReferenceDefinitions(sealedSlice)) {
+      // Reuse the tokens just produced (offsets are absolute into `source`)
+      // instead of re-tokenizing the sealed slice — byte-equivalent because
+      // both cut points are safe blank boundaries.
+      const sealedTokens = tokens.slice(this.safeTokenCount, advanced.tokenCount)
+      for (const [label, ref] of collectLinkReferenceDefinitions(source, sealedTokens)) {
         if (!this.refs.has(label)) {
           this.refs.set(label, ref)
           sealedLinkRefs.set(label, ref)
         }
       }
-      for (const [label, def] of collectFootnoteDefinitions(sealedSlice)) {
+      for (const [label, def] of collectFootnoteDefinitions(source, sealedTokens)) {
         if (!this.fnDefs.has(label)) {
           this.fnDefs.set(label, def)
           sealedFootnoteDefs.set(label, def)
@@ -295,6 +306,7 @@ export class IncrementalSourceScanner {
     this.lastNonBlankKind = advanced.lastNonBlankKind
     this.safePrefix = source.slice(0, this.safeOffset)
     this.tokens = tokens
+    this.lastSource = source
     return {
       tokens,
       sealed: tokens.slice(prevSafeTokenCount, this.safeTokenCount),
@@ -316,7 +328,14 @@ export class IncrementalSourceScanner {
       return collectLinkReferenceDefinitions(source)
     }
     const merged = new Map(this.refs)
-    const suffixRefs = collectLinkReferenceDefinitions(source.slice(this.safeOffset))
+    // When asked about the string the scanner just tokenized (the streaming
+    // hot path), reuse those tokens for the unsealed suffix instead of
+    // re-tokenizing it — the second tail tokenization per commit the #154
+    // guard flagged. Any other string still gets a correct fresh scan.
+    const suffixRefs =
+      source === this.lastSource
+        ? collectLinkReferenceDefinitions(source, this.tokens.slice(this.safeTokenCount))
+        : collectLinkReferenceDefinitions(source.slice(this.safeOffset))
     for (const [label, ref] of suffixRefs) {
       if (!merged.has(label)) merged.set(label, ref)
     }
@@ -337,7 +356,11 @@ export class IncrementalSourceScanner {
       return collectFootnoteDefinitions(source)
     }
     const merged = new Map(this.fnDefs)
-    const suffixDefs = collectFootnoteDefinitions(source.slice(this.safeOffset))
+    // Same token reuse as {@link linkRefs} — see the note there.
+    const suffixDefs =
+      source === this.lastSource
+        ? collectFootnoteDefinitions(source, this.tokens.slice(this.safeTokenCount))
+        : collectFootnoteDefinitions(source.slice(this.safeOffset))
     for (const [label, def] of suffixDefs) {
       if (!merged.has(label)) merged.set(label, def)
     }
