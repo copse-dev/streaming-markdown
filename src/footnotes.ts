@@ -19,6 +19,29 @@
  */
 import { dropTrailingNewline, stripFourColumnIndent } from './block-patterns.ts'
 import { decodeEscapes, normalizeReferenceLabel } from './link-references.ts'
+import { activeConfig } from './config.ts'
+
+/**
+ * Whether the footnote grammar is active for the current render (default on).
+ * Off, `[^label]: …` lines are ordinary paragraphs and `[^label]` stays literal.
+ *
+ * @experimental Introspection getter that reads the ambient render config; outside
+ * a render it returns the defaults. Not part of the stable v1 surface (#147) —
+ * scope behaviour via `MarkdownConfig.footnotes` instead. May move behind a
+ * subpath or be removed in a minor release.
+ */
+export function isFootnotesEnabled(): boolean {
+  return activeConfig().footnotes !== false
+}
+
+/**
+ * A `[^label]:` definition opener under the current render config: always false
+ * with footnotes disabled, so tokenizer decisions (block starts, paragraph and
+ * list interrupts) uniformly treat the line as ordinary text.
+ */
+export function isFootnoteDefLine(text: string): boolean {
+  return isFootnotesEnabled() && FOOTNOTE_DEF_LINE_RE.test(text)
+}
 
 /**
  * A footnote label: `^` then one or more characters that are neither
@@ -225,6 +248,7 @@ export function footnoteRefLabelsIn(text: string): string[] {
  * literal and never holds.
  */
 export function footnoteHoldStart(s: string, mask: boolean[]): number {
+  if (!isFootnotesEnabled()) return s.length
   for (let i = s.length - 2; i >= 0; i--) {
     if (s[i] !== '[' || s[i + 1] !== '^' || mask[i]) continue
     let backslashes = 0
@@ -245,5 +269,6 @@ export function footnoteHoldStart(s: string, mask: boolean[]): number {
  * multi-line open definition block held pending in one piece).
  */
 export function isPendingFootnoteDefLine(pending: string): boolean {
+  if (!isFootnotesEnabled()) return false
   return /^ {0,3}\[\^(?:[^\s\]]*$|[^\s\]]+\](?::|$))/.test(pending)
 }

@@ -1,10 +1,11 @@
-// Incremental block tokenization + link-reference scanning (#30).
+// Incremental block tokenization + definition scanning (#30), and the
+// sealed-block event stream of ADR 0004 Phase 1 (`advance`).
 //
-// Streaming re-runs two pure-string scans on every update: `tokenizeBlocks`
-// over the full content, and `collectLinkReferenceDefinitions` over the committed
-// prefix on every commit. Both are O(prefix) per call, which keeps total
-// streaming cost Θ(n²) even after the DOM layer became O(tail) per commit
-// (issue #21 limitation K).
+// Streaming used to re-run three pure-string scans on every update:
+// `tokenizeBlocks` over the full content, and the link-reference / footnote
+// definition collections over the committed prefix on every commit. Each is
+// O(prefix) per call, which keeps total streaming cost Θ(n²) even after the
+// DOM layer became O(tail) per commit (issue #21 limitation K).
 //
 // `IncrementalSourceScanner` makes both scans resume from a saved offset. The
 // stream is append-only in the common case, so everything before a *safe
@@ -41,10 +42,12 @@
 // source (a memcmp), else the cache resets and the scan starts over — correct,
 // just not incremental for that update.
 import {
+  collectFootnoteDefinitions,
   collectLinkReferenceDefinitions,
   tokenizeBlocks,
   type BlockToken,
 } from './block-tokenizer.ts'
+import { type FootnoteDefinition, type FootnoteDefinitionMap } from './footnotes.ts'
 import { type LinkReference, type LinkReferenceMap } from './link-references.ts'
 
 /** Kinds whose token can absorb later lines across a blank run (see header). */
@@ -157,10 +160,37 @@ function advanceSafeBoundary(
 }
 
 /**
- * Incremental tokenizer + link-reference scanner for one growing source string
+ * One {@link IncrementalSourceScanner.advance} step — the sealed-block event
+ * stream of ADR 0004 Phase 1. Everything before the safe boundary is *sealed*:
+ * no future append can re-tokenize it differently, so a consumer may act on it
+ * exactly once (render-once, definition collection, …). Everything after it is
+ * *forming* and is replayed on every advance.
+ *
+ * Within one append-only stream the events are monotone: each token is
+ * reported in `sealed` exactly once, in document order, and `formingFrom`
+ * never retreats. A non-append snapshot (rewrite/retreat) sets `reset` — all
+ * previously emitted events are void and the consumer must rebuild.
+ */
+export interface ScanAdvance {
+  /** All tokens of the snapshot — byte-identical to `tokenizeBlocks(source)`. */
+  tokens: BlockToken[]
+  /** Tokens sealed by THIS advance (fire-once, document order). */
+  sealed: BlockToken[]
+  /** Index into {@link tokens} where the forming (unsealed) region begins. */
+  formingFrom: number
+  /** Link-reference definitions sealed by this advance (labels new to the sealed map). */
+  sealedLinkRefs: LinkReferenceMap
+  /** Footnote definitions sealed by this advance (labels new to the sealed map). */
+  sealedFootnoteDefs: FootnoteDefinitionMap
+  /** The snapshot was not an append of the previous one; the cache restarted. */
+  reset: boolean
+}
+
+/**
+ * Incremental tokenizer + definition scanner for one growing source string
  * (the raw stream, or the committed prefix). Feed it monotonically growing
- * snapshots via {@link tokenize}; non-append-only snapshots are detected and
- * reset the cache.
+ * snapshots via {@link tokenize} or {@link advance}; non-append-only snapshots
+ * are detected and reset the cache.
  */
 export class IncrementalSourceScanner {
   private tokens: BlockToken[] = []
@@ -174,6 +204,15 @@ export class IncrementalSourceScanner {
   private lastNonBlankKind: BlockToken['kind'] | null = null
   /** Link-reference definitions found in `[0, safeOffset)` (first-wins). */
   private refs = new Map<string, LinkReference>()
+  /** Footnote definitions found in `[0, safeOffset)` (first-wins, #72). */
+  private fnDefs = new Map<string, FootnoteDefinition>()
+  /**
+   * The exact source of the latest {@link advance} — lets the definition views
+   * ({@link linkRefs} / {@link footnoteDefs}) reuse `tokens` for their suffix
+   * scans instead of re-tokenizing the tail a second (and third) time per
+   * commit, which showed up in the #154 code-block scaling guard.
+   */
+  private lastSource = ''
   /**
    * Diagnostic: total characters actually re-tokenized across all calls. The
    * #30 invariant is that this stays O(n) over a whole append-only stream —
@@ -188,6 +227,8 @@ export class IncrementalSourceScanner {
     this.safePrefix = ''
     this.lastNonBlankKind = null
     this.refs = new Map()
+    this.fnDefs = new Map()
+    this.lastSource = ''
   }
 
   /**
@@ -195,7 +236,23 @@ export class IncrementalSourceScanner {
    * result is byte-identical to `tokenizeBlocks(source)`.
    */
   tokenize(source: string): BlockToken[] {
-    if (!source.startsWith(this.safePrefix)) this.resetCache()
+    return this.advance(source).tokens
+  }
+
+  /**
+   * Tokenize `source` and report the sealed-block delta (ADR 0004 Phase 1).
+   * `tokens` is byte-identical to `tokenizeBlocks(source)`; `sealed` are the
+   * tokens the safe boundary advanced past since the previous call, together
+   * with the definitions those tokens sealed. See {@link ScanAdvance} for the
+   * monotonicity contract.
+   */
+  advance(source: string): ScanAdvance {
+    let reset = false
+    if (!source.startsWith(this.safePrefix)) {
+      this.resetCache()
+      reset = true
+    }
+    const prevSafeTokenCount = this.safeTokenCount
 
     const suffix = source.slice(this.safeOffset)
     this.scannedChars += suffix.length
@@ -213,8 +270,10 @@ export class IncrementalSourceScanner {
       this.safeTokenCount === 0 ? shifted : this.tokens.slice(0, this.safeTokenCount).concat(shifted)
 
     // Advance the safe boundary for the NEXT call, folding the newly-safe
-    // region's link-reference definitions into the cached map (first-wins;
-    // both cut points are blank boundaries, which no definition can span).
+    // region's link-reference and footnote definitions into the cached maps
+    // (first-wins; both cut points are blank boundaries, which no definition
+    // can span — a footnote def that COULD extend across the blank blocks the
+    // boundary from advancing in the first place, see canExtendAcrossBlank).
     const advanced = advanceSafeBoundary(
       source,
       tokens,
@@ -222,12 +281,24 @@ export class IncrementalSourceScanner {
       this.safeOffset,
       this.lastNonBlankKind,
     )
+    const sealedLinkRefs = new Map<string, LinkReference>()
+    const sealedFootnoteDefs = new Map<string, FootnoteDefinition>()
     if (advanced.offset > this.safeOffset) {
-      const newlySafe = collectLinkReferenceDefinitions(
-        source.slice(this.safeOffset, advanced.offset),
-      )
-      for (const [label, ref] of newlySafe) {
-        if (!this.refs.has(label)) this.refs.set(label, ref)
+      // Reuse the tokens just produced (offsets are absolute into `source`)
+      // instead of re-tokenizing the sealed slice — byte-equivalent because
+      // both cut points are safe blank boundaries.
+      const sealedTokens = tokens.slice(this.safeTokenCount, advanced.tokenCount)
+      for (const [label, ref] of collectLinkReferenceDefinitions(source, sealedTokens)) {
+        if (!this.refs.has(label)) {
+          this.refs.set(label, ref)
+          sealedLinkRefs.set(label, ref)
+        }
+      }
+      for (const [label, def] of collectFootnoteDefinitions(source, sealedTokens)) {
+        if (!this.fnDefs.has(label)) {
+          this.fnDefs.set(label, def)
+          sealedFootnoteDefs.set(label, def)
+        }
       }
     }
     this.safeTokenCount = advanced.tokenCount
@@ -235,7 +306,15 @@ export class IncrementalSourceScanner {
     this.lastNonBlankKind = advanced.lastNonBlankKind
     this.safePrefix = source.slice(0, this.safeOffset)
     this.tokens = tokens
-    return tokens
+    this.lastSource = source
+    return {
+      tokens,
+      sealed: tokens.slice(prevSafeTokenCount, this.safeTokenCount),
+      formingFrom: this.safeTokenCount,
+      sealedLinkRefs,
+      sealedFootnoteDefs,
+      reset,
+    }
   }
 
   /**
@@ -249,9 +328,41 @@ export class IncrementalSourceScanner {
       return collectLinkReferenceDefinitions(source)
     }
     const merged = new Map(this.refs)
-    const suffixRefs = collectLinkReferenceDefinitions(source.slice(this.safeOffset))
+    // When asked about the string the scanner just tokenized (the streaming
+    // hot path), reuse those tokens for the unsealed suffix instead of
+    // re-tokenizing it — the second tail tokenization per commit the #154
+    // guard flagged. Any other string still gets a correct fresh scan.
+    const suffixRefs =
+      source === this.lastSource
+        ? collectLinkReferenceDefinitions(source, this.tokens.slice(this.safeTokenCount))
+        : collectLinkReferenceDefinitions(source.slice(this.safeOffset))
     for (const [label, ref] of suffixRefs) {
       if (!merged.has(label)) merged.set(label, ref)
+    }
+    return merged
+  }
+
+  /**
+   * Footnote definitions of `source`, equal to
+   * `collectFootnoteDefinitions(source)` — the cached sealed-prefix map merged
+   * first-wins with a suffix scan, exactly like {@link linkRefs}. Replaces the
+   * per-update whole-token-array collection in the DOM commit path (the
+   * footnote share of #21 limitation K). Must be called with the same string
+   * as the latest {@link tokenize}/{@link advance} call; anything else falls
+   * back to a full scan.
+   */
+  footnoteDefs(source: string): FootnoteDefinitionMap {
+    if (!source.startsWith(this.safePrefix)) {
+      return collectFootnoteDefinitions(source)
+    }
+    const merged = new Map(this.fnDefs)
+    // Same token reuse as {@link linkRefs} — see the note there.
+    const suffixDefs =
+      source === this.lastSource
+        ? collectFootnoteDefinitions(source, this.tokens.slice(this.safeTokenCount))
+        : collectFootnoteDefinitions(source.slice(this.safeOffset))
+    for (const [label, def] of suffixDefs) {
+      if (!merged.has(label)) merged.set(label, def)
     }
     return merged
   }

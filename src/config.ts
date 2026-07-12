@@ -81,6 +81,23 @@ export interface MarkdownConfig {
    */
   emailAutolinks?: boolean
   /**
+   * GFM footnotes — inline `[^label]` references and `[^label]: …` definition
+   * blocks (#72) — on by default. `false` disables the grammar for the render:
+   * definition lines tokenize as ordinary paragraphs (so their text is visible,
+   * matching renderers without footnote support), references stay literal, and
+   * the streaming path skips its per-update definition scan. See footnotes.ts.
+   */
+  footnotes?: boolean
+  /**
+   * CommonMark link reference definitions — `[label]: /url "title"` blocks
+   * resolved by `[text][label]` / `[label]` references — on by default. `false`
+   * disables them: definition lines tokenize as ordinary paragraphs and
+   * reference-style links stay literal text, and the streaming path skips its
+   * per-update definition scan. Inline `[text](url)` links are unaffected.
+   * See link-references.ts.
+   */
+  linkReferences?: boolean
+  /**
    * Exclude characters from the emphasis flanking *punctuation* class — the seam
    * markdown-cjk-friendly uses to pair emphasis around full-width punctuation.
    * For the CJK preset, spread `cjkFriendlyConfig` from

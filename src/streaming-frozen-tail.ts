@@ -472,15 +472,18 @@ export class FrozenTailRenderer {
    * `sanitizeRenderedMarkdown(renderMarkdownUnsafe(complete))`, freezing the settled
    * prefix and re-rendering only the tail group. `tokens` must be
    * `tokenizeBlocks(complete)` (threaded from the caller, Layer 1), and
-   * `providedLinkRefs`, when given, must equal
-   * `collectLinkReferenceDefinitions(complete)` (threaded from the caller's
-   * incremental scanner, #30 — saves the per-commit O(prefix) ref scan).
+   * `providedLinkRefs` / `providedFootnoteDefs`, when given, must equal
+   * `collectLinkReferenceDefinitions(complete)` /
+   * `collectFootnoteDefinitions(complete)` (threaded from the caller's
+   * incremental scanner, #30 / ADR 0004 Phase 1 — saves the per-commit
+   * O(prefix) definition scans).
    */
   update(
     completedEl: HTMLElement,
     complete: string,
     tokens: BlockToken[],
     providedLinkRefs?: LinkReferenceMap,
+    providedFootnoteDefs?: FootnoteDefinitionMap,
   ): void {
     if (complete === '') {
       if (completedEl.childNodes.length > 0) completedEl.replaceChildren()
@@ -520,7 +523,7 @@ export class FrozenTailRenderer {
     // changed reference blocks and section items instead of the whole prefix.
     // Before the first definition, references are literal and the document is
     // byte-identical to a footnote-free one, so the ordinary fast path is valid.
-    const footnoteDefs = collectFootnoteDefinitions(complete, tokens)
+    const footnoteDefs = providedFootnoteDefs ?? collectFootnoteDefinitions(complete, tokens)
     if (footnoteDefs.size > 0) {
       this.commitWithFootnotes(completedEl, complete, tokens, linkRefs, linkRefKey, footnoteDefs)
       return
@@ -817,7 +820,7 @@ export class FrozenTailRenderer {
     }
     const canReuse =
       this.fnActive && this.fnLinkRefKey === linkRefKey && complete.startsWith(this.fnSource)
-    if (canReuse && this.fnIncremental(completedEl, complete, tokens, linkRefs)) {
+    if (canReuse && this.fnIncremental(completedEl, complete, tokens, linkRefs, footnoteDefs)) {
       this.fnSource = complete
       this.fnLinkRefKey = linkRefKey
       return
@@ -946,9 +949,8 @@ export class FrozenTailRenderer {
     complete: string,
     tokens: BlockToken[],
     linkRefs: LinkReferenceMap,
+    footnoteDefs: FootnoteDefinitionMap,
   ): boolean {
-    const footnoteDefs = collectFootnoteDefinitions(complete, tokens)
-
     const fast = this.fnFastCommit(completedEl, complete, tokens, linkRefs, footnoteDefs)
     if (fast !== 'skip') return fast === 'done'
 
