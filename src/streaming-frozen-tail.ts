@@ -80,6 +80,7 @@ import {
   morphElementChildrenFrom,
   morphInnerHtml,
   morphInnerHtmlFrom,
+  morphInnerHtmlRangeFrom,
   syncAttributes,
 } from './streaming-dom-morph.ts'
 
@@ -772,32 +773,32 @@ export class FrozenTailRenderer {
     } else {
       // Ordinary commit — including a fully-flattened re-root chain, where the
       // sanitizedDelta may be '' while the RAW delta was not (its '\n' seam
-      // must still be emitted, hence the raw-emptiness joins).
-      const parts: string[] = []
-      if (deltaHtml !== '') parts.push(sanitizedDelta)
-      if (tailHtml !== '') parts.push(sanitizedTail)
-      const lead = this.frozenHasHtml && parts.length > 0 ? '\n' : ''
-      const joined = parts.length > 0 ? lead + parts.join('\n') : ''
+      // must still be emitted, hence the raw-emptiness gating). Two range
+      // morphs — delta, then tail — so the delta parses exactly once: its
+      // morph template doubles as the frozen node count (gap C), where the
+      // old joint morph needed a second, count-only parse of the sanitized
+      // delta on every commit (~26% of the commit path). The split parse
+      // yields the joint morph's exact node sequence: top-level parts end in
+      // elements, so text cannot merge across the boundary, and each '\n'
+      // seam stays its own text node. Blocks settling this commit keep their
+      // node identity — the delta range morph reuses them in place and never
+      // trims — and the tail morph's trailing trim preserves the sweep
+      // semantics (gaps B/E).
+      if (deltaHtml !== '') {
+        const lead = this.frozenHasHtml ? '\n' : ''
+        this.frozenNodeCount += morphInnerHtmlRangeFrom(
+          root,
+          this.frozenNodeCount,
+          asSanitizedHtml(lead + sanitizedDelta),
+        )
+        this.frozenHasHtml = true
+      }
+      const tailLead = this.frozenHasHtml && tailHtml !== '' ? '\n' : ''
       morphInnerHtmlFrom(
         root,
         this.frozenNodeCount,
-        // Sanitized parts joined with literal '\n' seams — sanitizer-equivalent.
-        joined === '' ? '' : asSanitizedHtml(joined),
+        tailHtml !== '' ? asSanitizedHtml(tailLead + sanitizedTail) : '',
       )
-
-      // Advance the frozen bookkeeping over the delta's nodes. The count comes
-      // from parsing the delta fragment alone (top-level parts are elements, so
-      // concatenation cannot merge text nodes across the delta/tail boundary);
-      // it is O(delta), which totals O(n) over a whole stream (gap C: never
-      // inferred from token indices — blanks/refs emit nothing, list/blockquote
-      // runs collapse to one element).
-      if (deltaHtml !== '') {
-        const probe = root.cloneNode(false) as HTMLElement
-        // Same sanitized delta + literal seam the morph above just consumed.
-        setPresanitizedHtml(probe, asSanitizedHtml(lead + sanitizedDelta))
-        this.frozenNodeCount += probe.childNodes.length
-        this.frozenHasHtml = true
-      }
     }
     // #138: hold the pending tail in the DOM emitter while a `<details>` is
     // open in the RAW whole render — matching the string emitter, which
