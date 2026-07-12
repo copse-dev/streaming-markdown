@@ -10,7 +10,14 @@
 
 import { activeConfig } from './config.ts'
 
-/** Whether bare email addresses are linkified as `mailto:` for the current render (default on). */
+/**
+ * Whether bare email addresses are linkified as `mailto:` for the current render (default on).
+ *
+ * @experimental Introspection getter that reads the ambient render config; outside
+ * a render it returns the defaults. Not part of the stable v1 surface (#147) —
+ * scope behaviour via `MarkdownConfig.emailAutolinks` instead. May move behind a
+ * subpath or be removed in a minor release.
+ */
 export function isEmailAutolinksEnabled(): boolean {
   return activeConfig().emailAutolinks ?? true
 }

@@ -91,6 +91,11 @@ function resolveLanguage(lang: string): string | null {
  * i.e. escaped-plain-text fallback). Set it per render via
  * `MarkdownConfig.codeHighlighter` — obtain a backend from its `load*` entry
  * (`@copse/streaming-markdown/highlighters/highlightjs` or `.../shiki`).
+ *
+ * @experimental Introspection getter that reads the ambient render config; outside
+ * a render it returns the defaults. Not part of the stable v1 surface (#147) —
+ * scope behaviour via `MarkdownConfig.codeHighlighter` instead. May move behind a
+ * subpath or be removed in a minor release.
  */
 export function getCodeHighlighter(): CodeHighlighter | null {
   return activeConfig().codeHighlighter ?? null

@@ -105,7 +105,14 @@ function resolvedPolicy(): ResolvedPolicy | null {
   return cachedResolved
 }
 
-/** The current render's {@link LinkImagePolicy} in resolved form, or `null` when disabled. */
+/**
+ * The current render's {@link LinkImagePolicy} in resolved form, or `null` when disabled.
+ *
+ * @experimental Introspection getter that reads the ambient render config; outside
+ * a render it returns the defaults. Not part of the stable v1 surface (#147) —
+ * scope behaviour via `MarkdownConfig.linkImagePolicy` instead. May move behind a
+ * subpath or be removed in a minor release.
+ */
 export function getLinkImagePolicy(): LinkImagePolicy | null {
   const policy = resolvedPolicy()
   if (!policy) return null

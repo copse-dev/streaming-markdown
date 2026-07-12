@@ -395,7 +395,14 @@ export function decodeHtmlEntities(text: string): string {
   return (activeConfig().entityDecoder ?? builtinDecode)(text)
 }
 
-/** The render's `entityDecoder` config, or `null` when using the built-in. */
+/**
+ * The render's `entityDecoder` config, or `null` when using the built-in.
+ *
+ * @experimental Introspection getter that reads the ambient render config; outside
+ * a render it returns the defaults. Not part of the stable v1 surface (#147) —
+ * scope behaviour via `MarkdownConfig.entityDecoder` instead. May move behind a
+ * subpath or be removed in a minor release.
+ */
 export function getEntityDecoder(): EntityDecoder | null {
   return activeConfig().entityDecoder ?? null
 }
@@ -403,6 +410,11 @@ export function getEntityDecoder(): EntityDecoder | null {
 /**
  * The effective named set the built-in decoder uses for the current render
  * (built-in HTML4 ⊕ the render's `namedEntities` config).
+ *
+ * @experimental Introspection getter that reads the ambient render config; outside
+ * a render it returns the defaults. Not part of the stable v1 surface (#147) —
+ * scope behaviour via `MarkdownConfig.namedEntities` instead. May move behind a
+ * subpath or be removed in a minor release.
  */
 export function getNamedEntities(): Readonly<Record<string, string>> {
   return { ...effectiveNamed() }
