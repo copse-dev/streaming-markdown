@@ -92,7 +92,7 @@ repository plus the code-block-heavy case from #155:
   the tag as literal text and streams everything visibly. The row exists to
   regression-guard *our own* former O(n²) fallback (multi-second on this
   fixture before the ADR 0004 Phase 2 re-rooting); the parity row
-  (`htmlPolicy: 'escape'`, tag literalized, nothing held) is the only cell
+  (`htmlPolicy: 'escape-all'`, tag literalized, nothing held) is the only cell
   comparable with smd here, and it shows the usual ~2–4× architectural gap.
 
 ### Fairness caveats (read before quoting a number)
@@ -114,9 +114,11 @@ repository plus the code-block-heavy case from #155:
   turned off** via `MarkdownConfig` — GFM footnotes (`footnotes: false`) and
   link reference definitions (`linkReferences: false`), which also removes
   their per-update definition scans; email autolinks
-  (`emailAutolinks: false`); and raw HTML passthrough
-  (`htmlPolicy: 'escape'`, matching smd's render-tags-as-text behaviour).
-  What stays enabled matches [smd's own README
+  (`emailAutolinks: false`); and raw HTML (`htmlPolicy: 'escape-all'` —
+  every tag literalizes except the void `<br>`, exactly smd's
+  render-tags-as-text behaviour, and the policy under which the streaming
+  path runs no raw tag-balance guards at all). What stays enabled matches
+  [smd's own README
   checklist](https://github.com/thetarnav/streaming-markdown#markdown-features):
   tables, task lists, strikethrough, bare `http(s)` autolinks. (Residual
   asymmetries, all negligible on this corpus: smd tokenizes `$…$` math which
@@ -175,51 +177,51 @@ _Last run: 2026-07-12 — node v22.22.2, Intel(R) Xeon(R) Processor @ 2.80GHz, c
 
 | fixture | chars | updates | [ours DOM incremental](https://github.com/copse-dev/streaming-markdown) | [ours string→innerHTML](https://github.com/copse-dev/streaming-markdown) | [ours DOM incremental (unsafe)](https://github.com/copse-dev/streaming-markdown) | [ours unsafe→innerHTML](https://github.com/copse-dev/streaming-markdown) | [ours DOM incremental (smd parity)](https://github.com/copse-dev/streaming-markdown) | [smd (streaming-markdown)](https://github.com/thetarnav/streaming-markdown) | [ours react (StreamingMarkdown)](https://github.com/copse-dev/streaming-markdown) | [react-markdown](https://github.com/remarkjs/react-markdown) | [react-markdown + memo blocks](https://github.com/remarkjs/react-markdown) | [streamdown](https://github.com/vercel/streamdown) | [incremark react](https://github.com/kingshuaishuai/incremark) |
 | :-- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |
-| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 9338 | 199 | 305 ms | 3336 ms | 125 ms | 1076 ms | 139 ms | 15.2 ms | 368 ms | 966 ms | 309 ms | 266 ms | 1537 ms |
-| incremark/test-md.md | 18091 | 199 | 495 ms | 8951 ms | 218 ms | 2929 ms | 242 ms | 23.4 ms | 603 ms | 3396 ms | 692 ms | 950 ms | 2970 ms |
-| README.md | 9000 | 200 | 369 ms | 2936 ms | 200 ms | 1076 ms | 184 ms | 13.5 ms | 469 ms | 906 ms | 451 ms | 476 ms | 797 ms |
-| CHANGELOG.md | 14984 | 200 | 496 ms | 7061 ms | 259 ms | 2509 ms | 224 ms | 20.6 ms | 571 ms | 2257 ms | 612 ms | 738 ms | 1489 ms |
-| docs/ARCHITECTURE.md | 49982 | 200 | 1568 ms | 19020 ms | 811 ms | 6951 ms | 821 ms | 48.2 ms | 1774 ms | 5397 ms | 2481 ms | 2318 ms | 4142 ms |
-| tests/fixtures/terms-of-service-streaming.md | 5220 | 194 | 306 ms | 2382 ms | 133 ms | 882 ms | 130 ms | 12.0 ms | 354 ms | 698 ms | 245 ms | 243 ms | 605 ms |
-| synthetic/code-heavy (#155) | 12285 | 199 | 311 ms | 1358 ms | 213 ms | 568 ms | 197 ms | 9.58 ms | 400 ms | 328 ms | 249 ms | 130 ms | 325 ms |
-| synthetic/long-transcript | 118942 | 200 | 2277 ms | 90925 ms | 1178 ms | 20799 ms | 1151 ms | 71.0 ms | 2532 ms | 20166 ms | 3658 ms | 21836 ms | 16878 ms |
-| synthetic/raw-html-details (#0004) | 12343 | 200 | 43.9 ms | 1028 ms | 30.1 ms | 600 ms | 196 ms | 8.62 ms | 95.0 ms | 377 ms | 249 ms | 160 ms | 316 ms |
+| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 9338 | 199 | 359 ms | 3236 ms | 195 ms | 1132 ms | 197 ms | 19.4 ms | 440 ms | 939 ms | 302 ms | 241 ms | 1503 ms |
+| incremark/test-md.md | 18091 | 199 | 575 ms | 9183 ms | 314 ms | 3047 ms | 296 ms | 24.7 ms | 678 ms | 3448 ms | 682 ms | 963 ms | 2882 ms |
+| README.md | 9000 | 200 | 397 ms | 2683 ms | 218 ms | 1077 ms | 217 ms | 12.8 ms | 467 ms | 930 ms | 472 ms | 483 ms | 812 ms |
+| CHANGELOG.md | 14984 | 200 | 519 ms | 6780 ms | 246 ms | 2495 ms | 242 ms | 19.0 ms | 608 ms | 2312 ms | 609 ms | 734 ms | 1538 ms |
+| docs/ARCHITECTURE.md | 49982 | 200 | 1885 ms | 17972 ms | 1159 ms | 6346 ms | 1106 ms | 60.4 ms | 2204 ms | 4998 ms | 2507 ms | 2363 ms | 4038 ms |
+| tests/fixtures/terms-of-service-streaming.md | 5220 | 194 | 355 ms | 2463 ms | 220 ms | 815 ms | 197 ms | 12.6 ms | 405 ms | 677 ms | 264 ms | 247 ms | 560 ms |
+| synthetic/code-heavy (#155) | 12285 | 199 | 316 ms | 1338 ms | 224 ms | 549 ms | 235 ms | 8.13 ms | 383 ms | 336 ms | 227 ms | 143 ms | 307 ms |
+| synthetic/long-transcript | 118942 | 200 | 2805 ms | 81279 ms | 1898 ms | 19895 ms | 1889 ms | 74.8 ms | 3064 ms | 19511 ms | 3452 ms | 21967 ms | 15852 ms |
+| synthetic/raw-html-details (#0004) | 12343 | 200 | 48.9 ms | 973 ms | 40.6 ms | 586 ms | 222 ms | 8.00 ms | 107 ms | 351 ms | 237 ms | 153 ms | 312 ms |
 
 ### Per-update latency on the long transcript (DOM tier)
 
 | library | mean/update | p50 | p95 | max |
 | :-- | --: | --: | --: | --: |
-| [ours DOM incremental](https://github.com/copse-dev/streaming-markdown) | 11.4 ms | 6.34 ms | 14.7 ms | 435 ms |
-| [ours string→innerHTML](https://github.com/copse-dev/streaming-markdown) | 455 ms | 438 ms | 824 ms | 1637 ms |
-| [ours DOM incremental (unsafe)](https://github.com/copse-dev/streaming-markdown) | 5.89 ms | 3.40 ms | 8.57 ms | 215 ms |
-| [ours unsafe→innerHTML](https://github.com/copse-dev/streaming-markdown) | 104 ms | 108 ms | 186 ms | 218 ms |
-| [ours DOM incremental (smd parity)](https://github.com/copse-dev/streaming-markdown) | 5.75 ms | 3.24 ms | 8.74 ms | 226 ms |
-| [smd (streaming-markdown)](https://github.com/thetarnav/streaming-markdown) | 0.35 ms | 0.28 ms | 0.62 ms | 4.18 ms |
-| [ours react (StreamingMarkdown)](https://github.com/copse-dev/streaming-markdown) | 12.7 ms | 7.26 ms | 17.4 ms | 428 ms |
-| [react-markdown](https://github.com/remarkjs/react-markdown) | 101 ms | 106 ms | 180 ms | 247 ms |
-| [react-markdown + memo blocks](https://github.com/remarkjs/react-markdown) | 18.3 ms | 16.6 ms | 36.6 ms | 57.6 ms |
-| [streamdown](https://github.com/vercel/streamdown) | 109 ms | 95.2 ms | 230 ms | 252 ms |
-| [incremark react](https://github.com/kingshuaishuai/incremark) | 84.0 ms | 77.5 ms | 180 ms | 352 ms |
+| [ours DOM incremental](https://github.com/copse-dev/streaming-markdown) | 14.0 ms | 9.71 ms | 18.3 ms | 425 ms |
+| [ours string→innerHTML](https://github.com/copse-dev/streaming-markdown) | 406 ms | 397 ms | 823 ms | 1580 ms |
+| [ours DOM incremental (unsafe)](https://github.com/copse-dev/streaming-markdown) | 9.49 ms | 7.53 ms | 12.8 ms | 199 ms |
+| [ours unsafe→innerHTML](https://github.com/copse-dev/streaming-markdown) | 99.5 ms | 99.8 ms | 176 ms | 219 ms |
+| [ours DOM incremental (smd parity)](https://github.com/copse-dev/streaming-markdown) | 9.44 ms | 7.45 ms | 15.6 ms | 198 ms |
+| [smd (streaming-markdown)](https://github.com/thetarnav/streaming-markdown) | 0.37 ms | 0.30 ms | 0.61 ms | 5.67 ms |
+| [ours react (StreamingMarkdown)](https://github.com/copse-dev/streaming-markdown) | 15.3 ms | 11.1 ms | 20.1 ms | 398 ms |
+| [react-markdown](https://github.com/remarkjs/react-markdown) | 97.6 ms | 105 ms | 170 ms | 250 ms |
+| [react-markdown + memo blocks](https://github.com/remarkjs/react-markdown) | 17.3 ms | 15.5 ms | 35.5 ms | 51.8 ms |
+| [streamdown](https://github.com/vercel/streamdown) | 110 ms | 94.7 ms | 229 ms | 290 ms |
+| [incremark react](https://github.com/kingshuaishuai/incremark) | 78.9 ms | 72.4 ms | 164 ms | 366 ms |
 
 ### Pipeline only: per-chunk parse/render work, no DOM (Incremark’s published methodology)
 
 | fixture | chars | updates | [ours renderMarkdownUnsafe](https://github.com/copse-dev/streaming-markdown) | [ours renderStreamingMarkdown](https://github.com/copse-dev/streaming-markdown) | [incremark core.append](https://github.com/kingshuaishuai/incremark) | [streamdown parseMarkdownIntoBlocks](https://github.com/vercel/streamdown) | [marked full re-parse](https://github.com/markedjs/marked) |
 | :-- | --: | --: | --: | --: | --: | --: | --: |
-| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 9338 | 199 | 212 ms | 2250 ms | 12.9 ms | 34.0 ms | 42.4 ms |
-| incremark/test-md.md | 18091 | 199 | 722 ms | 6657 ms | 24.8 ms | 210 ms | 185 ms |
-| README.md | 9000 | 200 | 303 ms | 1791 ms | 33.2 ms | 6.71 ms | 72.2 ms |
-| CHANGELOG.md | 14984 | 200 | 635 ms | 4783 ms | 24.9 ms | 194 ms | 169 ms |
-| docs/ARCHITECTURE.md | 49982 | 200 | 1718 ms | 12036 ms | 954 ms | 64.5 ms | 553 ms |
-| tests/fixtures/terms-of-service-streaming.md | 5220 | 194 | 248 ms | 1676 ms | 12.9 ms | 48.4 ms | 48.9 ms |
-| synthetic/code-heavy (#155) | 12285 | 199 | 25.8 ms | 847 ms | 12.8 ms | 6.99 ms | 11.0 ms |
-| synthetic/long-transcript | 118942 | 200 | 5645 ms | 67160 ms | 717 ms | 90.9 ms | 1307 ms |
-| synthetic/raw-html-details (#0004) | 12343 | 200 | 27.8 ms | 607 ms | 11.7 ms | 12.0 ms | 12.8 ms |
+| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 9338 | 199 | 203 ms | 2246 ms | 12.0 ms | 35.2 ms | 41.8 ms |
+| incremark/test-md.md | 18091 | 199 | 721 ms | 6152 ms | 25.5 ms | 202 ms | 188 ms |
+| README.md | 9000 | 200 | 296 ms | 1894 ms | 34.8 ms | 6.45 ms | 76.0 ms |
+| CHANGELOG.md | 14984 | 200 | 672 ms | 5049 ms | 26.2 ms | 187 ms | 163 ms |
+| docs/ARCHITECTURE.md | 49982 | 200 | 1651 ms | 11644 ms | 901 ms | 67.2 ms | 561 ms |
+| tests/fixtures/terms-of-service-streaming.md | 5220 | 194 | 241 ms | 1624 ms | 12.1 ms | 45.9 ms | 45.4 ms |
+| synthetic/code-heavy (#155) | 12285 | 199 | 24.0 ms | 807 ms | 20.1 ms | 7.08 ms | 11.3 ms |
+| synthetic/long-transcript | 118942 | 200 | 5499 ms | 67367 ms | 717 ms | 85.6 ms | 1208 ms |
+| synthetic/raw-html-details (#0004) | 12343 | 200 | 28.9 ms | 599 ms | 13.4 ms | 11.2 ms | 11.9 ms |
 
 ### Bundle size (esbuild, minified, browser, es2022)
 
 | library | initial (min) | initial (min+gz) | total incl. lazy (min) | total (min+gz) | notes |
 | :-- | --: | --: | --: | --: | :-- |
-| [ours (DOM + string core)](https://github.com/copse-dev/streaming-markdown) | 94.1 kB | 31.3 kB | 94.1 kB | 31.3 kB | optional peers external (native Sanitizer path) |
+| [ours (DOM + string core)](https://github.com/copse-dev/streaming-markdown) | 93.4 kB | 31.2 kB | 93.4 kB | 31.2 kB | optional peers external (native Sanitizer path) |
 | [smd (streaming-markdown)](https://github.com/thetarnav/streaming-markdown) | 14.7 kB | 4.3 kB | 14.7 kB | 4.3 kB | dependency-free |
 | [react-markdown](https://github.com/remarkjs/react-markdown) | 114.8 kB | 35.5 kB | 114.8 kB | 35.5 kB | React runtime external (peer) |
 | [streamdown](https://github.com/vercel/streamdown) | 488.3 kB | 145.4 kB | 488.3 kB | 145.4 kB | React runtime external (peer); lazy chunks = mermaid etc. |
@@ -242,14 +244,14 @@ _Real-browser tier: Chromium via playwright-core, layout forced per update (`off
 
 | fixture | chars | updates | ours DOM incremental | ours DOM incremental (unsafe) | ours DOM incremental (smd parity) | smd (streaming-markdown) |
 | :-- | --: | --: | --: | --: | --: | --: |
-| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 9338 | 199 | 110 ms (p95 1.20) | 57.4 ms (p95 0.70) | 56.6 ms (p95 0.70) | 28.0 ms (p95 0.30) |
-| incremark/test-md.md | 18091 | 199 | 182 ms (p95 2.10) | 118 ms (p95 1.30) | 110 ms (p95 1.20) | 38.9 ms (p95 0.40) |
-| README.md | 9000 | 200 | 131 ms (p95 1.40) | 78.2 ms (p95 0.80) | 78.8 ms (p95 0.80) | 15.7 ms (p95 0.20) |
-| CHANGELOG.md | 14984 | 200 | 167 ms (p95 1.30) | 97.3 ms (p95 0.70) | 95.5 ms (p95 0.80) | 33.6 ms (p95 0.30) |
-| docs/ARCHITECTURE.md | 49982 | 200 | 458 ms (p95 4.30) | 307 ms (p95 3.10) | 297 ms (p95 3.10) | 40.9 ms (p95 0.40) |
-| tests/fixtures/terms-of-service-streaming.md | 5220 | 194 | 82.5 ms (p95 0.80) | 45.1 ms (p95 0.50) | 44.7 ms (p95 0.40) | 11.7 ms (p95 0.20) |
-| synthetic/code-heavy (#155) | 12285 | 199 | 93.7 ms (p95 0.80) | 69.3 ms (p95 0.60) | 66.0 ms (p95 0.60) | 29.8 ms (p95 0.40) |
-| synthetic/long-transcript | 118942 | 200 | 586 ms (p95 4.50) | 423 ms (p95 2.90) | 427 ms (p95 3.20) | 130 ms (p95 1.00) |
-| synthetic/raw-html-details (#0004) | 12343 | 200 | 9.20 ms (p95 0.10) | 5.50 ms (p95 0.10) | 75.6 ms (p95 0.70) | 25.0 ms (p95 0.30) |
+| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 9338 | 199 | 109 ms (p95 1.30) | 57.5 ms (p95 0.70) | 57.8 ms (p95 0.70) | 22.2 ms (p95 0.20) |
+| incremark/test-md.md | 18091 | 199 | 180 ms (p95 2.00) | 111 ms (p95 1.30) | 103 ms (p95 1.20) | 43.1 ms (p95 0.50) |
+| README.md | 9000 | 200 | 122 ms (p95 1.20) | 72.2 ms (p95 0.80) | 71.0 ms (p95 0.80) | 16.2 ms (p95 0.20) |
+| CHANGELOG.md | 14984 | 200 | 166 ms (p95 1.40) | 91.1 ms (p95 0.70) | 94.6 ms (p95 0.80) | 22.6 ms (p95 0.20) |
+| docs/ARCHITECTURE.md | 49982 | 200 | 406 ms (p95 4.10) | 288 ms (p95 3.00) | 303 ms (p95 3.00) | 38.4 ms (p95 0.30) |
+| tests/fixtures/terms-of-service-streaming.md | 5220 | 194 | 82.8 ms (p95 0.80) | 45.5 ms (p95 0.50) | 45.3 ms (p95 0.50) | 11.8 ms (p95 0.20) |
+| synthetic/code-heavy (#155) | 12285 | 199 | 91.0 ms (p95 0.70) | 65.6 ms (p95 0.60) | 67.1 ms (p95 0.60) | 24.2 ms (p95 0.30) |
+| synthetic/long-transcript | 118942 | 200 | 531 ms (p95 4.10) | 415 ms (p95 3.10) | 413 ms (p95 3.10) | 115 ms (p95 0.80) |
+| synthetic/raw-html-details (#0004) | 12343 | 200 | 7.40 ms (p95 0.10) | 4.90 ms (p95 0.10) | 65.9 ms (p95 0.60) | 23.2 ms (p95 0.30) |
 
 <!-- bench-browser-results:end -->

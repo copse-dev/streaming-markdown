@@ -311,12 +311,15 @@ function hasUnbalancedRawHtml(html: string): boolean {
  * Whether freezing `html` as a per-fragment delta would diverge from the
  * whole-string render, so the commit must fall back to a full morph. Escape mode
  * only ever passes the benign inline allowlist through, so its (byte-identical,
- * cheaper) check is retained; passthrough must guard every raw tag.
+ * cheaper) check is retained; passthrough must guard every raw tag. Under
+ * `'escape-all'` no raw tag can survive except the void `<br>` (and the
+ * renderer's own tags, balanced within complete blocks), so nothing is ever
+ * unfreezable — the whole balance apparatus is skipped.
  */
 function hasUnfreezableRawHtml(html: string): boolean {
-  return getHtmlPolicy() === 'passthrough'
-    ? hasUnbalancedRawHtml(html)
-    : hasUnbalancedBenignRawInline(html)
+  const policy = getHtmlPolicy()
+  if (policy === 'escape-all') return false
+  return policy === 'passthrough' ? hasUnbalancedRawHtml(html) : hasUnbalancedBenignRawInline(html)
 }
 
 // Container elements a re-rooted commit may append into (ADR 0004 Phase 2):

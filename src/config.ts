@@ -48,7 +48,10 @@ import type { DiagramRenderer } from './mermaid.ts'
 export interface MarkdownConfig {
   /**
    * Raw-HTML handling (#600). `'passthrough'` (the default) emits well-formed tags
-   * for the sink sanitizer to arbitrate; `'escape'` literalizes them. See html-policy.ts.
+   * for the sink sanitizer to arbitrate; `'escape'` literalizes them except the
+   * benign attribute-less inline set; `'escape-all'` literalizes everything but
+   * `<br>` — no raw element can form, which also retires the streaming path's
+   * tag-balance guards and their fallback cliffs. See html-policy.ts.
    */
   htmlPolicy?: HtmlPolicy
   /**

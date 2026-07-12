@@ -333,7 +333,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
       const { host, teardown } = domHost()
       const renderer = new ours.StreamingMarkdownRenderer(host, {
         sanitizerBackend: passthroughSanitizerBackend,
-        htmlPolicy: 'escape',
+        htmlPolicy: 'escape-all',
         emailAutolinks: false,
         footnotes: false,
         linkReferences: false,
