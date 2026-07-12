@@ -5,6 +5,60 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-12
+
+### ⚠ BREAKING CHANGES
+
+- evict workspace/host residue from the neutral core (#146) (#190) (`cf8f130`)
+- config-injected renderer API — replace per-slot setters with MarkdownConfig + setDefaultConfig (#186) (`2b64851`)
+
+### Features
+
+- side-by-side streaming playground with failure cases (#158) (#189) (`f60dda6`)
+- first-party React wrapper (/react export) (#156) (#191) (`1d11d36`)
+
+### Bug Fixes
+
+- snapshot config at construction (#153) (#187) (`efd7d3a`)
+- route angle autolinks through the scheme allowlist (#139) (#169) (`64f5ad5`)
+- brand renderStreamingMarkdown's return as SanitizedHtml (#140) (#171) (`be999ef`)
+- decode hex non-breaking space `&#xa0;` in the streaming pending tail (#143) (#163) (`f5a4229`)
+- restore the prior footnote context after a nested render (#144) (#170) (`9f2bdcb`)
+- hold the pending tail in the DOM emitter for an open <details> (#138) (#166) (`def43f4`)
+
+### Performance
+
+- compute renderAnchor's isWorkspace lazily (#146) (#181) (`af947b7`)
+- restore ~O(n) streaming via an append-only fast path (#133) (#162) (`41e5195`)
+
+### Documentation
+
+- mark the experimental main-entry surface before v1 (#147) (#188) (`24acca0`)
+- add a React integration guide (#156) (#182) (`1c8348f`)
+- add a security model + threat model page (#159) (#167) (`082d92f`)
+- correct stale GFM extended-autolink conformance figure (11/11, #149) (#164) (`721e993`)
+- mark the over-exposed main-entry internals @experimental (#147) (#180) (`ecb5b30`)
+- document the SanitizerBackend serialization contract (#148) (#165) (`700cca2`)
+
+### Tests
+
+- mid-stream string/DOM emitter parity fuzz (#150) (#178) (`60e7082`)
+- extension-API reentrancy — recursive renderMarkdownUnsafe (#151) (#176) (`41f2849`)
+- pin a second baseline under the shipping passthrough default (#141) (#172) (`3ee0d14`)
+- entity-decode matrix over the streaming pending path (#152) (#175) (`ed6d01b`)
+- adversarial-input hardening suite (deep nesting, floods, wide tables) (#142) (#168) (`5f02cc6`)
+
+### Other Changes
+
+- Add cross-library streaming benchmark harness (#157) (#185) (`4b94e71`)
+- bench: adopt a real-document corpus for the relative growth guard (#154) (#179) (`6fd5181`)
+- demo: add an "Edge cases" preset with the canonical streaming failure shapes (#158) (#183) (`c8ef998`)
+- bench: add a code-block-heavy streaming case + re-highlight scaling guard (#155) (#173) (`fba3f72`)
+- Config model (#137): ADR 0003 + per-render overrides for the security-policy tier (#161) (`010c574`)
+- v1 review: restore coverage (#132), remove dead branches, fix block-nesting DoS (#136) (#160) (`fa78392`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v0.10.0...v0.11.0
+
 ## [0.10.0] - 2026-07-10
 
 ### ⚠ BREAKING CHANGES
