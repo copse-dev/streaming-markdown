@@ -1,5 +1,6 @@
 import { parseOpenFenceContent } from './block-patterns.ts'
 import { FORMING_FENCE_PRE_CLASS, getFenceHandler } from './fence-handlers.ts'
+import { firstDirectChild } from './dom-scan.ts'
 import { fenceCodeClass, highlightFenceCode } from './highlight.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { setSanitizedHtml } from './html-sink.ts'
@@ -44,13 +45,7 @@ export function syncFormingFenceDom(container: HTMLElement, source: string): voi
   // The forming <pre> is only ever created as a direct child (below), and its
   // <code> as the <pre>'s first child — direct scans, no selector engine (the
   // fence path runs per update while a code block streams).
-  let pre: HTMLPreElement | null = null
-  for (let el = container.firstElementChild; el; el = el.nextElementSibling) {
-    if (el.tagName === 'PRE' && el.classList.contains(FORMING_FENCE_PRE_CLASS)) {
-      pre = el as HTMLPreElement
-      break
-    }
-  }
+  let pre = firstDirectChild(container, 'PRE', FORMING_FENCE_PRE_CLASS) as HTMLPreElement | null
   if (!pre) {
     container.replaceChildren()
     pre = document.createElement('pre')

@@ -20,6 +20,7 @@ import {
 } from './render-pending-line.ts'
 import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from './streaming-split.ts'
 import { IncrementalSourceScanner } from './incremental-scan.ts'
+import { findDescendantByClass, firstDirectChild, lastDirectChild } from './dom-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
 import { type MarkdownConfig, withConfig } from './config.ts'
@@ -71,24 +72,6 @@ const TRAILING_OPEN_LI_CLOSE_RE = /(<li(?:\s[^>]*)?>)([\s\S]*?)(<\/li>\s*<\/(?:u
 // an O(prefix)-per-frame DOM scan into O(tail) — the dominant residual cost of a
 // long stream once the committed prefix is frozen (#21 follow-up). jsdom's
 // `:scope >`/descendant selectors still walk the full subtree, so this matters.
-
-/** First direct child carrying `cls` — `:scope > .cls` without the selector engine. */
-function directChildByClass(host: Element, cls: string): Element | null {
-  for (let el = host.firstElementChild; el; el = el.nextElementSibling) {
-    if (el.classList.contains(cls)) return el
-  }
-  return null
-}
-
-/** First descendant carrying `cls` (optionally tag-restricted), document-order DFS — no selector engine. */
-function findDescendantByClass(root: Element, cls: string, tagName?: string): Element | null {
-  for (let el = root.firstElementChild; el; el = el.nextElementSibling) {
-    if ((tagName === undefined || el.tagName === tagName) && el.classList.contains(cls)) return el
-    const nested = findDescendantByClass(el, cls, tagName)
-    if (nested) return nested
-  }
-  return null
-}
 
 /** A pending descendant (continuation span, pending `<li>`) inside the trailing element. */
 function tailPendingDescendant(completedEl: HTMLElement, cls: string, tagName?: string): Element | null {
@@ -268,13 +251,7 @@ function syncListPendingDom(
     const hostLi = findOpenListItemHost(completedEl)
     if (hostLi) {
       // `:scope > ul:last-of-type` as a direct backwards child scan.
-      let existingNested: Element | null = null
-      for (let el = hostLi.lastElementChild; el; el = el.previousElementSibling) {
-        if (el.tagName === listTag.toUpperCase()) {
-          existingNested = el
-          break
-        }
-      }
+      const existingNested = lastDirectChild(hostLi, listTag.toUpperCase(), null)
       if (existingNested instanceof HTMLElement) {
         list = existingNested
       } else {
@@ -471,7 +448,7 @@ function syncParagraphContinuationDom(
   const host = findTrailingParagraphHost(completedEl)
   if (!host) return false
 
-  const existing = directChildByClass(host, PARAGRAPH_CONTINUATION_CLASS)
+  const existing = firstDirectChild(host, null, PARAGRAPH_CONTINUATION_CLASS)
   /* c8 ignore start -- unreachable defensive guard: `active` is always `true`
      here and `pendingInner` is non-empty whenever this path runs (see the note
      in syncListPendingDom). */
@@ -501,7 +478,7 @@ function syncListContinuationDom(
   const li = findOpenListItemHost(completedEl)
   if (!li) return false
 
-  const existing = directChildByClass(li, LIST_CONTINUATION_CLASS)
+  const existing = firstDirectChild(li, null, LIST_CONTINUATION_CLASS)
   /* c8 ignore start -- unreachable defensive guard: `active` is always `true`
      here and `pendingInner` is non-empty whenever this path runs (see the note
      in syncListPendingDom). */

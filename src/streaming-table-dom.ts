@@ -1,3 +1,4 @@
+import { firstDirectChild, lastDirectChild } from './dom-scan.ts'
 import { splitTableRow, TABLE_SEP_RE } from './block-tokenizer.ts'
 import { dropTrailingNewline } from './block-patterns.ts'
 import { escapeHtml } from './escape.ts'
@@ -59,13 +60,7 @@ export function syncFormingTableDom(container: HTMLElement, source: string): voi
 
   // The forming table is only ever created as a direct child — direct scan,
   // no selector engine (this path runs per update while a table streams).
-  let existing: Element | null = null
-  for (let el = container.firstElementChild; el; el = el.nextElementSibling) {
-    if (el.tagName === 'TABLE' && el.classList.contains(FORMING_TABLE_CLASS)) {
-      existing = el
-      break
-    }
-  }
+  const existing = firstDirectChild(container, 'TABLE', FORMING_TABLE_CLASS)
   let table: HTMLTableElement
   if (existing instanceof Element && existing.tagName === 'TABLE') {
     table = existing as HTMLTableElement
@@ -145,11 +140,8 @@ export function clearFormingTableDom(container: HTMLElement): void {
  */
 function findPendingRow(table: HTMLTableElement): HTMLTableRowElement | null {
   for (const tbody of table.tBodies) {
-    for (let el = tbody.lastElementChild; el; el = el.previousElementSibling) {
-      if (el.tagName === 'TR' && el.classList.contains(PENDING_ROW_CLASS)) {
-        return el as HTMLTableRowElement
-      }
-    }
+    const row = lastDirectChild(tbody, 'TR', PENDING_ROW_CLASS)
+    if (row) return row as HTMLTableRowElement
   }
   return null
 }
