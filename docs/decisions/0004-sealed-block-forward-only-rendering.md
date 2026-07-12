@@ -112,6 +112,98 @@ unfreezable — turning today's permanent O(n²) fallback into ordinary O(tail)
 appends under a shifted root. Until then, the fallback cost is the single
 biggest real-world hazard this plan removes.
 
+### The direct-DOM floor (measured)
+
+The last theoretical parity item vs smd is a **direct-DOM block builder**:
+constructing committed block nodes with `createElement`/`createTextNode` the
+way smd does, instead of the current committed pipeline (render block → HTML
+string → sanitize → `innerHTML` parse into a morph template → diff). Whether
+that is worth an emitter fork is an empirical question — what fraction of the
+remaining per-update parity-config cost is the HTML-string **parse**, versus
+the string **render**, versus the **diff**? Measured (2026-07-12, same
+machine/day for all rows): temporary stage counters at the pipeline seams
+(`renderBlocksToParts`/`renderListItemsSlice`, `sanitizeRenderedMarkdown`,
+`setPresanitizedHtml` split into detached-template vs live-element
+assignments, `morphChildren`, `IncrementalSourceScanner.tokenize`,
+`renderPendingLine`, and whole-`update()`), replaying the published
+methodology — long transcript (118.9 kB), 200 updates, smd-parity config —
+mean of 5 runs after warmup, probe overhead ≤ 6% of p50. Baselines that day:
+parity p50 3.38 ms jsdom / 1.80 ms Chromium, smd 0.31 / 0.70.
+
+Stage attribution, share of total `update()` JS time per run (200 updates, of
+which 182 commit; "parse committed" is the `innerHTML` parse of the sanitized
+delta+tail morph templates — ~476 kB re-parsed per run; "parse pending" is the
+live pending-element `innerHTML` writes):
+
+| stage | jsdom (of 1160 ms/run) | Chromium (of 337 ms/run, layout forced) |
+| :-- | --: | --: |
+| string render (`renderBlocks*`) | 203 ms — 17.5% | 151 ms — **45.0%** |
+| parse committed (`innerHTML` templates) | 431 ms — **37.2%** | 27.7 ms — **8.2%** |
+| diff (`morphChildren`) | 218 ms — 18.8% | 32.4 ms — 9.6% |
+| tokenize (incremental scan ×2) | 57 ms — 4.9% | 54.9 ms — 16.3% |
+| pending-line render + pending `innerHTML` | 57 ms — 5.0% | 10.8 ms — 3.2% |
+| sanitize (passthrough) | 1.9 ms — 0.2% | 0.9 ms — 0.3% |
+| other (split, table/pending DOM sync, …) | 192 ms — 16.5% | 58.6 ms — 17.4% |
+
+And the parse-vs-build microbench, replaying the run's **actual captured
+template strings** (280 strings, 476 kB per run): (a) `innerHTML` parse as
+today; (b) direct build — `createElement`/`createTextNode`/`setAttribute`
+walking a precomputed spec of the identical tree (a *lower bound* on a real
+direct emitter, which would also pay the inline logic currently inside
+"string render"); (c) hybrid shell build — `createElement` the block shells,
+`innerHTML` only each block's inline content:
+
+| per run | jsdom | Chromium |
+| :-- | --: | --: |
+| (a) `innerHTML` parse (current) | 351 ms | 16.3 ms |
+| (b) direct build (identical tree) | 79 ms (4.5× cheaper) | 13.3 ms (1.2× cheaper) |
+| (c) shell build + inline `innerHTML` | 367 ms (**slower**) | 22.2 ms (**36% slower**) |
+
+Conclusions, in decision order:
+
+- **The floor is not where jsdom said it was.** jsdom's JS HTML parser makes
+  parse-committed the biggest stage (37%) and direct building look 4.5×
+  cheaper — a projected ~29% parity win if one only ever benchmarks jsdom.
+  In Chromium the same strings parse ~15× faster: the parse is **8.2%** of
+  per-update JS, and hand-building the identical tree saves only ~18% *of
+  that* — a net ≈ **1.5% projected win** for a full direct-DOM builder, ≈ 12%
+  even if both parse and diff dropped to zero (which requires the sealed-event
+  emitter below anyway, not a parse swap). Both are far under any bar that
+  would justify the risk.
+- **The hybrid (block shells direct, inline via `innerHTML`) is a strict
+  loss** in both engines: block shells are a trivial fraction of the parse —
+  inline content dominates — and many small `innerHTML` writes cost more than
+  one big one.
+- **What actually remains is our own work, not the parser's**: string render
+  45% + tokenize 16% + other 17% of Chromium per-update time is the
+  re-derive-the-tail-each-commit architecture. That is exactly what sealed
+  events (Phases 1–2) attack, and nothing a DOM builder helps with.
+- **Even inside a future sealed-event emitter, direct building buys almost
+  nothing over render-once + parse-once**: at Chromium parse throughput the
+  once-per-block string parse is within ~20% of a hand-built tree, for zero
+  new correctness surface.
+
+The correctness surface a direct builder would have had to carry (and now
+does not need to): the committed contract is byte-equality with
+`sanitizeRenderedMarkdown(renderMarkdownUnsafe(complete))`, so a builder must
+reproduce the HTML **parser's** tree exactly — text-node boundaries (the `'\n'`
+seams stay separate text nodes only because top-level parts end in elements;
+the single-parse range morph relies on this), entity decoding byte-for-byte
+(numeric, named, legacy-without-semicolon), attribute order
+(`attributesEqual` is order-sensitive), and the parser-context quirks the
+freeze guards currently *ask the parser about* (`openElementChainAtEof`
+probes foster-parenting, formatting-element reconstruction, CDATA
+swallowing — a builder cannot probe a parser it bypasses). The sanitized
+default is string-in (DOMPurify / native Sanitizer), so direct building could
+only ever serve passthrough/escape-all configs — a config-gated second
+emitter, against a tight bundle budget, for a measured ~1.5%.
+
+**Decision: do not build a direct-DOM block builder — in either the current
+pipeline or the Phase 2 emitter.** The committed-path floor on real engines
+is set by the string render and tokenize stages; keep funding sealed-block
+events (tail latency and cliff removal, per the Phase 0 verdict) and re-run
+this attribution if the render/tokenize shares ever stop dominating.
+
 ## Plan: sealed-block events
 
 Make the tokenizer emit **sealed-block events** — "this block can never change
