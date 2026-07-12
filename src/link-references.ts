@@ -1,5 +1,20 @@
 import { decodeHtmlEntities } from './entity-decoder.ts'
 import { canonicalizeEscapedPunctuation } from './backslash-escapes.ts'
+import { activeConfig } from './config.ts'
+
+/**
+ * Whether link reference definitions are active for the current render (default
+ * on). Off, `[label]: /url` lines are ordinary paragraphs and reference-style
+ * links stay literal; inline `[text](url)` links are unaffected.
+ *
+ * @experimental Introspection getter that reads the ambient render config; outside
+ * a render it returns the defaults. Not part of the stable v1 surface (#147) —
+ * scope behaviour via `MarkdownConfig.linkReferences` instead. May move behind a
+ * subpath or be removed in a minor release.
+ */
+export function isLinkReferencesEnabled(): boolean {
+  return activeConfig().linkReferences !== false
+}
 
 /** Parsed link reference definition from block-level `[label]: destination`. */
 export interface LinkReference {

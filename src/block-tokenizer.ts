@@ -3,6 +3,7 @@
  * each block is complete, open (unfinished), or ambiguous (needs more input).
  */
 import {
+  isLinkReferencesEnabled,
   isValidReferenceLabel,
   parseBracketedLabel,
   parseLinkReferenceDefinitionAt,
@@ -25,7 +26,8 @@ import {
   mathBlockOpenCandidate,
 } from './math-block.ts'
 import {
-  FOOTNOTE_DEF_LINE_RE,
+  isFootnoteDefLine,
+  isFootnotesEnabled,
   normalizeFootnoteLabel,
   parseFootnoteDefSlice,
   type FootnoteDefinition,
@@ -300,7 +302,7 @@ function pushBlock(
  */
 function tryFootnoteDefBlock(lines: ScannedLine[], i: number): number | null {
   const startLine = lines[i]
-  if (!startLine || !FOOTNOTE_DEF_LINE_RE.test(startLine.text)) return null
+  if (!startLine || !isFootnoteDefLine(startLine.text)) return null
   let j = i + 1
   while (j < lines.length) {
     const next = lines[j]
@@ -322,7 +324,7 @@ function tryFootnoteDefBlock(lines: ScannedLine[], i: number): number | null {
       continue
     }
     if (
-      FOOTNOTE_DEF_LINE_RE.test(next.text) ||
+      isFootnoteDefLine(next.text) ||
       ATX_HEADING_RE.test(next.text) ||
       LIST_ITEM_RE.test(next.text) ||
       BLOCKQUOTE_RE.test(next.text) ||
@@ -339,10 +341,13 @@ function tryFootnoteDefBlock(lines: ScannedLine[], i: number): number | null {
 }
 
 function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
+  if (!isLinkReferencesEnabled()) return null
   const startLine = lines[i]
   if (!startLine || !/^ {0,3}\[/.test(startLine.text)) return null
-  // `[^label]:` is a footnote definition (#72), never a link reference.
-  if (FOOTNOTE_DEF_LINE_RE.test(startLine.text)) return null
+  // `[^label]:` is a footnote definition (#72), never a link reference —
+  // unless footnotes are disabled, in which case CommonMark makes `[^label]`
+  // an ordinary reference label and the line may be a plain definition.
+  if (isFootnoteDefLine(startLine.text)) return null
   // A definition cannot span a blank line and its continuation lines cannot be
   // block starts, so gather the contiguous run those rules allow.
   let buf = ''
@@ -379,7 +384,7 @@ function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
     }
     if (indent > 3 || buf[k] !== '[') break
     // A footnote definition (#72) ends the run of link reference definitions.
-    if (buf[k + 1] === '^' && FOOTNOTE_DEF_LINE_RE.test(buf.slice(offset))) break
+    if (buf[k + 1] === '^' && isFootnoteDefLine(buf.slice(offset))) break
     const def = parseLinkReferenceDefinitionAt(buf, k)
     if (!def || !isValidReferenceLabel(def.label)) break
     const segment = buf.slice(offset, def.end)
@@ -457,9 +462,13 @@ function endsInOpenParagraphNested(fragment: string, last: BlockToken): boolean 
  * `[link](url) …` paragraph line has no `]:`, so it is not needlessly excluded.
  */
 function startsLinkRefDef(s: string): boolean {
+  if (!isLinkReferencesEnabled()) return false
   let i = 0
   while (i < 3 && s[i] === ' ') i++
-  if (s[i] !== '[' || s[i + 1] === '^') return false // `[^…]` is a footnote def
+  if (s[i] !== '[') return false
+  // `[^…]` is a footnote def — but with footnotes disabled, `^label` is an
+  // ordinary reference label and the line may be a plain definition.
+  if (s[i + 1] === '^' && isFootnotesEnabled()) return false
   const label = parseBracketedLabel(s, i)
   if (!label || label.label.trim() === '') return false
   return s[label.end] === ':'
@@ -480,7 +489,7 @@ function keepsFlatParagraphOpen(s: string): boolean {
     BLOCKQUOTE_RE.test(s) ||
     fenceMarker(s) !== null ||
     isMathBlockInterruptLine(s) ||
-    FOOTNOTE_DEF_LINE_RE.test(s) ||
+    isFootnoteDefLine(s) ||
     startsLinkRefDef(s) ||
     isTableRow(s)
   )
@@ -515,7 +524,7 @@ function breaksUnorderedListItem(lines: ScannedLine[], itemStart: number, j: num
     fenceMarker(next.text) ||
     isMathBlockInterruptLine(next.text) ||
     BLOCKQUOTE_RE.test(next.text) ||
-    FOOTNOTE_DEF_LINE_RE.test(next.text) ||
+    isFootnoteDefLine(next.text) ||
     tryLinkRefDefBlock(lines, j) !== null ||
     (isTableRow(next.text, lines[j + 1]?.text) &&
           lines[j + 1] &&
@@ -706,7 +715,7 @@ export function tokenizeBlocks(source: string): BlockToken[] {
             fenceMarker(next.text) ||
             isMathBlockInterruptLine(next.text) ||
             BLOCKQUOTE_RE.test(next.text) ||
-            FOOTNOTE_DEF_LINE_RE.test(next.text) ||
+            isFootnoteDefLine(next.text) ||
             tryLinkRefDefBlock(lines, j) !== null ||
             (isTableRow(next.text, lines[j + 1]?.text) &&
           lines[j + 1] &&
@@ -889,7 +898,7 @@ export function tokenizeBlocks(source: string): BlockToken[] {
         // (spec 213) — a `[label]: dest` line here is a lazy continuation.
         // A FOOTNOTE definition can (cmark-gfm parses it as a container
         // start), so `text[^1]\n[^1]: note` resolves without a blank line.
-        FOOTNOTE_DEF_LINE_RE.test(next.text) ||
+        isFootnoteDefLine(next.text) ||
         (isTableRow(next.text, lines[j + 1]?.text) &&
           lines[j + 1] &&
           TABLE_SEP_RE.test(lines[j + 1]?.text ?? ''))
@@ -923,8 +932,9 @@ export function collectLinkReferenceDefinitions(
   source: string,
   tokens?: BlockToken[],
 ): LinkReferenceMap {
-  const blocks = tokens ?? tokenizeBlocks(source)
   const refs = new Map<string, LinkReference>()
+  if (!isLinkReferencesEnabled()) return refs
+  const blocks = tokens ?? tokenizeBlocks(source)
   const merge = (found: LinkReferenceMap): void => {
     for (const [key, ref] of found) {
       if (!refs.has(key)) refs.set(key, ref)
@@ -956,8 +966,9 @@ export function collectFootnoteDefinitions(
   source: string,
   tokens?: BlockToken[],
 ): FootnoteDefinitionMap {
-  const blocks = tokens ?? tokenizeBlocks(source)
   const defs = new Map<string, FootnoteDefinition>()
+  if (!isFootnotesEnabled()) return defs
+  const blocks = tokens ?? tokenizeBlocks(source)
   for (const token of blocks) {
     if (token.kind !== 'footnote_def') continue
     const def = parseFootnoteDefSlice(source.slice(token.start, token.end))
