@@ -181,9 +181,24 @@ interface Contestant {
   name: string
   tier: 'pipeline' | 'dom'
   version: string
+  /** GitHub project URL — rendered as the library's link in every published table. */
+  repo: string
   note?: string
   setup: () => RunHandle
 }
+
+// GitHub project links for every library that appears in a published table.
+const REPO = {
+  ours: 'https://github.com/copse-dev/streaming-markdown',
+  smd: 'https://github.com/thetarnav/streaming-markdown',
+  reactMarkdown: 'https://github.com/remarkjs/react-markdown',
+  streamdown: 'https://github.com/vercel/streamdown',
+  incremark: 'https://github.com/kingshuaishuai/incremark',
+  marked: 'https://github.com/markedjs/marked',
+} as const
+
+/** Markdown link for a contestant/bundle name — how every table cell renders it. */
+const linked = (name: string, repo: string): string => `[${name}](${repo})`
 
 function pkgVersion(pkg: string): string {
   try {
@@ -211,6 +226,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
   // --- pipeline tier -------------------------------------------------------
   contestants.push({
     name: 'ours renderMarkdownUnsafe',
+    repo: REPO.ours,
     tier: 'pipeline',
     version: ourVersion,
     note: 'full re-render per chunk → unsanitized HTML string',
@@ -218,6 +234,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
   })
   contestants.push({
     name: 'ours renderStreamingMarkdown',
+    repo: REPO.ours,
     tier: 'pipeline',
     version: ourVersion,
     note: 'full re-render per chunk → SANITIZED HTML string (does strictly more work than any parse-only competitor)',
@@ -228,6 +245,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
     const { createIncremarkParser } = await import('@incremark/core')
     contestants.push({
       name: 'incremark core.append',
+      repo: REPO.incremark,
       tier: 'pipeline',
       version: pkgVersion('@incremark/core'),
       note: 'incremental parse → mdast blocks (no HTML/DOM output)',
@@ -247,6 +265,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
     const { parseMarkdownIntoBlocks } = await import('streamdown')
     contestants.push({
       name: 'streamdown parseMarkdownIntoBlocks',
+      repo: REPO.streamdown,
       tier: 'pipeline',
       version: pkgVersion('streamdown'),
       note: 'block split of the accumulated text (marked lexer; no render)',
@@ -260,6 +279,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
     const { Marked } = await import('marked')
     contestants.push({
       name: 'marked full re-parse',
+      repo: REPO.marked,
       tier: 'pipeline',
       version: pkgVersion('marked'),
       note: 'accumulated text → HTML string per chunk (the ant-design-x pattern in Incremark’s benchmark)',
@@ -282,6 +302,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
 
   contestants.push({
     name: 'ours DOM incremental',
+    repo: REPO.ours,
     tier: 'dom',
     version: ourVersion,
     note: 'StreamingMarkdownRenderer.update — incremental, sanitized',
@@ -293,6 +314,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
   })
   contestants.push({
     name: 'ours string→innerHTML',
+    repo: REPO.ours,
     tier: 'dom',
     version: ourVersion,
     note: 'full sanitized re-render + innerHTML swap per chunk',
@@ -315,6 +337,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
   const { passthroughSanitizerBackend } = await import('./dom-setup.ts')
   contestants.push({
     name: 'ours DOM incremental (unsafe)',
+    repo: REPO.ours,
     tier: 'dom',
     version: ourVersion,
     note: 'StreamingMarkdownRenderer.update with sanitization disabled (passthrough backend) — the smd-comparable config',
@@ -328,6 +351,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
   })
   contestants.push({
     name: 'ours unsafe→innerHTML',
+    repo: REPO.ours,
     tier: 'dom',
     version: ourVersion,
     note: 'renderMarkdownUnsafe full re-render + innerHTML swap per chunk (no sanitizer)',
@@ -342,10 +366,38 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
     },
   })
 
+  // Like-for-like feature parity with smd: beyond the unsafe variant's
+  // sanitizer-off configuration, every grammar feature smd does not support is
+  // disabled too — footnotes and link reference definitions (the two per-update
+  // definition scans), email autolinks, and raw HTML passthrough (escaped to
+  // literal text, smd's behaviour). What stays enabled matches smd's own README
+  // checklist: tables, task lists, strikethrough, bare http(s) autolinks. The
+  // residual gap to smd in this row is architectural (re-tokenize + tail morph
+  // vs. append-only) — see docs/decisions/0004.
+  contestants.push({
+    name: 'ours DOM incremental (smd parity)',
+    repo: REPO.ours,
+    tier: 'dom',
+    version: ourVersion,
+    note: 'unsafe config + footnotes/link-refs/email-autolinks disabled, raw HTML escaped — like-for-like feature set with smd',
+    setup: () => {
+      const { host, teardown } = domHost()
+      const renderer = new ours.StreamingMarkdownRenderer(host, {
+        sanitizerBackend: passthroughSanitizerBackend,
+        htmlPolicy: 'escape',
+        emailAutolinks: false,
+        footnotes: false,
+        linkReferences: false,
+      })
+      return { feed: (_c, acc) => renderer.update(acc), teardown }
+    },
+  })
+
   try {
     const smd = await import('streaming-markdown')
     contestants.push({
       name: 'smd (streaming-markdown)',
+      repo: REPO.smd,
       tier: 'dom',
       version: pkgVersion('streaming-markdown'),
       note: 'incremental DOM writer; no sanitizer',
@@ -456,6 +508,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
       const { StreamingMarkdown } = await import('../../src/react.tsx')
       contestants.push({
         name: 'ours react (StreamingMarkdown)',
+        repo: REPO.ours,
         tier: 'dom',
         version: ourVersion,
         note: 'our /react wrapper: <StreamingMarkdown> drives StreamingMarkdownRenderer.update() — incremental, sanitized',
@@ -473,6 +526,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
       const Markdown = (await import('react-markdown')).default
       contestants.push({
         name: 'react-markdown',
+        repo: REPO.reactMarkdown,
         tier: 'dom',
         version: pkgVersion('react-markdown'),
         note: 'naive: whole document re-rendered per chunk',
@@ -494,6 +548,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
       }
       contestants.push({
         name: 'react-markdown + memo blocks',
+        repo: REPO.reactMarkdown,
         tier: 'dom',
         version: pkgVersion('react-markdown'),
         note: 'marked.lexer block split + per-block memo',
@@ -507,6 +562,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
       const { Streamdown } = await import('streamdown')
       contestants.push({
         name: 'streamdown',
+        repo: REPO.streamdown,
         tier: 'dom',
         version: pkgVersion('streamdown'),
         note: 'defaults (internal block memo, hardening, incomplete-markdown repair)',
@@ -521,6 +577,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
       const { createIncremarkParser } = await import('@incremark/core')
       contestants.push({
         name: 'incremark react',
+        repo: REPO.incremark,
         tier: 'dom',
         version: pkgVersion('@incremark/react'),
         note: 'core parser.append per chunk + <Incremark blocks> renderer',
@@ -633,6 +690,7 @@ function measure(contestant: Contestant, chunks: string[], totalChars: number): 
 
 interface BundleResult {
   name: string
+  repo: string
   entryMinBytes: number
   entryGzBytes: number
   totalMinBytes: number
@@ -652,39 +710,45 @@ async function measureBundles(): Promise<{ bundles: BundleResult[]; skipped: str
   }
 
   const REACT_EXTERNALS = ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/client']
-  const entries: { name: string; contents: string; external: string[]; note: string }[] = [
+  const entries: { name: string; repo: string; contents: string; external: string[]; note: string }[] = [
     {
       name: 'ours (DOM + string core)',
+      repo: REPO.ours,
       contents: "export { StreamingMarkdownRenderer, renderStreamingMarkdown } from '../../src/index.ts'",
       external: ['dompurify', 'entities', 'highlight.js', 'shiki', 'katex', 'mermaid'],
       note: 'optional peers external (native Sanitizer path)',
     },
     {
       name: 'smd (streaming-markdown)',
+      repo: REPO.smd,
       contents: "export * from 'streaming-markdown'",
       external: [],
       note: 'dependency-free',
     },
     {
       name: 'react-markdown',
+      repo: REPO.reactMarkdown,
       contents: "export { default } from 'react-markdown'",
       external: REACT_EXTERNALS,
       note: 'React runtime external (peer)',
     },
     {
       name: 'streamdown',
+      repo: REPO.streamdown,
       contents: "export { Streamdown } from 'streamdown'",
       external: REACT_EXTERNALS,
       note: 'React runtime external (peer); lazy chunks = mermaid etc.',
     },
     {
       name: 'incremark (@incremark/core)',
+      repo: REPO.incremark,
       contents: "export { createIncremarkParser } from '@incremark/core'",
       external: [],
       note: 'parser only — no renderer',
     },
     {
       name: 'incremark (@incremark/react)',
+      repo: REPO.incremark,
       contents: "export { Incremark, useIncremark } from '@incremark/react'",
       external: [...REACT_EXTERNALS, 'katex', 'mermaid'],
       note: 'React runtime + katex/mermaid peers external; shiki bundles',
@@ -739,6 +803,7 @@ async function measureBundles(): Promise<{ bundles: BundleResult[]; skipped: str
       }
       bundles.push({
         name: entry.name,
+        repo: entry.repo,
         entryMinBytes: entryMin,
         entryGzBytes: entryGz,
         totalMinBytes: totalMin,
@@ -768,7 +833,7 @@ function renderMatrix(
 ): string[] {
   const libs = contestants.filter((c) => c.tier === tier)
   const lines: string[] = []
-  const header = ['fixture', 'chars', 'updates', ...libs.map((c) => c.name)]
+  const header = ['fixture', 'chars', 'updates', ...libs.map((c) => linked(c.name, c.repo))]
   lines.push(`| ${header.join(' | ')} |`)
   lines.push(`| :-- | --: | --: | ${libs.map(() => '--:').join(' | ')} |`)
   for (const fixture of fixtures) {
@@ -798,7 +863,9 @@ function renderTailLatency(
   for (const c of contestants.filter((c) => c.tier === 'dom')) {
     const r = perLib.get(c.name)
     if (!r || 'error' in r) continue
-    lines.push(`| ${c.name} | ${ms(r.meanMs)} ms | ${ms(r.p50Ms)} ms | ${ms(r.p95Ms)} ms | ${ms(r.maxMs)} ms |`)
+    lines.push(
+      `| ${linked(c.name, c.repo)} | ${ms(r.meanMs)} ms | ${ms(r.p50Ms)} ms | ${ms(r.p95Ms)} ms | ${ms(r.maxMs)} ms |`,
+    )
   }
   return lines
 }
@@ -809,7 +876,7 @@ function renderBundles(bundles: BundleResult[]): string[] {
   lines.push('| :-- | --: | --: | --: | --: | :-- |')
   for (const b of bundles) {
     lines.push(
-      `| ${b.name} | ${kb(b.entryMinBytes)} | ${kb(b.entryGzBytes)} | ${kb(b.totalMinBytes)} | ${kb(b.totalGzBytes)} | ${b.note} |`,
+      `| ${linked(b.name, b.repo)} | ${kb(b.entryMinBytes)} | ${kb(b.entryGzBytes)} | ${kb(b.totalMinBytes)} | ${kb(b.totalGzBytes)} | ${b.note} |`,
     )
   }
   return lines
@@ -990,7 +1057,7 @@ const json = {
   node: process.version,
   cpu: cpus()[0]?.model ?? 'unknown',
   args,
-  contestants: contestants.map((c) => ({ name: c.name, tier: c.tier, version: c.version, note: c.note })),
+  contestants: contestants.map((c) => ({ name: c.name, tier: c.tier, version: c.version, repo: c.repo, note: c.note })),
   fixtures: fixtures.map((f) => ({ name: f.name, chars: f.text.length, updates: chunksOf(f.text).length })),
   results: Object.fromEntries([...results].map(([f, m]) => [f, Object.fromEntries(m)])),
   bundles: bundleReport.bundles,
