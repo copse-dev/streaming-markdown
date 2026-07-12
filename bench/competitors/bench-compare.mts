@@ -1,9 +1,10 @@
 /**
  * Cross-library streaming benchmark (#157) — non-gating, published out-of-band.
  *
- * Streams a shared corpus chunk-by-chunk through this library and each
- * competitor (Streamdown, react-markdown ± block memoization, smd, Incremark)
- * and reports wall-clock totals, per-chunk latency percentiles, throughput,
+ * Streams a shared corpus chunk-by-chunk through this library — its string,
+ * incremental-DOM, and `/react` wrapper entry points — and each competitor
+ * (Streamdown, react-markdown ± block memoization, smd, Incremark) and reports
+ * wall-clock totals, per-chunk latency percentiles, throughput,
  * and bundle sizes. Two tiers keep the comparison honest:
  *
  *   pipeline — headless per-chunk parse/render work, the methodology of
@@ -39,7 +40,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { cpus } from 'node:os'
 import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { CORPUS_DIR, INCREMARK_CORPUS } from './fetch-corpus.mts'
 
@@ -309,25 +310,20 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
   // smd-comparable configuration (sanitizer off — smd has none; highlighter
   // already unregistered; math/mermaid/emoji already not loaded). Two shapes:
   // the incremental DOM path under a passthrough backend, and the unsafe
-  // string export swapped in via innerHTML.
-  const { setSanitizerBackend } = await import('../../src/sanitize.ts')
-  const { benchSanitizerBackend, passthroughSanitizerBackend } = await import('./dom-setup.ts')
+  // string export swapped in via innerHTML. The passthrough backend is injected
+  // per-renderer via config (no global swap needed under the ambient config API).
+  const { passthroughSanitizerBackend } = await import('./dom-setup.ts')
   contestants.push({
     name: 'ours DOM incremental (unsafe)',
     tier: 'dom',
     version: ourVersion,
     note: 'StreamingMarkdownRenderer.update with sanitization disabled (passthrough backend) — the smd-comparable config',
     setup: () => {
-      setSanitizerBackend(passthroughSanitizerBackend)
       const { host, teardown } = domHost()
-      const renderer = new ours.StreamingMarkdownRenderer(host)
-      return {
-        feed: (_c, acc) => renderer.update(acc),
-        teardown: () => {
-          setSanitizerBackend(benchSanitizerBackend)
-          teardown()
-        },
-      }
+      const renderer = new ours.StreamingMarkdownRenderer(host, {
+        sanitizerBackend: passthroughSanitizerBackend,
+      })
+      return { feed: (_c, acc) => renderer.update(acc), teardown }
     },
   })
   contestants.push({
@@ -404,8 +400,75 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
     }
   }
 
+  // Our /react wrapper (src/react.tsx) imports React as a bare specifier, which
+  // resolves — from src/ — to the REPO-ROOT node_modules/react. The shared
+  // `reactTools`/`reactDriver` above, imported from bench/competitors, resolve
+  // react + react-dom to bench/competitors/node_modules — a SECOND, distinct
+  // React copy. Rendering our root-React component through the bench-React
+  // renderer trips "Invalid hook call" (two React instances → null hook
+  // dispatcher). So our wrapper gets its own driver whose createElement,
+  // createRoot and flushSync all come from the ROOT node_modules, matching the
+  // single React copy the component itself uses. (Competitors don't need this:
+  // their components live in bench/competitors/node_modules, same tree as
+  // `reactTools`.)
+  let oursReactTools: {
+    createElement: typeof import('react').createElement
+    createRoot: typeof import('react-dom/client').createRoot
+    flushSync: typeof import('react-dom').flushSync
+  } | null = null
+  try {
+    const rootUrl = (rel: string): string => pathToFileURL(resolve(repoRoot, 'node_modules', rel)).href
+    const { createElement } = (await import(rootUrl('react/index.js'))) as typeof import('react')
+    const { flushSync } = (await import(rootUrl('react-dom/index.js'))) as typeof import('react-dom')
+    const { createRoot } = (await import(rootUrl('react-dom/client.js'))) as typeof import('react-dom/client')
+    oursReactTools = { createElement, createRoot, flushSync }
+  } catch (e) {
+    skipped.push(`ours react runtime (root copy): ${String(e)}`)
+  }
+
+  const oursReactDriver = (render: (acc: string) => unknown): RunHandle => {
+    if (!oursReactTools) throw new Error('ours react runtime unavailable')
+    const { createRoot, flushSync } = oursReactTools
+    const { host, teardown } = domHost()
+    const root = createRoot(host)
+    return {
+      feed: (_c, acc) => {
+        flushSync(() => {
+          root.render(render(acc) as never)
+        })
+      },
+      teardown: () => {
+        root.unmount()
+        teardown()
+      },
+    }
+  }
+
+  if (oursReactTools) {
+    const ort = oursReactTools
+    // Our own `@copse/streaming-markdown/react` wrapper as an apples-to-apples
+    // React entry: `<StreamingMarkdown markdown={acc}/>` re-renders per chunk but
+    // drives the incremental `StreamingMarkdownRenderer.update()` under the hood
+    // (not a re-render-everything), sanitized via the process-default backend.
+    // Compare it against `streamdown` / `react-markdown` / `incremark react`;
+    // `ours DOM incremental` above is the same engine without the React layer.
+    try {
+      const { StreamingMarkdown } = await import('../../src/react.tsx')
+      contestants.push({
+        name: 'ours react (StreamingMarkdown)',
+        tier: 'dom',
+        version: ourVersion,
+        note: 'our /react wrapper: <StreamingMarkdown> drives StreamingMarkdownRenderer.update() — incremental, sanitized',
+        setup: () => oursReactDriver((acc) => ort.createElement(StreamingMarkdown as never, { markdown: acc })),
+      })
+    } catch (e) {
+      skipped.push(`ours react: ${String(e)}`)
+    }
+  }
+
   if (reactTools) {
     const rt = reactTools
+
     try {
       const Markdown = (await import('react-markdown')).default
       contestants.push({

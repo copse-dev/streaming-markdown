@@ -78,6 +78,11 @@
       "import": "./dist/host-workspace.js",
       "default": "./dist/host-workspace.js"
     },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js",
+      "default": "./dist/react.js"
+    },
     "./styles/core.css": "./styles/core.css",
     "./styles/default.css": "./styles/default.css",
     "./styles/cjk.css": "./styles/cjk.css"
@@ -100,7 +105,7 @@
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "build:demo": "npm run build && rm -f docs/streaming-markdown.*.mjs && esbuild docs/browser-entry.mjs --bundle --splitting --format=esm --platform=browser --outdir=docs --out-extension:.js=.mjs --entry-names=streaming-markdown.browser --chunk-names=streaming-markdown.[name]-[hash]",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
     "test:e2e": "node --import tsx --test tests/trusted-types.e2e.test.ts",
     "coverage": "c8 npm test",
     "coverage:check": "node --import tsx scripts/coverage-gate.mts",
@@ -129,6 +134,8 @@
     "highlight.js": "^11.11.1",
     "katex": "^0.16.0 || ^0.17.0",
     "mermaid": "^11.0.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0",
     "shiki": "^4.3.1"
   },
   "peerDependenciesMeta": {
@@ -147,6 +154,12 @@
     "mermaid": {
       "optional": true
     },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
     "shiki": {
       "optional": true
     }
@@ -154,6 +167,8 @@
   "devDependencies": {
     "@types/jsdom": "^28.0.3",
     "@types/node": "^26.0.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "c8": "^11.0.0",
     "commonmark-spec": "0.31.2",
     "dompurify": "^3.4.11",
@@ -163,6 +178,8 @@
     "jsdom": "^29.1.1",
     "katex": "^0.17.0",
     "playwright-core": "^1.61.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "shiki": "^4.3.1",
     "tsx": "^4.19.2",
     "typescript": "^6.0.3"

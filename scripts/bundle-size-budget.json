@@ -6,6 +6,8 @@
     "highlight.js",
     "katex",
     "mermaid",
+    "react",
+    "react-dom",
     "shiki"
   ],
   "entries": {
@@ -52,6 +54,11 @@
     "./cjk": {
       "file": "dist/cjk.js",
       "gzipBudget": 240
+    },
+    "./react": {
+      "file": "dist/react.js",
+      "gzipBudget": 600,
+      "extraExternals": ["./renderer.js", "./html-sink.js", "./streaming.js"]
     }
   }
 }
