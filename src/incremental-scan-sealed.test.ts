@@ -166,6 +166,14 @@ describe('sealed-block event stream (ADR 0004 Phase 1)', () => {
     assert.deepEqual(step.sealed, step.tokens.slice(0, step.formingFrom))
   })
 
+  it('falls back to a full scan when footnoteDefs is asked about a different string', () => {
+    const scanner = new IncrementalSourceScanner()
+    const doc = 'text[^a]\n\n[^a]: note\n\nsettled paragraph\n\nafter\n\n'
+    scanner.advance(doc)
+    const other = 'other[^z]\n\n[^z]: zzz\n\nsettled paragraph\n\nafter\n\n'
+    assert.deepEqual(new Map(scanner.footnoteDefs(other)), new Map(collectFootnoteDefinitions(other)))
+  })
+
   it('honours the grammar feature gates', () => {
     withConfig({ footnotes: false, linkReferences: false }, () => {
       const scanner = new IncrementalSourceScanner()

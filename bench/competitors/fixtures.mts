@@ -59,6 +59,17 @@ export function loadFixtures(filter: RegExp | null): Fixture[] {
     name: 'synthetic/long-transcript',
     text: fixtures.map((f) => f.text).join('\n\n---\n\n'),
   })
+  // The unbounded-fallback trap of docs/decisions/0004 (an unclosed raw
+  // `<details>` early in the stream), kept OUT of the long-transcript
+  // concatenation: an open container legitimately swallows everything after
+  // it, which would change what the headline fixture measures for every
+  // library. Standalone it shows how each renderer's incremental architecture
+  // behaves when committed output can still be re-parented — the shape LLM
+  // output produces routinely.
+  fixtures.push({
+    name: 'synthetic/raw-html-details (#0004)',
+    text: `Intro paragraph before the disclosure widget.\n\n<details>\n\n${codeHeavyFixture()}`,
+  })
   return filter ? fixtures.filter((f) => filter.test(f.name)) : fixtures
 }
 
