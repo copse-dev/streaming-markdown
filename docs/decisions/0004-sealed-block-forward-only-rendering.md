@@ -126,10 +126,21 @@ instead of re-deriving stability by rescanning.
   optional and measurable. ✔
 - Relative regression guard (`npm run bench`, #154) gates CI on our own
   numbers, so each phase below lands only if it moves them. ✔
-- **Next:** the planned Playwright real-browser tier for the same corpus.
-  jsdom measures JS + DOM-tree work only; layout/paint may dwarf the remaining
-  JS gap for the React competitors while barely moving smd or us. This decides
-  how much of the project is worth funding, **before** the parser work starts.
+- **Real-browser tier: landed and run** (`npm run bench:competitors:browser`,
+  Chromium via playwright-core, same corpus/chunking, layout forced per
+  update). First results, long transcript (114 kB, 200 updates): smd p50
+  0.5 ms / p95 1.0 ms; **ours smd-parity p50 1.8 ms / p95 3.0 ms; ours
+  sanitized (DOMPurify backend) p50 2.3 ms / p95 4.9 ms**. Two decisions fall
+  out. (1) jsdom overstated the architectural gap by an order of magnitude:
+  ~3–4× in a real engine, not ~24× — and every configuration is deep inside
+  frame budget, so the *median frame-time* case for Phases 2–3 is weak on
+  current hardware. (2) What the browser numbers do NOT dilute is the
+  fallback cliff (the `<details>` case study below happens in real engines
+  identically) and the tail (`max` per update still hits 35–50 ms on the long
+  transcript — a dropped frame — where smd's worst update is 1.6 ms). The
+  sealed-block project's payoff is therefore **tail latency and cliff
+  removal**, not medians; scope Phases 2–3 accordingly (the re-rooted append
+  point and bounded fallbacks first, wholesale emitter replacement last).
 
 ### Phase 1 — Seal events from the incremental scanner
 
