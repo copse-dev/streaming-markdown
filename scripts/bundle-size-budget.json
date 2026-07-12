@@ -1,5 +1,5 @@
 {
-  "note": "Gzipped+minified byte budgets for the package's own contribution to a consumer bundle. Measured by scripts/check-bundle-size.mts: each entry is bundled from dist/ with esbuild (--bundle --minify --format=esm --platform=browser), the optional peer dependencies are marked external (they are the host's responsibility), and the output is gzipped. CI (.github/workflows/ci.yml `size` job) fails if any measured value exceeds its budget. Bump a budget deliberately — with `npm run size:update` — only when an intentional change grows an entry; an accidental regression on the core value prop should redden the PR instead. Budgets carry ~5% headroom over the measured size so trivial refactors don't force a bump.",
+  "note": "Gzipped+minified byte budgets for the package's own contribution to a consumer bundle. Measured by scripts/check-bundle-size.mts: each entry is bundled from dist/ with esbuild (--bundle --minify --format=esm --platform=browser), the optional peer dependencies are marked external (they are the host's responsibility), and the output is gzipped. CI (.github/workflows/ci.yml `size` job) fails if any measured value exceeds its budget. Bump a budget deliberately \u2014 with `npm run size:update` \u2014 only when an intentional change grows an entry; an accidental regression on the core value prop should redden the PR instead. Budgets carry ~5% headroom over the measured size so trivial refactors don't force a bump.",
   "externals": [
     "dompurify",
     "entities",
@@ -13,7 +13,7 @@
   "entries": {
     ".": {
       "file": "dist/index.js",
-      "gzipBudget": 33030
+      "gzipBudget": 34700
     },
     "./inline/emoji": {
       "file": "dist/emoji-shortcodes.js",
@@ -58,7 +58,11 @@
     "./react": {
       "file": "dist/react.js",
       "gzipBudget": 600,
-      "extraExternals": ["./renderer.js", "./html-sink.js", "./streaming.js"]
+      "extraExternals": [
+        "./renderer.js",
+        "./html-sink.js",
+        "./streaming.js"
+      ]
     }
   }
 }

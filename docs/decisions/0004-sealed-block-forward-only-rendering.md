@@ -177,6 +177,36 @@ when the state machine seals). The event stream is testable headless against
 
 ### Phase 2 — Render-once commit path
 
+**Status: first slice landed — re-rooted append points and probe-verified
+freezes** (`streaming-frozen-tail.ts`, `streaming-reroot.test.ts`), scoped per
+the Phase 0 verdict (cliffs and tails before medians):
+
+- The unfreezable-raw-HTML guard's string count is now refined by an inert
+  `DOMParser` canary probe: a delta whose imbalance the parser self-heals (the
+  changelog case — `<details>` closed by its `</li>`) proves
+  concatenation-safety and **freezes normally**; a delta that genuinely leaves
+  a safe container element (`details`/`div`/`section`/…) open **re-roots** —
+  the open element becomes the live append target and later blocks freeze
+  inside it, exactly where the whole-string parse puts them, under both a
+  surviving container and a sanitizer-unwrapped one (both shipped backends
+  keep a dropped element's children in place, which per-fragment rendering
+  reproduces). Formatting-element reconstruction, foster-parenting, and
+  CDATA-swallowing shapes are detected by the same probe and keep the old
+  full-morph fallback; a frame's close tag costs one full morph, after which
+  the balanced region freezes wholesale.
+- Measured on the v0.11.0 changelog (15 kB, 200 updates, same machine,
+  base = Phase 1): details-in-list-item **6868 ms → 429 ms** (1.77 M → 55.7 k
+  rendered chars); bare top-level details **8245 ms → 398 ms** (1.83 M →
+  53.6 k). The cliff is gone in both shapes; clean-content numbers are
+  unchanged, and `synthetic/raw-html-details (#0004)` is now a published
+  benchmark fixture so it cannot silently regress.
+
+Remaining in this phase: sealed-event-driven rendering (consume
+`ScanAdvance.sealed` instead of the delta re-derivation), and targeted
+link-reference patches (limitation J still full-morphs on a late definition —
+the other fallback cliff, and the likely source of the residual per-update
+`max` outliers).
+
 A new emitter consumes the events: `sealed` blocks render to DOM exactly once
 and are appended (no string re-render, no serialize-compare, no morph);
 `forming` renders into the pending container as today (holds included);

@@ -318,6 +318,63 @@ function hasUnfreezableRawHtml(html: string): boolean {
     : hasUnbalancedBenignRawInline(html)
 }
 
+// Container elements a re-rooted commit may append into (ADR 0004 Phase 2):
+// transparent flow containers with no special parsing rules, so a fragment
+// parsed in their context serializes exactly as it does at the top level.
+// Formatting elements (b/i/…) are excluded on purpose — the whole-string
+// parser RECONSTRUCTS those into every later block, which re-rooting cannot
+// express — as are elements with parser-magic content models (p auto-closes,
+// table/select foster-parent).
+const SAFE_REROOT_TAGS = new Set(['DETAILS', 'DIV', 'SECTION', 'ARTICLE', 'ASIDE', 'MAIN', 'NAV', 'FIGURE'])
+
+const PROBE_TAG = 'sm-open-chain-probe'
+const PROBE_HTML = `<${PROBE_TAG}>zz</${PROBE_TAG}>`
+
+/**
+ * How content appended after `rawHtml` would parse, probed empirically in an
+ * INERT document (`DOMParser` — no scripts, no resource loading, not a Trusted
+ * Types sink):
+ *
+ *  - `[]` — concatenation-safe: `parse(rawHtml + rest)` serializes as
+ *    `parse(rawHtml)` then `parse(rest)`, whatever the tag-count balance scan
+ *    said (an unclosed `<details>` inside a list item is healed by `</li>`),
+ *    so the fragment is safe to freeze.
+ *  - a non-empty tag chain (outermost first) — later content nests inside
+ *    that still-open element chain, the shape re-rooting can express.
+ *  - `null` — the divergence is NOT plain nesting (formatting-element
+ *    reconstruction is reported as the reconstructed tag chain and rejected by
+ *    the caller's safe-list; foster-parenting and CDATA swallowing land here),
+ *    so the caller must fall back.
+ *
+ * The probe appends a canary ELEMENT (not a comment: only character/element
+ * insertion triggers the parser's formatting-element reconstruction, which a
+ * comment probe is blind to) and compares serializations: equality proves
+ * concatenation-safety directly, and on divergence the canary's ancestor chain
+ * IS the open-element chain later content would nest into. An attacker-typed
+ * `<sm-open-chain-probe>` in the markdown sits earlier in document order and,
+ * at worst, appears in the chain — where the safe-list rejects it.
+ */
+function openElementChainAtEof(rawHtml: string): string[] | null {
+  const ParserCtor = document.defaultView?.DOMParser
+  /* c8 ignore next 2 -- every supported host (browser, jsdom) exposes DOMParser */
+  if (!ParserCtor) return null
+  const parser = new ParserCtor()
+  const alone = parser.parseFromString(`<body>${rawHtml}</body>`, 'text/html')
+  const probed = parser.parseFromString(`<body>${rawHtml}${PROBE_HTML}</body>`, 'text/html')
+  if (probed.body.innerHTML === alone.body.innerHTML + PROBE_HTML) return []
+  const probes = probed.body.getElementsByTagName(PROBE_TAG)
+  const canary = probes[probes.length - 1]
+  if (!canary) return null // swallowed as CDATA (<script>/<style>/…) — unknown
+  const chain: string[] = []
+  for (let el = canary.parentElement; el && el !== probed.body; el = el.parentElement) {
+    chain.unshift(el.tagName)
+  }
+  // Serialization diverged but the canary sits at the top level: the parser
+  // relocated content (foster parenting) rather than nesting it — not a shape
+  // re-rooting can express.
+  return chain.length > 0 ? chain : null
+}
+
 const DETAILS_OPEN_RE = /<details(?=[\s>])/gi
 const DETAILS_CLOSE_RE = /<\/details>/gi
 
@@ -334,6 +391,14 @@ export function hasOpenDetailsElement(html: string): boolean {
   const opens = html.match(DETAILS_OPEN_RE)?.length ?? 0
   const closes = html.match(DETAILS_CLOSE_RE)?.length ?? 0
   return opens > closes
+}
+
+/** Signed net `<details>` opens minus closes in `html` (raw renderer output). */
+function detailsBalance(html: string): number {
+  if (!html.includes('<details') && !html.includes('</details')) return 0
+  const opens = html.match(DETAILS_OPEN_RE)?.length ?? 0
+  const closes = html.match(DETAILS_CLOSE_RE)?.length ?? 0
+  return opens - closes
 }
 
 /**
@@ -369,6 +434,56 @@ export class FrozenTailRenderer {
    * consumed by production code.
    */
   renderedChars = 0
+
+  // ---- Re-rooted append frames (ADR 0004 Phase 2) ------------------------
+  // While committed raw HTML leaves a safe container element open (an unclosed
+  // `<details>`/`<div>`/… under the passthrough policy), the whole-string
+  // parse nests ALL later content inside that element. This used to be
+  // unfreezable — every subsequent commit fell back to a full-document morph,
+  // the O(n²) cliff of docs/decisions/0004. Instead the commit path re-roots:
+  // the open element becomes the append target, later blocks freeze INSIDE it
+  // exactly as at the top level (`frozenNodeCount`/`frozenHasHtml` describe
+  // the innermost frame while frames are open; each frame saves the outer
+  // level's values). A matching close tag — or any structural surprise —
+  // falls back to one full morph; the then-balanced region freezes wholesale
+  // through the ordinary path afterwards.
+  /** Innermost-last stack of live open container elements being appended into. */
+  private openFrames: { el: HTMLElement; tag: string; outerFrozenNodeCount: number; outerFrozenHasHtml: boolean }[] = []
+  /** Top-level child of `completedEl` containing every open frame (stale-trim anchor). */
+  private frameAnchor: ChildNode | null = null
+  /**
+   * Net `<details>` opens minus closes across the frozen RAW render. The #138
+   * pending-tail hold must track the *unsanitized* whole render (the string
+   * emitter re-checks it every frame; the sink may unwrap the element), and
+   * with frozen deltas never re-rendered this running balance is that check.
+   */
+  private frozenDetailsBalance = 0
+
+  private resetFrames(): void {
+    this.openFrames = []
+    this.frameAnchor = null
+    this.frozenDetailsBalance = 0
+  }
+
+  /** The element commits currently append into: the innermost open frame, else `completedEl`. */
+  private commitRoot(completedEl: HTMLElement): HTMLElement {
+    return this.openFrames[this.openFrames.length - 1]?.el ?? completedEl
+  }
+
+  /**
+   * True when `deltaHtml`/`tailHtml` mention a close tag for any open frame.
+   * Conservative by string scan: even a balanced same-tag pair trips it (the
+   * cost is one full morph + re-derivation, never wrong output). A real close
+   * means later content pops OUT of the frame — per-fragment parsing drops the
+   * stray close instead, so the framed fast path must not run.
+   */
+  private frameCloseAppeared(deltaHtml: string, tailHtml: string): boolean {
+    for (const frame of this.openFrames) {
+      const close = `</${frame.tag.toLowerCase()}`
+      if (deltaHtml.toLowerCase().includes(close) || tailHtml.toLowerCase().includes(close)) return true
+    }
+    return false
+  }
 
   // ---- Intra-list freezing (#29) ----------------------------------------
   // When the trailing group is a long, still-open, signature-uniform list, the
@@ -465,6 +580,7 @@ export class FrozenTailRenderer {
     this.committedHasOpenDetails = false
     this.resetListState()
     this.resetFootnoteState()
+    this.resetFrames()
   }
 
   /**
@@ -490,9 +606,12 @@ export class FrozenTailRenderer {
       this.reset()
       return
     }
-    // Recomputed below (in fullMorph when a `<details>` is still open); default
-    // to closed so it never persists stale across a commit that resolved it.
-    this.committedHasOpenDetails = false
+    // Recomputed below (in fullMorph when a `<details>` is still open). The
+    // default carries the frozen raw balance: a `<details>` left open by an
+    // already-frozen delta (ADR 0004 Phase 2) stays held even on commit paths
+    // that return early (e.g. the shared-list fast path); a commit that
+    // resolved the tail's imbalance never persists stale.
+    this.committedHasOpenDetails = this.frozenDetailsBalance > 0
 
     const linkRefs = providedLinkRefs ?? collectLinkReferenceDefinitions(complete, tokens)
     const linkRefKey = serializeLinkRefs(linkRefs)
@@ -568,66 +687,212 @@ export class FrozenTailRenderer {
     const deltaHtml = deltaTokens.length
       ? renderBlocks(complete, deltaTokens, { linkRefs, ...RENDER_OPTS })
       : ''
-    // An unbalanced raw tag (`<b>` or a block-spanning `<details>` left open)
-    // makes whole-string sanitization keep the element open across later blocks;
-    // per-fragment sanitization closes it early, so never freeze such a delta.
-    // The fallback repeats each commit (frozenEnd stays 0), degrading that
-    // stream to the old full-morph behaviour — correct, just not incremental.
-    if (deltaHtml !== '' && hasUnfreezableRawHtml(deltaHtml)) {
-      this.fullMorph(completedEl, complete, tokens, linkRefKey)
-      return
-    }
     const tailHtml = tailTokens.length
       ? renderBlocks(complete, tailTokens, { linkRefs, ...RENDER_OPTS })
       : ''
+
+    // A close tag for an open frame means later content pops OUT of the frame
+    // in the whole-string parse; per-fragment parsing drops the stray close, so
+    // the framed fast path cannot express it. One full morph rebuilds — and the
+    // now-balanced region then freezes wholesale through the ordinary path.
+    if (this.openFrames.length > 0 && this.frameCloseAppeared(deltaHtml, tailHtml)) {
+      this.fullMorph(completedEl, complete, tokens, linkRefKey)
+      return
+    }
+
+    // An unbalanced raw tag in the delta used to be terminally unfreezable:
+    // whole-string sanitization keeps the element open across later blocks,
+    // per-fragment sanitization closes it early, and the fallback repeated on
+    // every commit (frozenEnd stuck) — the O(n²) cliff of docs/decisions/0004.
+    // The tag-count scan is only an over-approximation though, so ask the
+    // parser what actually stays open at the delta's EOF (Phase 2):
+    //   - nothing (`[]`) — the imbalance self-healed (an unclosed `<details>`
+    //     inside a `</li>`-closed list item): the delta is safe to freeze;
+    //   - a chain of safe container elements — re-root: commit the delta, then
+    //     append all later content INSIDE the open element(s), exactly where
+    //     the whole-string parse puts it;
+    //   - anything else (formatting tags, parser-magic elements, unknown) —
+    //     today's full-morph fallback.
+    let rerootChain: string[] | null = null
+    if (deltaHtml !== '' && hasUnfreezableRawHtml(deltaHtml)) {
+      const chain = getHtmlPolicy() === 'passthrough' ? openElementChainAtEof(deltaHtml) : null
+      if (chain === null || (chain.length > 0 && !chain.every((tag) => SAFE_REROOT_TAGS.has(tag)))) {
+        this.fullMorph(completedEl, complete, tokens, linkRefKey)
+        return
+      }
+      if (chain.length > 0) rerootChain = chain
+    }
     this.renderedChars += deltaHtml.length + tailHtml.length
 
-    // #138: hold the pending tail in the DOM emitter when a `<details>` is still
-    // open in the *unsettled tail* — matching the string emitter, which re-checks
-    // the whole render every frame. The earlier assumption that a still-open
-    // `<details>` always full-morphs is false when the delta is empty: the frozen
-    // prefix and delta are always balanced (an unbalanced tag never freezes — the
-    // guard above falls back), so the tail render is the only place a lone-open
-    // `<details>` can survive, and its open state is the whole render's.
-    this.committedHasOpenDetails = hasOpenDetailsElement(tailHtml)
+    const root = this.commitRoot(completedEl)
+    // While frames are open the commit morphs inside the innermost frame, so
+    // stale top-level leftovers (block-level pending elements appended after
+    // the frame's anchor by the previous frame) must be trimmed explicitly —
+    // at the top level they sit AFTER the anchor, which is always the last
+    // committed top-level node.
+    if (this.frameAnchor) {
+      while (completedEl.lastChild && completedEl.lastChild !== this.frameAnchor) {
+        completedEl.lastChild.remove()
+      }
+    }
 
     // Reconcile everything after the frozen prefix — newly-settled delta plus
-    // tail — in ONE morph. Morphing (not re-parsing) means the blocks that are
-    // settling right now keep the DOM node identity they already had as last
-    // frame's tail (CSS transitions, text selection, and media in a block
-    // survive its freeze frame), and the trailing-child trim removes last
-    // frame's leftover tail nodes and any block-level pending elements.
-    // Seam rule: `renderBlocks` joins non-empty top-level blocks with '\n'
-    // (gap B) — empty parts get neither a seam nor an append.
-    const parts: SanitizedHtml[] = []
-    if (deltaHtml !== '') parts.push(sanitizeRenderedMarkdown(deltaHtml))
-    if (tailHtml !== '') parts.push(sanitizeRenderedMarkdown(tailHtml))
-    const lead = this.frozenHasHtml && parts.length > 0 ? '\n' : ''
-    morphInnerHtmlFrom(
-      completedEl,
-      this.frozenNodeCount,
-      // Sanitized parts joined with literal '\n' seams — sanitizer-equivalent.
-      parts.length > 0 ? asSanitizedHtml(lead + parts.join('\n')) : '',
-    )
+    // tail — in ONE morph (or two around a re-root push). Morphing (not
+    // re-parsing) means the blocks that are settling right now keep the DOM
+    // node identity they already had as last frame's tail (CSS transitions,
+    // text selection, and media in a block survive its freeze frame), and the
+    // trailing-child trim removes last frame's leftover tail nodes and any
+    // block-level pending elements. Seam rule: `renderBlocks` joins non-empty
+    // top-level RAW blocks with '\n' (gap B); the seam text survives the
+    // sanitizer even when a fragment's elements do not, so joins follow raw
+    // emptiness on the paths a sanitizer-unwrapped container can reach.
+    const sanitizedDelta = deltaHtml !== '' ? sanitizeRenderedMarkdown(deltaHtml) : ''
+    const sanitizedTail = tailHtml !== '' ? sanitizeRenderedMarkdown(tailHtml) : ''
 
-    // Advance the frozen bookkeeping over the delta's nodes. The count comes
-    // from parsing the delta fragment alone (top-level parts are elements, so
-    // concatenation cannot merge text nodes across the delta/tail boundary);
-    // it is O(delta), which totals O(n) over a whole stream (gap C: never
-    // inferred from token indices — blanks/refs emit nothing, list/blockquote
-    // runs collapse to one element).
-    if (deltaHtml !== '') {
-      const probe = completedEl.cloneNode(false) as HTMLElement
-      // Same sanitized delta + literal seam the morph above just consumed.
-      setPresanitizedHtml(probe, asSanitizedHtml(lead + (parts[0] ?? '')))
-      this.frozenNodeCount += probe.childNodes.length
-      this.frozenHasHtml = true
+    // Which of the raw open chain survives sanitization on the rightmost path
+    // of the delta fragment. Unwrapped elements (both shipped backends keep a
+    // dropped element's children in place) leave the whole-string parse
+    // flattened the same way per-fragment rendering is — so with NO survivors
+    // the delta freezes through the ordinary path; survivors become frames.
+    const survivors =
+      rerootChain && sanitizedDelta !== ''
+        ? this.survivingChain(root, sanitizedDelta, rerootChain)
+        : []
+
+    if (rerootChain && survivors.length > 0) {
+      /* c8 ignore start -- defensive backstop: commitWithReroot's live walk
+         mirrors the survivingChain probe over the same sanitized fragment, so
+         it cannot report a mismatch; kept so a future divergence degrades to
+         the correct full morph instead of wrong output. */
+      if (!this.commitWithReroot(completedEl, root, survivors, sanitizedDelta, sanitizedTail, tailHtml !== '')) {
+        this.fullMorph(completedEl, complete, tokens, linkRefKey)
+        return
+      }
+      /* c8 ignore stop */
+    } else {
+      // Ordinary commit — including a fully-flattened re-root chain, where the
+      // sanitizedDelta may be '' while the RAW delta was not (its '\n' seam
+      // must still be emitted, hence the raw-emptiness joins).
+      const parts: string[] = []
+      if (deltaHtml !== '') parts.push(sanitizedDelta)
+      if (tailHtml !== '') parts.push(sanitizedTail)
+      const lead = this.frozenHasHtml && parts.length > 0 ? '\n' : ''
+      const joined = parts.length > 0 ? lead + parts.join('\n') : ''
+      morphInnerHtmlFrom(
+        root,
+        this.frozenNodeCount,
+        // Sanitized parts joined with literal '\n' seams — sanitizer-equivalent.
+        joined === '' ? '' : asSanitizedHtml(joined),
+      )
+
+      // Advance the frozen bookkeeping over the delta's nodes. The count comes
+      // from parsing the delta fragment alone (top-level parts are elements, so
+      // concatenation cannot merge text nodes across the delta/tail boundary);
+      // it is O(delta), which totals O(n) over a whole stream (gap C: never
+      // inferred from token indices — blanks/refs emit nothing, list/blockquote
+      // runs collapse to one element).
+      if (deltaHtml !== '') {
+        const probe = root.cloneNode(false) as HTMLElement
+        // Same sanitized delta + literal seam the morph above just consumed.
+        setPresanitizedHtml(probe, asSanitizedHtml(lead + sanitizedDelta))
+        this.frozenNodeCount += probe.childNodes.length
+        this.frozenHasHtml = true
+      }
     }
+    // #138: hold the pending tail in the DOM emitter while a `<details>` is
+    // open in the RAW whole render — matching the string emitter, which
+    // re-checks its raw render every frame. Frozen deltas are never
+    // re-rendered, so the frozen share is a running raw balance.
+    this.frozenDetailsBalance += detailsBalance(deltaHtml)
+    this.committedHasOpenDetails =
+      this.frozenDetailsBalance > 0 || hasOpenDetailsElement(tailHtml)
+
     this.frozenEnd = advanceTo
     this.frozenSource = complete.slice(0, advanceTo)
     this.lastLinkRefKey = linkRefKey
 
-    this.maybeActivateIntraList(completedEl, complete, tokens, tailStart)
+    // Intra-list bookkeeping indexes top-level children of `completedEl`;
+    // inside a frame the shared-list optimization simply stays off.
+    if (this.openFrames.length === 0) {
+      this.maybeActivateIntraList(completedEl, complete, tokens, tailStart)
+    }
+  }
+
+  /**
+   * The subsequence of `chain` (raw open elements at the delta's EOF,
+   * outermost first) that survives sanitization, walked along the rightmost
+   * path of the sanitized delta fragment. Elements the sanitizer unwrapped are
+   * skipped — their children sit in place at the enclosing level, exactly as
+   * the whole-string sanitize leaves them.
+   */
+  private survivingChain(root: HTMLElement, sanitizedDelta: SanitizedHtml, chain: string[]): string[] {
+    const probe = root.cloneNode(false) as HTMLElement
+    setPresanitizedHtml(probe, sanitizedDelta)
+    const survivors: string[] = []
+    let cursor: Element = probe
+    for (const tag of chain) {
+      const nextEl = cursor.lastElementChild
+      if (nextEl && nextEl.tagName === tag) {
+        survivors.push(tag)
+        cursor = nextEl
+      }
+    }
+    return survivors
+  }
+
+  /**
+   * Commit a delta that leaves `chain` (outermost first, all
+   * {@link SAFE_REROOT_TAGS}, sanitizer-surviving) open at its EOF: morph the
+   * delta into the current root, walk the freshly-appended DOM down the chain
+   * pushing a frame per element, then morph the tail INSIDE the innermost
+   * frame — where the whole-string parse puts it. Returns false when the live
+   * DOM does not match the probed chain (caller full-morphs; correctness over
+   * speed).
+   */
+  private commitWithReroot(
+    completedEl: HTMLElement,
+    root: HTMLElement,
+    chain: string[],
+    // Non-empty in practice (survivors require sanitized elements); typed
+    // loosely so the call site needs no narrowing assertion.
+    sanitizedDelta: SanitizedHtml | '',
+    sanitizedTail: SanitizedHtml | '',
+    rawTailNonEmpty: boolean,
+  ): boolean {
+    const lead = this.frozenHasHtml ? '\n' : ''
+    morphInnerHtmlFrom(root, this.frozenNodeCount, asSanitizedHtml(lead + sanitizedDelta))
+
+    // The open elements sit on the rightmost path of the delta's DOM (they
+    // contain the delta's EOF), so walk lastElementChild with tag assertions.
+    let container: HTMLElement = root
+    for (const tag of chain) {
+      const nextEl = container.lastElementChild
+      /* c8 ignore next -- defensive: the live morph mirrors the survivingChain
+         probe, so the walk cannot diverge; kept as a correctness backstop. */
+      if (!(nextEl instanceof HTMLElement) || nextEl.tagName !== tag) return false
+      this.openFrames.push({
+        el: nextEl,
+        tag,
+        outerFrozenNodeCount: this.frozenNodeCount,
+        outerFrozenHasHtml: this.frozenHasHtml,
+      })
+      container = nextEl
+    }
+    // First (outermost) activation: the anchor is the last top-level child of
+    // `completedEl`, which contains the whole chain.
+    this.frameAnchor ??= completedEl.lastChild
+    // The frame interior committed by the delta is frozen; the '\n' seam
+    // between the delta's last (raw non-empty) block and any later block lands
+    // INSIDE the open element in the whole-string parse, so the frame always
+    // leads with one.
+    this.frozenNodeCount = container.childNodes.length
+    this.frozenHasHtml = true
+    morphInnerHtmlFrom(
+      container,
+      this.frozenNodeCount,
+      rawTailNonEmpty ? asSanitizedHtml('\n' + sanitizedTail) : '',
+    )
+    return true
   }
 
   /**
@@ -814,7 +1079,10 @@ export class FrozenTailRenderer {
     linkRefKey: string,
     footnoteDefs: FootnoteDefinitionMap,
   ): void {
-    if (this.fnGaveUp || complete.includes('<details')) {
+    // Footnotes + a live re-root frame is an exotic combination the per-part
+    // bookkeeping does not model; full-morph keeps it correct (and clears the
+    // frames, matching the whole-document morph).
+    if (this.fnGaveUp || this.openFrames.length > 0 || complete.includes('<details')) {
       this.fullMorph(completedEl, complete, tokens, linkRefKey)
       return
     }
@@ -1141,5 +1409,6 @@ export class FrozenTailRenderer {
     this.lastLinkRefKey = linkRefKey
     this.resetListState()
     this.resetFootnoteState()
+    this.resetFrames()
   }
 }
