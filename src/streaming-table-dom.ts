@@ -1,3 +1,4 @@
+import { firstDirectChild, lastDirectChild } from './dom-scan.ts'
 import { splitTableRow, TABLE_SEP_RE } from './block-tokenizer.ts'
 import { dropTrailingNewline } from './block-patterns.ts'
 import { escapeHtml } from './escape.ts'
@@ -57,7 +58,9 @@ export function syncFormingTableDom(container: HTMLElement, source: string): voi
     return
   }
 
-  const existing = container.querySelector(`table.${FORMING_TABLE_CLASS}`)
+  // The forming table is only ever created as a direct child — direct scan,
+  // no selector engine (this path runs per update while a table streams).
+  const existing = firstDirectChild(container, 'TABLE', FORMING_TABLE_CLASS)
   let table: HTMLTableElement
   if (existing instanceof Element && existing.tagName === 'TABLE') {
     table = existing as HTMLTableElement
@@ -113,15 +116,8 @@ export function syncPendingTableRowDom(table: HTMLTableElement, pendingRow: stri
     tbody = table.createTBody()
   }
 
-  let row: HTMLTableRowElement | null = tbody.querySelector(`tr.${PENDING_ROW_CLASS}`)
+  let row: HTMLTableRowElement | null = findPendingRow(table)
   if (!(row instanceof Element) || row.tagName !== 'TR') {
-    // This block runs only when the querySelector above found no pending row, so
-    // the querySelectorAll sweep is empty and its callback never fires — kept as
-    // a defensive cleanup in case a malformed pending row ever slips in.
-    tbody.querySelectorAll(`tr.${PENDING_ROW_CLASS}`).forEach((r) => {
-      /* c8 ignore next -- unreachable: sweep is empty when this block runs */
-      r.remove()
-    })
     row = tbody.insertRow()
     row.className = PENDING_ROW_CLASS
   }
@@ -137,8 +133,21 @@ export function clearFormingTableDom(container: HTMLElement): void {
   container.replaceChildren()
 }
 
+/**
+ * The pending body row, if any — appended at the end of a `<tbody>` by
+ * `syncPendingTableRowDom`, so a backwards direct-child scan finds it without
+ * the selector engine (this runs per update while a table row streams).
+ */
+function findPendingRow(table: HTMLTableElement): HTMLTableRowElement | null {
+  for (const tbody of table.tBodies) {
+    const row = lastDirectChild(tbody, 'TR', PENDING_ROW_CLASS)
+    if (row) return row as HTMLTableRowElement
+  }
+  return null
+}
+
 export function removePendingTableRow(table: HTMLTableElement): void {
-  table.querySelector(`tr.${PENDING_ROW_CLASS}`)?.remove()
+  findPendingRow(table)?.remove()
 }
 
 /** Append an in-progress body row to the last committed table in rendered HTML. */

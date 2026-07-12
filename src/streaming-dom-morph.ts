@@ -61,7 +61,7 @@ function canReuse(node: Node, next: Node): boolean {
  * Nodes taken from `template` are moved into `parent`; `template` is left
  * partially emptied and discarded by the caller.
  */
-function morphChildren(parent: Node, template: Node, offset = 0): void {
+function morphChildren(parent: Node, template: Node, offset = 0, trimTrailing = true): void {
   const nextChildren = Array.from(template.childNodes)
   for (let i = 0; i < nextChildren.length; i++) {
     const next = nextChildren[i]
@@ -80,11 +80,17 @@ function morphChildren(parent: Node, template: Node, offset = 0): void {
         }
       }
     } else {
+      // A reused slot must be replaced in place; a fresh append (no current)
+      // was handled above, so `current` exists here. Range morphs (`trim
+      // Trailing` false) rely on positional replacement never shifting later
+      // siblings.
       parent.replaceChild(next, current)
     }
   }
-  while (parent.childNodes.length > offset + nextChildren.length) {
-    parent.lastChild?.remove()
+  if (trimTrailing) {
+    while (parent.childNodes.length > offset + nextChildren.length) {
+      parent.lastChild?.remove()
+    }
   }
 }
 
@@ -122,6 +128,29 @@ export function morphInnerHtmlFrom(
   const template = container.cloneNode(false) as HTMLElement
   setPresanitizedHtml(template, html)
   morphChildren(container, template, startIndex)
+}
+
+/**
+ * Reconcile only the children at `[startIndex, startIndex + N)` against
+ * `html`'s parse — N being the parse's top-level node count, which is
+ * returned — leaving both the prefix AND any later siblings untouched (the
+ * caller reconciles the following range itself). Splitting a commit into a
+ * delta range morph and a tail morph lets the delta parse exactly once: the
+ * morph template doubles as the frozen node count (#21 gap C), which
+ * previously cost a second, count-only parse of the sanitized delta on every
+ * commit.
+ */
+export function morphInnerHtmlRangeFrom(
+  container: HTMLElement,
+  startIndex: number,
+  html: SanitizedHtml | '',
+): number {
+  if (html === '') return 0
+  const template = container.cloneNode(false) as HTMLElement
+  setPresanitizedHtml(template, html)
+  const count = template.childNodes.length
+  morphChildren(container, template, startIndex, false)
+  return count
 }
 
 /**

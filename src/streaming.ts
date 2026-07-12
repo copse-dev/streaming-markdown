@@ -20,6 +20,7 @@ import {
 } from './render-pending-line.ts'
 import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from './streaming-split.ts'
 import { IncrementalSourceScanner } from './incremental-scan.ts'
+import { findDescendantByClass, firstDirectChild, lastDirectChild } from './dom-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
 import { escapeHtml } from './escape.ts'
 import { type MarkdownConfig, withConfig } from './config.ts'
@@ -72,15 +73,15 @@ const TRAILING_OPEN_LI_CLOSE_RE = /(<li(?:\s[^>]*)?>)([\s\S]*?)(<\/li>\s*<\/(?:u
 // long stream once the committed prefix is frozen (#21 follow-up). jsdom's
 // `:scope >`/descendant selectors still walk the full subtree, so this matters.
 
-/** A pending descendant (continuation span, pending `<li>`) inside the trailing list. */
-function tailPendingDescendant(completedEl: HTMLElement, selector: string): Element | null {
+/** A pending descendant (continuation span, pending `<li>`) inside the trailing element. */
+function tailPendingDescendant(completedEl: HTMLElement, cls: string, tagName?: string): Element | null {
   const last = completedEl.lastElementChild
   if (!last) return null
   // The committed footnotes section is never a pending-tail host, and it grows
   // with the document (N `<li>`), so walking it per update is the residual O(n)
   // cost of a footnote stream (#133). Skip it — the pending tail is a sibling.
   if (last.tagName === 'SECTION' && last.classList.contains('footnotes')) return null
-  return last.querySelector(selector) ?? null
+  return findDescendantByClass(last, cls, tagName)
 }
 
 /** A pending block element attached directly to `completedEl` (always the last child). */
@@ -108,7 +109,7 @@ function clearBlockPendingDom(completedEl: HTMLElement, parts: BlockPendingClean
   if (parts.includes('continuation')) clearListContinuationDom(completedEl)
   if (parts.includes('paragraph-continuation')) clearParagraphContinuationDom(completedEl)
   if (parts.includes('list-items')) {
-    const pendingLi = tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)
+    const pendingLi = tailPendingDescendant(completedEl, BLOCK_PENDING_CLASS, 'LI')
     const wrapper = pendingLi?.parentElement
     pendingLi?.remove()
     // The wrapper <ul>/<ol> may have been created solely to host this pending
@@ -228,7 +229,7 @@ function syncListPendingDom(
 
   const listTag = pendingListTag(pending)
   const indent = listPendingIndent(pending)
-  const existingPendingLi = tailPendingDescendant(completedEl, `li.${BLOCK_PENDING_CLASS}`)
+  const existingPendingLi = tailPendingDescendant(completedEl, BLOCK_PENDING_CLASS, 'LI')
 
   /* c8 ignore start -- unreachable defensive guard: the only caller (update)
      enters the block-pending path solely when `pendingVisible`, and
@@ -249,9 +250,10 @@ function syncListPendingDom(
   if (indent > 0) {
     const hostLi = findOpenListItemHost(completedEl)
     if (hostLi) {
-      const existingNested = hostLi.querySelector(`:scope > ${listTag}:last-of-type`)
-      if (existingNested instanceof Element && existingNested.tagName === listTag.toUpperCase()) {
-        list = existingNested as HTMLElement
+      // `:scope > ul:last-of-type` as a direct backwards child scan.
+      const existingNested = lastDirectChild(hostLi, listTag.toUpperCase(), null)
+      if (existingNested instanceof HTMLElement) {
+        list = existingNested
       } else {
         list = document.createElement(listTag)
         hostLi.append(list)
@@ -380,7 +382,9 @@ function findOpenListItemHost(completedEl: HTMLElement): HTMLElement | null {
 }
 
 function clearListContinuationDom(completedEl: HTMLElement): void {
-  tailPendingDescendant(completedEl, `li .${LIST_CONTINUATION_CLASS}`)?.remove()
+  // The continuation span is only ever appended inside a list item (see
+  // syncListContinuationDom), so the class alone identifies it.
+  tailPendingDescendant(completedEl, LIST_CONTINUATION_CLASS)?.remove()
 }
 
 /**
@@ -432,7 +436,7 @@ function removeParagraphContinuationNode(el: Element | null): void {
 
 function clearParagraphContinuationDom(completedEl: HTMLElement): void {
   removeParagraphContinuationNode(
-    tailPendingDescendant(completedEl, `.${PARAGRAPH_CONTINUATION_CLASS}`),
+    tailPendingDescendant(completedEl, PARAGRAPH_CONTINUATION_CLASS),
   )
 }
 
@@ -444,7 +448,7 @@ function syncParagraphContinuationDom(
   const host = findTrailingParagraphHost(completedEl)
   if (!host) return false
 
-  const existing = host.querySelector(`:scope > .${PARAGRAPH_CONTINUATION_CLASS}`)
+  const existing = firstDirectChild(host, null, PARAGRAPH_CONTINUATION_CLASS)
   /* c8 ignore start -- unreachable defensive guard: `active` is always `true`
      here and `pendingInner` is non-empty whenever this path runs (see the note
      in syncListPendingDom). */
@@ -474,7 +478,7 @@ function syncListContinuationDom(
   const li = findOpenListItemHost(completedEl)
   if (!li) return false
 
-  const existing = li.querySelector(`:scope > .${LIST_CONTINUATION_CLASS}`)
+  const existing = firstDirectChild(li, null, LIST_CONTINUATION_CLASS)
   /* c8 ignore start -- unreachable defensive guard: `active` is always `true`
      here and `pendingInner` is non-empty whenever this path runs (see the note
      in syncListPendingDom). */
@@ -687,6 +691,12 @@ export class StreamingMarkdownRenderer {
   private committedTokens: BlockToken[] = []
   /** Whether `lastComplete` contains `|` — cached for the same reason. */
   private committedHasPipe = false
+  /**
+   * The table currently hosting a pending body row, held by reference so its
+   * cleanup never needs a DOM search (the backstop for the trailing-chain
+   * table walk). Null whenever no pending row is attached.
+   */
+  private pendingRowTable: HTMLTableElement | null = null
   private readonly frozenTail = new FrozenTailRenderer()
   // Incremental scanners (#30): re-tokenize / re-scan only past the last safe
   // boundary instead of the whole string every update. One per source stream —
@@ -812,8 +822,9 @@ export class StreamingMarkdownRenderer {
       else if (mathSource) syncFormingMathDom(formingEl, mathSource)
       else if (tableSource) syncFormingTableDom(formingEl, tableSource)
       formingEl.hidden = false
-      const committed = mayHaveCommittedTable ? this.findLastCommittedTable() : null
+      const committed = this.pendingRowTable ?? (mayHaveCommittedTable ? this.findLastCommittedTable() : null)
       if (committed) removePendingTableRow(committed)
+      this.pendingRowTable = null
     } else {
       clearFormingDom(formingEl)
       formingEl.hidden = true
@@ -851,21 +862,41 @@ export class StreamingMarkdownRenderer {
     pending: string,
     completeTokens?: BlockToken[],
   ): void {
-    const table = this.findLastCommittedTable()
+    // The direct reference to the row-hosting table is the cleanup backstop:
+    // even if the trailing walk no longer reaches that table, the stale
+    // pending row it hosts is still removed.
+    const table = this.findLastCommittedTable() ?? this.pendingRowTable
     if (!table) return
 
     if (pendingLineBelongsInTable(complete, pending, completeTokens)) {
       syncPendingTableRowDom(table, pending)
+      this.pendingRowTable = table
       return
     }
     removePendingTableRow(table)
+    this.pendingRowTable = null
   }
 
+  /**
+   * The trailing committed `<table>`, found by walking the last-element-child
+   * chain — never the selector engine. A pending body row only ever targets
+   * the TRAILING table (`pendingLineBelongsInTable` gates on the last block
+   * token being a table), and a stale pending row can only live in a table
+   * that was trailing when the row was attached (a frozen table never hosts
+   * one, and the tail morph sweeps rows when the table settles) — so the old
+   * whole-subtree `querySelectorAll('table')`, which ran on EVERY update of a
+   * pipe-bearing stream and cost ~20% of the jsdom benchmark inside the
+   * selector engine, is replaced by an O(depth) walk. The chain descends so a
+   * table inside a re-rooted open container (ADR 0004 Phase 2) is still
+   * found; a trailing footnotes section is skipped (the content precedes it).
+   */
   private findLastCommittedTable(): HTMLTableElement | null {
-    const tables = this.completedEl?.querySelectorAll('table')
-    const last = tables?.[tables.length - 1]
-    if (last instanceof Element && last.tagName === 'TABLE') {
-      return last
+    let el: Element | null = this.completedEl?.lastElementChild ?? null
+    if (el && el.tagName === 'SECTION' && el.classList.contains('footnotes')) {
+      el = el.previousElementSibling
+    }
+    for (; el; el = el.lastElementChild) {
+      if (el.tagName === 'TABLE') return el as HTMLTableElement
     }
     return null
   }
