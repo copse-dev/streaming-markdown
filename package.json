@@ -118,6 +118,7 @@
     "bench": "tsx scripts/bench-streaming.mts",
     "bench:browser": "tsx scripts/bench-browser.mts",
     "bench:competitors": "npm --prefix bench/competitors run bench",
+    "bench:competitors:browser": "npm --prefix bench/competitors run bench:browser",
     "size": "node --import tsx scripts/check-bundle-size.mts",
     "size:update": "node --import tsx scripts/check-bundle-size.mts --update",
     "changelog": "tsx scripts/gen-changelog.mts",
