@@ -12,7 +12,7 @@ describe('normalizeHostImagePath — screenshot determinism (#churn)', () => {
   })
 
   it('strips a container absolute prefix down to the root marker', () => {
-    assert.deepEqual(normalizeHostImagePath('/opt/cursor/artifacts/screenshots/x.png'), {
+    assert.deepEqual(normalizeHostImagePath('/opt/runner/artifacts/screenshots/x.png'), {
       path: 'artifacts/screenshots/x.png',
     })
   })
@@ -26,7 +26,7 @@ describe('normalizeHostImagePath — screenshot determinism (#churn)', () => {
   it('collapses every volatile form of the same artifact to one identical path', () => {
     const forms = [
       'artifacts/screenshots/x.png',
-      '/opt/cursor/artifacts/screenshots/x.png',
+      '/opt/runner/artifacts/screenshots/x.png',
       '/home/user/some-repo/artifacts/screenshots/x.png',
       '/tmp/build-9f3a/checkout/artifacts/screenshots/x.png',
       'https://host.example/v1/agents/session-abc123/artifacts/download?path=artifacts/screenshots/x.png',
@@ -65,7 +65,7 @@ describe('normalizeHostImagePath — screenshot determinism (#churn)', () => {
 describe('host image policy renders volatile srcs to one stable placeholder', () => {
   it('renders the container-absolute and relative forms identically', () => {
     withHostImagePolicy(() => {
-      const abs = renderMarkdownUnsafe('<img alt="shot" src="/opt/cursor/artifacts/screenshots/x.png" />')
+      const abs = renderMarkdownUnsafe('<img alt="shot" src="/opt/runner/artifacts/screenshots/x.png" />')
       const rel = renderMarkdownUnsafe('<img alt="shot" src="artifacts/screenshots/x.png" />')
       assert.equal(abs, rel)
       assert.match(abs, /data-host-image-path="artifacts\/screenshots\/x\.png"/)

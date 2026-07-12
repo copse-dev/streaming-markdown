@@ -109,7 +109,7 @@ export interface NormalizeImagePathOptions {
  * output references the same artifact through volatile forms —
  *
  *   - `artifacts/screenshots/x.png`                              (already relative)
- *   - `/opt/cursor/artifacts/screenshots/x.png`                 (container abs path)
+ *   - `/opt/runner/artifacts/screenshots/x.png`                 (container abs path)
  *   - `/home/user/some-repo/artifacts/screenshots/x.png`        (repo/dir names leak)
  *   - `https://host/v1/agents/<session>/artifacts/download?path=artifacts/screenshots/x.png`
  *

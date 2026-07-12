@@ -7,7 +7,7 @@
 // other tag falls through to escaping.
 //
 // The renderer normalizes the path so volatile prefixes — a container abs path
-// (`/opt/cursor/artifacts/…`), a repo/dir name (`/home/user/<repo>/artifacts/…`),
+// (`/opt/runner/artifacts/…`), a repo/dir name (`/home/user/<repo>/artifacts/…`),
 // or a per-session download URL — all collapse to the same
 // `data-host-image-path`. That determinism is what stops the rendered DOM (and
 // any screenshot of it) from churning when those environment details change.
