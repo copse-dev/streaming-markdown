@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>@copse/streaming-markdown — Streaming Playground</title>
+  <!-- Shared Copse "wave" mark (from copse-dev/agent-pane, assets/icon-app-wave.svg). -->
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="./favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="./favicon-16.png" sizes="16x16" type="image/png">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="manifest" href="./site.webmanifest">
+  <meta name="theme-color" content="#0F172A">
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1c2128;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --text-bright: #f0f6fc;
+      --accent: #58a6ff;
+      --accent-dim: rgba(31, 111, 235, 0.15);
+      --success: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+      --code-bg: #161b22;
+      --pending-bg: rgba(21, 40, 70, 0.7);
+      --pending-border: rgba(31, 111, 235, 0.5);
+      --pending-text: #8b949e;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    a { color: var(--accent); }
+    a:visited { color: var(--accent); }
+    a:hover { text-decoration: underline; }
+
+    /* ── Header ─────────────────────────────────────────── */
+    .site-header {
+      border-bottom: 1px solid var(--border);
+      padding: 1.5rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .site-header-left {
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+    }
+
+    .site-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text-bright);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    .site-tagline { color: var(--text-muted); font-size: 0.85rem; }
+
+    .header-links { display: flex; gap: 0.9rem; align-items: center; }
+
+    .header-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.15s;
+    }
+
+    .header-links a:hover { color: var(--accent); }
+
+    /* ── Hero ────────────────────────────────────────────── */
+    .hero {
+      padding: 2.5rem 2rem 1rem;
+      max-width: 1100px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--text-bright);
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.02em;
+    }
+
+    .hero p {
+      color: var(--text-muted);
+      font-size: 1rem;
+      max-width: 640px;
+      margin: 0 auto;
+      line-height: 1.7;
+    }
+
+    .hero p code {
+      font-size: 0.9em;
+      background: var(--surface);
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+
+    /* ── Section layout ──────────────────────────────────── */
+    .section {
+      padding: 1.5rem 2rem 2.5rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    /* ── Control bar ─────────────────────────────────────── */
+    .controls {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.15rem;
+      margin-bottom: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .control-row {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      flex-wrap: wrap;
+    }
+
+    .sample-bar { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+
+    .sample-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 6px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .sample-btn:hover, .sample-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 0.5rem 1.15rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: opacity 0.15s;
+    }
+
+    .btn-primary:hover { opacity: 0.85; }
+
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 6px;
+      padding: 0.5rem 0.9rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .btn-secondary:hover { border-color: var(--text-muted); color: var(--text); }
+
+    .slider-group {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      min-width: 220px;
+    }
+
+    .slider-group input[type="range"] {
+      accent-color: var(--accent);
+      cursor: pointer;
+      flex: 1;
+      min-width: 90px;
+    }
+
+    .slider-group .slider-val {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--accent);
+      min-width: 4.5rem;
+      text-align: right;
+    }
+
+    .control-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-right: 0.15rem;
+    }
+
+    .spacer { flex: 1; }
+
+    .status-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.78rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--text-muted);
+    }
+
+    .status-dot .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .status-dot.streaming .dot {
+      background: var(--warning);
+      animation: blink 0.8s ease-in-out infinite;
+    }
+
+    .status-dot.done .dot { background: var(--success); }
+
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    .sample-caption {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      padding-top: 0.85rem;
+      line-height: 1.6;
+    }
+
+    .sample-caption strong { color: var(--text-bright); font-weight: 600; }
+
+    /* ── Panels ──────────────────────────────────────────── */
+    .panels {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+
+    @media (max-width: 860px) { .panels { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel.naive { border-color: rgba(248, 81, 73, 0.35); }
+    .panel.library { border-color: rgba(63, 185, 80, 0.35); }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.7rem 1rem;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      gap: 0.75rem;
+    }
+
+    .panel-title {
+      font-size: 0.85rem;
+      color: var(--text-bright);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      min-width: 0;
+    }
+
+    .panel-title .tag {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 700;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    .panel.naive .tag { background: rgba(248, 81, 73, 0.15); color: var(--danger); }
+    .panel.library .tag { background: rgba(63, 185, 80, 0.15); color: var(--success); }
+
+    .panel-title code {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ── Metric badges ───────────────────────────────────── */
+    .metrics {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.55rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    .metric {
+      flex: 1;
+      min-width: 5.5rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.4rem 0.55rem;
+      text-align: center;
+    }
+
+    .metric .metric-val {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-bright);
+      line-height: 1.2;
+      transition: color 0.2s;
+    }
+
+    .metric .metric-label {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-top: 0.1rem;
+    }
+
+    /* Colour the metric by severity: the naive pane lights up red as jank
+       accumulates; the library pane stays green because it barely moves. */
+    .metric.hot .metric-val { color: var(--danger); }
+    .metric.warm .metric-val { color: var(--warning); }
+    .metric.cool .metric-val { color: var(--success); }
+
+    .panel-body {
+      padding: 1rem;
+      height: 420px;
+      overflow-y: auto;
+      font-size: 0.9rem;
+      flex: 1;
+    }
+
+    /* ── Rendered content styles ─────────────────────────── */
+    .panel-body h1 { font-size: 1.4rem; margin: 0.5rem 0; color: var(--text-bright); }
+    .panel-body h2 { font-size: 1.15rem; margin: 0.75rem 0 0.4rem; color: var(--text-bright); }
+    .panel-body h3 { font-size: 1rem; margin: 0.6rem 0 0.3rem; color: var(--text-bright); }
+    .panel-body p { margin: 0.4rem 0; }
+    .panel-body ul, .panel-body ol { margin: 0.4rem 0 0.4rem 1.5rem; }
+    .panel-body li { margin: 0.15rem 0; }
+    .panel-body blockquote {
+      border-left: 3px solid var(--border);
+      padding-left: 0.75rem;
+      color: var(--text-muted);
+      margin: 0.5rem 0;
+      font-style: italic;
+    }
+    .panel-body code {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+      font-size: 0.82em;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+    .panel-body pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      overflow-x: auto;
+      margin: 0.5rem 0;
+    }
+    .panel-body pre code { background: none; border: none; padding: 0; font-size: 0.85em; }
+    .panel-body table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 0.5rem 0;
+      font-size: 0.88em;
+    }
+    .panel-body th, .panel-body td {
+      border: 1px solid var(--border);
+      padding: 0.35rem 0.6rem;
+      text-align: left;
+    }
+    .panel-body th { background: var(--surface2); color: var(--text-bright); }
+    .panel-body a { color: var(--accent); }
+    .panel-body strong { color: var(--text-bright); }
+    .panel-body hr { border: none; border-top: 1px solid var(--border); margin: 0.75rem 0; }
+
+    /* ── Pending state styles (library pane) ──────────────
+       Same jank contract as the main demo: pending chrome keeps the element's
+       final metrics, so promotion only recolours — text never moves. */
+    .panel-body p,
+    .panel-body h1,
+    .panel-body h2,
+    .panel-body h3 {
+      border-left: 3px solid transparent;
+      padding-left: 0.6rem;
+      margin-left: calc(-0.6rem - 3px);
+      border-radius: 0 3px 3px 0;
+    }
+
+    .panel-body blockquote p,
+    .panel-body li p { border-left: none; padding-left: 0; margin-left: 0; }
+
+    p.stream-pending-paragraph,
+    p:has(> .stream-pending-paragraph-continuation) {
+      background: var(--pending-bg);
+      border-color: var(--pending-border);
+    }
+
+    .panel-body.is-streaming > p:last-child,
+    .panel-body.is-streaming
+      .stream-complete:has(+ .stream-forming[hidden])
+      > p:last-child {
+      background: var(--pending-bg);
+      border-color: var(--pending-border);
+    }
+
+    p.stream-pending-paragraph { color: var(--pending-text); }
+
+    .stream-pending-list-item,
+    li:has(> .stream-pending-list-continuation) {
+      background: var(--pending-bg);
+      border-radius: 3px;
+    }
+
+    .stream-pending-list-item { color: var(--pending-text); }
+    .stream-pending-list-item::marker { color: var(--accent); }
+
+    .stream-pending-heading {
+      background: var(--pending-bg);
+      border-left: 3px solid var(--pending-border);
+      padding-left: 0.6rem;
+      margin-left: calc(-0.6rem - 3px);
+      color: var(--pending-text);
+      border-radius: 0 3px 3px 0;
+      font-weight: 700;
+    }
+
+    .stream-pending-h1 { font-size: 1.4rem; margin: 0.5rem 0 0.5rem calc(-0.6rem - 3px); }
+    .stream-pending-h2 { font-size: 1.15rem; margin: 0.75rem 0 0.4rem calc(-0.6rem - 3px); }
+    .stream-pending-h3 { font-size: 1rem; margin: 0.6rem 0 0.3rem calc(-0.6rem - 3px); }
+
+    .stream-pending-blockquote {
+      background: var(--pending-bg);
+      border-left: 3px solid var(--pending-border);
+      padding-left: 0.75rem;
+      color: var(--pending-text);
+      font-style: italic;
+    }
+
+    .stream-table-forming {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.5rem 0;
+      font-size: 0.88em;
+    }
+
+    .stream-table-forming th,
+    .stream-table-forming td {
+      border: 1px solid var(--border);
+      padding: 0.35rem 0.6rem;
+      text-align: left;
+    }
+
+    .stream-table-forming th { background: var(--surface2); }
+
+    tr.stream-pending-row td {
+      background: var(--pending-bg);
+      color: var(--pending-text);
+    }
+
+    .stream-fence-forming { border-color: var(--pending-border); }
+    .stream-pending { color: var(--pending-text); }
+
+    /* Settle-in for the incremental (library) pane's committed blocks — opacity
+       only, no layout. The naive pane recreates its whole subtree per tick, so
+       scoping the animation to .stream-complete keeps it off the naive side. */
+    @media (prefers-reduced-motion: no-preference) {
+      .stream-complete > :not(.stream-pending-block),
+      .stream-complete li:not(.stream-pending-block),
+      .stream-complete tbody tr:not(.stream-pending-row) {
+        animation: stream-settle 0.25s ease-out;
+      }
+
+      .panel-body.library p,
+      .panel-body.library li,
+      .panel-body.library blockquote,
+      .panel-body.library td {
+        transition: background-color 0.3s ease-out, border-color 0.3s ease-out,
+          color 0.3s ease-out;
+      }
+    }
+
+    @keyframes stream-settle { from { opacity: 0.55; } to { opacity: 1; } }
+
+    /* ── Footnotes ───────────────────────────────────────── */
+    .panel-body sup.footnote-ref { font-size: 0.7em; }
+    .panel-body sup.footnote-ref a { text-decoration: none; }
+    .panel-body .footnotes {
+      margin-top: 1rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.85em;
+      color: var(--text-muted);
+    }
+    .panel-body .footnotes ol { margin-left: 1.2rem; }
+    .panel-body .footnote-backref { text-decoration: none; margin-left: 0.25rem; }
+
+    /* ── Takeaway strip ──────────────────────────────────── */
+    .takeaway {
+      margin-top: 1.5rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.15rem 1.25rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.7;
+    }
+
+    .takeaway h3 {
+      font-size: 0.95rem;
+      color: var(--text-bright);
+      margin-bottom: 0.5rem;
+    }
+
+    .takeaway ul { margin: 0.4rem 0 0 1.2rem; }
+    .takeaway code {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.85em;
+      background: var(--surface2);
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    .takeaway .naive-word { color: var(--danger); font-weight: 600; }
+    .takeaway .lib-word { color: var(--success); font-weight: 600; }
+
+    /* ── Footer ──────────────────────────────────────────── */
+    .site-footer {
+      padding: 1.5rem 2rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .site-footer a { color: var(--text-muted); text-decoration: none; }
+    .site-footer a:hover { color: var(--accent); }
+
+    /* ── Scrollbar ───────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-left">
+    <span class="site-title">@copse/streaming-markdown</span>
+    <span class="site-tagline">streaming playground</span>
+  </div>
+  <div class="header-links">
+    <a href="./index.html">← Live demo</a>
+    <a href="https://github.com/copse-dev/streaming-markdown" target="_blank">GitHub</a>
+    <a href="https://www.npmjs.com/package/@copse/streaming-markdown" target="_blank">npm</a>
+  </div>
+</header>
+
+<div class="hero">
+  <h1>Naive re-render vs. incremental streaming</h1>
+  <p>
+    Both panes stream the <em>same</em> markdown, one chunk at a time. The
+    <strong>left</strong> is the naive baseline every chat UI starts with —
+    <code>innerHTML</code>-replace the at-rest render of the whole partial on
+    every chunk. The <strong>right</strong> is
+    <code>StreamingMarkdownRenderer.update()</code>, which patches the DOM
+    incrementally and holds unfinished constructs in a pending state. Watch the
+    jank counters diverge.
+  </p>
+</div>
+
+<div class="section">
+  <div class="controls">
+    <div class="control-row">
+      <span class="control-label">Failure case</span>
+      <div class="sample-bar" id="sample-bar">
+        <button class="sample-btn active" data-sample="bold">Unclosed **bold</button>
+        <button class="sample-btn" data-sample="table">Half-formed table</button>
+        <button class="sample-btn" data-sample="fence">Open code fence</button>
+        <button class="sample-btn" data-sample="footnote">Late footnote</button>
+        <button class="sample-btn" data-sample="mixed">Everything</button>
+      </div>
+    </div>
+
+    <div class="control-row">
+      <button class="btn-primary" id="btn-play">&#9654; Replay</button>
+      <button class="btn-secondary" id="btn-clear">Clear</button>
+
+      <div class="slider-group" title="How many characters each chunk delivers. Larger chunks = the naive pane flashes bigger, less-finished fragments.">
+        <span>chunk</span>
+        <input type="range" id="chunk-slider" min="1" max="24" step="1" value="4">
+        <span class="slider-val" id="chunk-val">4 ch</span>
+      </div>
+
+      <div class="slider-group" title="Delay between chunks. Slower streaming makes the flash-of-incomplete-markdown on the naive side easy to see frame by frame.">
+        <span>throttle</span>
+        <input type="range" id="speed-slider" min="10" max="240" step="10" value="90">
+        <span class="slider-val" id="speed-val">90 ms</span>
+      </div>
+
+      <div class="spacer"></div>
+      <span class="status-dot" id="status"><span class="dot"></span><span id="status-text">idle</span></span>
+    </div>
+
+    <div class="sample-caption" id="sample-caption"></div>
+  </div>
+
+  <div class="panels">
+    <div class="panel naive">
+      <div class="panel-header">
+        <span class="panel-title">
+          <span class="tag">Naive</span>
+          <code>el.innerHTML = renderMarkdown(prefix)</code>
+        </span>
+      </div>
+      <div class="metrics">
+        <div class="metric" id="naive-m-nodes"><div class="metric-val">0</div><div class="metric-label">nodes added</div></div>
+        <div class="metric" id="naive-m-shifts"><div class="metric-val">0</div><div class="metric-label">layout shifts</div></div>
+        <div class="metric" id="naive-m-cls"><div class="metric-val">0.000</div><div class="metric-label">CLS score</div></div>
+      </div>
+      <div class="panel-body" id="naive-output"></div>
+    </div>
+
+    <div class="panel library">
+      <div class="panel-header">
+        <span class="panel-title">
+          <span class="tag">This library</span>
+          <code>renderer.update(prefix)</code>
+        </span>
+      </div>
+      <div class="metrics">
+        <div class="metric" id="lib-m-nodes"><div class="metric-val">0</div><div class="metric-label">nodes added</div></div>
+        <div class="metric" id="lib-m-shifts"><div class="metric-val">0</div><div class="metric-label">layout shifts</div></div>
+        <div class="metric" id="lib-m-cls"><div class="metric-val">0.000</div><div class="metric-label">CLS score</div></div>
+      </div>
+      <div class="panel-body library" id="lib-output"></div>
+    </div>
+  </div>
+
+  <div class="takeaway">
+    <h3>What the counters measure</h3>
+    <p>
+      <strong>Nodes added</strong> counts DOM elements created (via a
+      <code>MutationObserver</code> on each pane). The <span class="naive-word">naive</span>
+      pane re-parses and re-inserts the <em>entire</em> partial on every chunk,
+      so its count climbs with the square of the document; the
+      <span class="lib-word">incremental</span> pane only appends what changed.
+      <strong>Layout shifts</strong> / <strong>CLS</strong> come from a
+      <code>PerformanceObserver({ type: 'layout-shift' })</code>, attributed to
+      whichever pane owns the shifted node — the visible jank of an unfinished
+      construct flashing raw, then re-flowing when it completes.
+    </p>
+    <ul>
+      <li><span class="naive-word">Naive:</span> <code>**bold</code> shows literal asterisks, a half table is a paragraph of pipes, <code>[^1]</code> is literal text — each flashes, then the whole subtree is thrown away and rebuilt next chunk.</li>
+      <li><span class="lib-word">This library:</span> the unfinished construct is held in a <em>pending</em> state that already has its final layout, so completing it only recolours in place. This page doubles as a visual regression bed for that pending→committed motion contract (see <a href="https://github.com/copse-dev/streaming-markdown/blob/main/ARCHITECTURE.md">ARCHITECTURE.md</a>).</li>
+    </ul>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <span>@copse/streaming-markdown · Apache-2.0</span>
+  <span>
+    <a href="./index.html">Live demo</a> ·
+    <a href="https://github.com/copse-dev/streaming-markdown">GitHub</a> ·
+    <a href="https://www.npmjs.com/package/@copse/streaming-markdown">npm</a>
+  </span>
+</footer>
+
+<script type="module">
+import {
+  StreamingMarkdownRenderer,
+  renderMarkdown,
+  setSanitizedHtml,
+  isBrowserSanitizerSupported,
+  dompurifyBackend,
+  setDefaultConfig,
+} from './streaming-markdown.browser.mjs';
+
+// On engines without the native Sanitizer API (Firefox, older Chromium) install
+// DOMPurify as the process-wide default sanitizer backend. Registering it
+// globally — rather than passing it per render — is what lets `setSanitizedHtml`
+// resolve a backend: it re-sanitizes at its own sink using the AMBIENT config,
+// so a per-call `sanitizerBackend` would not reach it. Where the native
+// Sanitizer exists this is a no-op and everything uses the zero-dependency path.
+if (!isBrowserSanitizerSupported()) {
+  setDefaultConfig({ sanitizerBackend: dompurifyBackend });
+}
+const renderConfig = {};
+
+// ── Canonical failure cases (issue #158) ────────────────────────────────────
+// Each is a shape a naive "re-render the string as HTML every token" approach
+// flashes or mangles mid-stream. The caption explains what to watch for.
+const SAMPLES = {
+  bold: {
+    label: 'Unclosed **bold',
+    caption: 'A bold run opens with <strong>**</strong> and stays open for a whole clause. ' +
+      'The <strong>naive</strong> pane prints the literal asterisks until the closing ' +
+      '<code>**</code> finally lands; the <strong>library</strong> pane holds the tail ' +
+      'in a pending state and never flashes a stray <code>**</code>.',
+    text: `# Release notes
+
+We shipped **a fairly long, still-unclosed bold phrase that keeps going for a
+while before it finally** closes — and only then does the naive renderer stop
+showing the raw asterisks.
+
+Then some ordinary prose continues afterwards so the two panes have room to
+diverge as the stream flows.`,
+  },
+  table: {
+    label: 'Half-formed table',
+    caption: 'A GFM table is ambiguous until its <code>|---|</code> delimiter row arrives, ' +
+      'and each body row lands one at a time. The <strong>naive</strong> pane flashes ' +
+      'a paragraph of pipes, then a header-only table, rebuilding the whole thing every ' +
+      'chunk; the <strong>library</strong> pane shows a <em>forming</em> table with a ' +
+      'pending row.',
+    text: `## Deploy status
+
+| Service   | Region    | Status   |
+| --------- | --------- | -------- |
+| gateway   | us-east   | healthy  |
+| workers   | us-west   | healthy  |
+| scheduler | eu-central| degraded |
+| archiver  | ap-south  | healthy  |
+
+The table above assembles a row at a time — watch the naive pane re-lay-out the
+whole grid on every single chunk.`,
+  },
+  fence: {
+    label: 'Open code fence',
+    caption: 'While a code fence is open, its interior must stay inert — never parsed as ' +
+      'markdown. The <strong>naive</strong> pane re-highlights and replaces the entire ' +
+      '<code>&lt;pre&gt;</code> on every chunk; the <strong>library</strong> pane streams ' +
+      'text into one stable fence and upgrades it in place when the closing <code>```</code> ' +
+      'arrives.',
+    text: `## Example
+
+Here is a function that streams a response into a renderer:
+
+\`\`\`js
+async function stream(url, el) {
+  const renderer = new StreamingMarkdownRenderer(el)
+  const res = await fetch(url)
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let acc = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    acc += dec.decode(value, { stream: true })
+    renderer.update(acc) // incremental DOM patch, no reflow
+  }
+}
+\`\`\`
+
+And a closing paragraph after the fence completes.`,
+  },
+  footnote: {
+    label: 'Late footnote',
+    caption: 'A reference like <code>[^1]</code> appears in the prose long before its ' +
+      'definition streams in at the end. The <strong>naive</strong> pane shows literal ' +
+      '<code>[^1]</code> text and then reflows the whole document when the definition ' +
+      'upgrades it to a numbered link; the <strong>library</strong> pane keeps the ' +
+      'surrounding prose put and grows the footnotes section without a reflow.',
+    text: `## Design notes
+
+Streaming markdown began as a renderer for LLM chat UIs[^chat], where models
+emit citations[^cite] as footnote references constantly, well before the
+matching definitions arrive at the tail of the message.
+
+Until the definition streams in, a naive renderer just shows the literal
+\`[^chat]\` and \`[^cite]\` markers in the middle of the sentence.
+
+[^chat]: Tokens arrive incrementally, so blocks must render before they finish.
+[^cite]: References are numbered in first-use order; the section grows as each definition lands.`,
+  },
+  mixed: {
+    label: 'Everything',
+    caption: 'All four failure shapes in one stream: unclosed emphasis, a half-formed table, ' +
+      'an open code fence, and a late footnote definition. The counters pull apart the ' +
+      'fastest here.',
+    text: `# Streaming edge cases
+
+A run like **this bold phrase stays open** for a while — the naive pane flashes
+the raw asterisks[^why] until it closes.
+
+| Feature   | Status   | Owner |
+| --------- | -------- | ----- |
+| Streaming | shipping | core  |
+| Footnotes | shipping | core  |
+
+\`\`\`ts
+// The fence interior streams as inert, escaped text — a stray *asterisk* or #
+// here never flashes as emphasis or a heading.
+const answer = compute(42)
+\`\`\`
+
+The footnote definition below lands last and upgrades the earlier marker.
+
+[^why]: Exactly the shapes a naive re-render flashes on, all in one place.`,
+  },
+};
+
+// ── Jank instrumentation ────────────────────────────────────────────────────
+// Two independent per-pane signals:
+//   1. MutationObserver → count DOM element nodes added. The naive full-replace
+//      re-creates the whole subtree each chunk; the incremental path appends
+//      only what changed.
+//   2. PerformanceObserver('layout-shift') → CLS. Each shift entry carries the
+//      nodes that moved; we attribute the score to whichever pane contains them.
+function countAddedElements(mutations) {
+  let n = 0;
+  for (const m of mutations) {
+    m.addedNodes.forEach((node) => {
+      if (node.nodeType === 1) {
+        n += 1 + node.querySelectorAll('*').length; // the node + its subtree
+      }
+    });
+  }
+  return n;
+}
+
+class Pane {
+  constructor(prefix) {
+    this.el = document.getElementById(`${prefix}-output`);
+    this.mNodes = document.querySelector(`#${prefix}-m-nodes .metric-val`);
+    this.mShifts = document.querySelector(`#${prefix}-m-shifts .metric-val`);
+    this.mCls = document.querySelector(`#${prefix}-m-cls .metric-val`);
+    this.nodesCard = document.getElementById(`${prefix}-m-nodes`);
+    this.clsCard = document.getElementById(`${prefix}-m-cls`);
+    this.reset();
+
+    // Count nodes added to this pane for the whole page lifetime; we snapshot
+    // the baseline at reset() so each replay measures only its own churn.
+    this.observer = new MutationObserver((mut) => {
+      this.nodesAdded += countAddedElements(mut);
+      this.renderNodeMetric();
+    });
+    this.observer.observe(this.el, { childList: true, subtree: true });
+  }
+
+  reset() {
+    this.el.innerHTML = '';
+    this.nodesAdded = 0;
+    this.shiftCount = 0;
+    this.clsScore = 0;
+    this.renderNodeMetric();
+    this.renderShiftMetric();
+  }
+
+  renderNodeMetric() {
+    this.mNodes.textContent = this.nodesAdded.toLocaleString();
+  }
+
+  renderShiftMetric() {
+    this.mShifts.textContent = this.shiftCount.toLocaleString();
+    this.mCls.textContent = this.clsScore.toFixed(3);
+  }
+
+  // Colour the cards by severity so the divergence reads at a glance. Thresholds
+  // are relative — the point is the contrast between the two panes.
+  colourMetrics() {
+    const cls = this.clsScore;
+    this.clsCard.classList.toggle('hot', cls >= 0.1);
+    this.clsCard.classList.toggle('warm', cls >= 0.01 && cls < 0.1);
+    this.clsCard.classList.toggle('cool', cls < 0.01);
+  }
+
+  addShift(value) {
+    this.shiftCount += 1;
+    this.clsScore += value;
+    this.renderShiftMetric();
+    this.colourMetrics();
+  }
+}
+
+const naive = new Pane('naive');
+const lib = new Pane('lib');
+
+// Attribute each layout-shift entry to the pane whose subtree the shifted node
+// lives in. `hadRecentInput` shifts (user scroll/type) are ignored, matching the
+// CLS spec. Shifts with no source nodes can't be attributed and are skipped.
+if ('PerformanceObserver' in window) {
+  try {
+    const po = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.hadRecentInput) continue;
+        for (const src of entry.sources || []) {
+          const node = src.node;
+          if (!node) continue;
+          if (naive.el.contains(node)) { naive.addShift(entry.value); break; }
+          if (lib.el.contains(node)) { lib.addShift(entry.value); break; }
+        }
+      }
+    });
+    po.observe({ type: 'layout-shift', buffered: false });
+  } catch { /* layout-shift unsupported (Firefox/Safari) — node counts still tell the story */ }
+}
+
+// ── Streaming driver ────────────────────────────────────────────────────────
+const sampleBar = document.getElementById('sample-bar');
+const caption = document.getElementById('sample-caption');
+const chunkSlider = document.getElementById('chunk-slider');
+const chunkVal = document.getElementById('chunk-val');
+const speedSlider = document.getElementById('speed-slider');
+const speedVal = document.getElementById('speed-val');
+const statusEl = document.getElementById('status');
+const statusText = document.getElementById('status-text');
+const btnPlay = document.getElementById('btn-play');
+const btnClear = document.getElementById('btn-clear');
+
+let currentSample = 'bold';
+let timer = null;
+let pos = 0;
+let libRenderer = null;
+
+function setStatus(state, text) {
+  statusEl.className = `status-dot ${state}`;
+  statusText.textContent = text;
+}
+
+// Never let a chunk end exactly on a newline: the pending tail would be empty
+// for one tick and the library pane's open-block highlight would drop for a
+// frame. Step one char past the newline to keep the tail non-empty.
+function advance(text, from, step) {
+  let next = Math.min(from + step, text.length);
+  if (next < text.length && text[next - 1] === '\n') next++;
+  return next;
+}
+
+function stop() {
+  if (timer) { clearInterval(timer); timer = null; }
+}
+
+function reset() {
+  stop();
+  naive.reset();
+  lib.reset();
+  naive.colourMetrics();
+  lib.colourMetrics();
+  lib.el.classList.remove('is-streaming');
+  libRenderer = new StreamingMarkdownRenderer(lib.el, renderConfig);
+  pos = 0;
+}
+
+function play() {
+  reset();
+  const text = SAMPLES[currentSample].text;
+  const step = Number(chunkSlider.value);
+  const interval = Number(speedSlider.value);
+  lib.el.classList.add('is-streaming');
+  setStatus('streaming', 'streaming…');
+
+  timer = setInterval(() => {
+    if (pos >= text.length) {
+      stop();
+      lib.el.classList.remove('is-streaming');
+      setStatus('done', 'settled');
+      return;
+    }
+    pos = advance(text, pos, step);
+    const prefix = text.slice(0, pos);
+
+    // Naive baseline: re-parse the whole partial at rest and replace the entire
+    // subtree. renderMarkdown returns sanitized HTML; setSanitizedHtml assigns
+    // it through the same sink the library uses (Trusted Types-safe).
+    setSanitizedHtml(naive.el, renderMarkdown(prefix, renderConfig));
+    naive.el.scrollTop = naive.el.scrollHeight;
+
+    // Incremental path: patch the DOM in place, holding unfinished blocks in a
+    // pending state that already carries their final layout.
+    libRenderer.update(prefix);
+    lib.el.scrollTop = lib.el.scrollHeight;
+  }, interval);
+}
+
+function selectSample(name) {
+  currentSample = name;
+  caption.innerHTML = SAMPLES[name].caption;
+  document.querySelectorAll('.sample-btn').forEach((b) =>
+    b.classList.toggle('active', b.dataset.sample === name));
+  play();
+}
+
+sampleBar.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-sample]');
+  if (!btn) return;
+  selectSample(btn.dataset.sample);
+});
+
+btnPlay.addEventListener('click', play);
+btnClear.addEventListener('click', () => {
+  reset();
+  setStatus('', 'idle');
+});
+
+chunkSlider.addEventListener('input', () => { chunkVal.textContent = `${chunkSlider.value} ch`; });
+speedSlider.addEventListener('input', () => { speedVal.textContent = `${speedSlider.value} ms`; });
+
+// Auto-start on the first failure case so the page is live on load — the
+// shareable artifact per issue #158.
+selectSample('bold');
+</script>
+</body>
+</html>
