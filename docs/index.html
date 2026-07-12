@@ -1391,12 +1391,15 @@ import {
 
 // The single MarkdownConfig object every render/renderer in this demo is passed
 // (the process-wide `set*` setters are gone — config is injected per render).
-// Fields are filled in below as backends load; the same object reference flows
-// to `renderStreamingMarkdown(partial, renderConfig)` and
-// `new StreamingMarkdownRenderer(host, renderConfig)`, so a later mutation (a
-// highlighter loading, the math grammar switching on) is picked up on the next
-// render without re-plumbing.
-const renderConfig = {};
+// A `StreamingMarkdownRenderer` SNAPSHOTS this object at construction (#153), so
+// a field mutated afterwards reaches `renderStreamingMarkdown(partial,
+// renderConfig)` (read live each tick) but NOT an already-built renderer
+// instance. Anything a renderer must honour therefore has to be set BEFORE it is
+// constructed — hence `mathSyntax` is on from the start rather than flipped
+// mid-stream (its grammar has a currency guard, so literal `$20` stays literal).
+// `codeHighlighter` is the exception: it is filled in as a backend loads, and
+// the demo re-plumbs by rebuilding the affected renderers (rerenderAfterHighlight).
+const renderConfig = { mathSyntax: true };
 
 // Firefox and older browsers lack the native Sanitizer API (Element.setHTML);
 // route those through DOMPurify by naming it as the config's sanitizer backend.
@@ -1503,10 +1506,10 @@ function ensureMermaid() {
 }
 
 // Load the KaTeX backend on the first math the stream mentions and capture the
-// MathRenderer to pass via config to hydrate. Prose `$…$` grammar is turned on
-// separately and explicitly through `renderConfig.mathSyntax` (set in
-// detectExtras); katex itself (import-map/CDN) is warmed here so the chip times
-// the real network cost and hydration at stream end is instant.
+// MathRenderer to pass via config to hydrate. Prose `$…$` grammar is enabled
+// separately at construction (`renderConfig.mathSyntax`), so the pending-math
+// scaffolding already exists; katex itself (import-map/CDN) is warmed here so
+// the chip times the real network cost and hydration at stream end is instant.
 function ensureKatex() {
   if (extras.katex.promise) return extras.katex.promise;
   setChips('katex', 'loading', 'loading from CDN…');
@@ -1581,11 +1584,11 @@ function detectExtras(partial) {
   if (activeHighlighter === 'shiki' && !extras.shiki.promise
       && /```(?!mermaid\b)[a-z0-9]/i.test(partial)) ensureShiki();
   // Any of the four math forms: $$…$$, \[…\], inline $…$ / \(…\), or a ```math
-  // fence. Turn the prose `$…$` grammar on via config the moment math appears
-  // (explicit `{ mathSyntax: true }` — the ```math fence renders regardless) and
-  // kick off the backend load so hydration is ready when the stream settles.
+  // fence. The `$…$` prose grammar is already on (renderConfig.mathSyntax, set
+  // at construction), so partials stream as pending-math scaffolding from the
+  // first paint; here we only kick the lazy KaTeX *library* load the moment math
+  // appears, so hydration is ready when the stream settles.
   if (/\$\$|\\\[|\\\(|```math|\$[^$\n]+\$/.test(partial)) {
-    renderConfig.mathSyntax = true;
     if (!extras.katex.promise) ensureKatex();
   }
 }
