@@ -72,7 +72,7 @@ import {
   setActiveFootnoteContext,
 } from './footnotes.ts'
 import { getHtmlPolicy } from './html-policy.ts'
-import { type LinkReferenceMap } from './link-references.ts'
+import { normalizeReferenceLabel, type LinkReferenceMap } from './link-references.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml, setSanitizedHtml } from './html-sink.ts'
 import { renderMarkdownUnsafe, TOP_LEVEL_RENDER_OPTS } from './renderer.ts'
@@ -417,6 +417,15 @@ export class FrozenTailRenderer {
   private frozenNodeCount = 0
   /** Serialized committed link-ref map at the last commit (invalidation guard). */
   private lastLinkRefKey = ''
+  /** The committed link-ref map behind {@link lastLinkRefKey} (delta diffing). */
+  private lastLinkRefs: LinkReferenceMap = new Map()
+  /**
+   * Normalized bracketed spans seen in FROZEN source (accumulated per delta,
+   * O(delta) each commit). Over-approximates the reference labels the frozen
+   * region could contain; a new definition whose label is not in here cannot
+   * change frozen output, so its arrival skips the limitation-J full morph.
+   */
+  private frozenLabelCandidates = new Set<string>()
   /**
    * Whether the committed render leaves a `<details>` open (#600). Read by the
    * streaming renderer to hold the pending tail so a collapsed body is not
@@ -484,6 +493,44 @@ export class FrozenTailRenderer {
       if (deltaHtml.toLowerCase().includes(close) || tailHtml.toLowerCase().includes(close)) return true
     }
     return false
+  }
+
+  /**
+   * Fold the bracketed spans of newly frozen `source` into the candidate set
+   * (escape-aware, whitespace/case-normalized like reference labels, plus a
+   * backslash-stripped variant — over-approximation only ever costs an
+   * unnecessary full morph, never wrong output). O(newly frozen bytes), so it
+   * totals O(n) over a stream.
+   */
+  private accumulateLabelCandidates(source: string): void {
+    if (!source.includes('[')) return
+    const spanRe = /\[((?:\\[\s\S]|[^\[\]\\])*)\]/g
+    for (let m = spanRe.exec(source); m; m = spanRe.exec(source)) {
+      const span = m[1] ?? ''
+      if (span.trim() === '') continue
+      this.frozenLabelCandidates.add(normalizeReferenceLabel(span))
+      if (span.includes('\\')) {
+        this.frozenLabelCandidates.add(normalizeReferenceLabel(span.replace(/\\([\s\S])/g, '$1')))
+      }
+    }
+  }
+
+  /**
+   * True when the committed link-ref map changed purely by ADDING labels,
+   * none of which matches a bracketed span ever frozen — so the frozen DOM
+   * provably cannot change and the limitation-J full morph is unnecessary.
+   * Removals and value changes are never inert.
+   */
+  private linkRefDeltaIsInert(linkRefs: LinkReferenceMap): boolean {
+    if (linkRefs.size < this.lastLinkRefs.size) return false
+    for (const [label, ref] of this.lastLinkRefs) {
+      const next = linkRefs.get(label)
+      if (!next || next.href !== ref.href || (next.title ?? '') !== (ref.title ?? '')) return false
+    }
+    for (const label of linkRefs.keys()) {
+      if (!this.lastLinkRefs.has(label) && this.frozenLabelCandidates.has(label)) return false
+    }
+    return true
   }
 
   // ---- Intra-list freezing (#29) ----------------------------------------
@@ -578,6 +625,8 @@ export class FrozenTailRenderer {
     this.frozenHasHtml = false
     this.frozenNodeCount = 0
     this.lastLinkRefKey = ''
+    this.lastLinkRefs = new Map()
+    this.frozenLabelCandidates.clear()
     this.committedHasOpenDetails = false
     this.resetListState()
     this.resetFootnoteState()
@@ -650,12 +699,21 @@ export class FrozenTailRenderer {
     }
     if (this.fnActive || this.fnGaveUp) this.resetFootnoteState()
 
-    if (
-      linkRefKey !== this.lastLinkRefKey ||
-      !complete.startsWith(this.frozenSource) ||
-      tokenStraddles(tokens, this.frozenEnd)
-    ) {
-      this.fullMorph(completedEl, complete, tokens, linkRefKey)
+    if (!complete.startsWith(this.frozenSource) || tokenStraddles(tokens, this.frozenEnd)) {
+      this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
+      return
+    }
+    // A committed link-ref map change can rewrite earlier blocks (limitation
+    // J) — but only blocks that actually reference one of the labels the
+    // change touched. When the change is purely additive (append-only streams
+    // only ever ADD labels; first definition wins) and none of the new labels
+    // appears among the bracketed spans of the frozen source, the frozen DOM
+    // provably cannot change: adopt the new map and stay on the fast path.
+    // Anything else — removals, value changes, or a possibly-referenced new
+    // label — keeps today's full-morph fallback. This was the largest
+    // remaining full-morph trigger on definition-bearing documents.
+    if (linkRefKey !== this.lastLinkRefKey && !this.linkRefDeltaIsInert(linkRefs)) {
+      this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
       return
     }
 
@@ -668,7 +726,7 @@ export class FrozenTailRenderer {
     if (this.listSig) {
       const outcome = this.commitSharedList(completedEl, complete, tokens, linkRefs, linkRefKey)
       if (outcome === 'fallback') {
-        this.fullMorph(completedEl, complete, tokens, linkRefKey)
+        this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
         return
       }
       if (outcome === 'handled') return
@@ -697,7 +755,7 @@ export class FrozenTailRenderer {
     // the framed fast path cannot express it. One full morph rebuilds — and the
     // now-balanced region then freezes wholesale through the ordinary path.
     if (this.openFrames.length > 0 && this.frameCloseAppeared(deltaHtml, tailHtml)) {
-      this.fullMorph(completedEl, complete, tokens, linkRefKey)
+      this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
       return
     }
 
@@ -718,7 +776,7 @@ export class FrozenTailRenderer {
     if (deltaHtml !== '' && hasUnfreezableRawHtml(deltaHtml)) {
       const chain = getHtmlPolicy() === 'passthrough' ? openElementChainAtEof(deltaHtml) : null
       if (chain === null || (chain.length > 0 && !chain.every((tag) => SAFE_REROOT_TAGS.has(tag)))) {
-        this.fullMorph(completedEl, complete, tokens, linkRefKey)
+        this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
         return
       }
       if (chain.length > 0) rerootChain = chain
@@ -766,7 +824,7 @@ export class FrozenTailRenderer {
          it cannot report a mismatch; kept so a future divergence degrades to
          the correct full morph instead of wrong output. */
       if (!this.commitWithReroot(completedEl, root, survivors, sanitizedDelta, sanitizedTail, tailHtml !== '')) {
-        this.fullMorph(completedEl, complete, tokens, linkRefKey)
+        this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
         return
       }
       /* c8 ignore stop */
@@ -808,9 +866,13 @@ export class FrozenTailRenderer {
     this.committedHasOpenDetails =
       this.frozenDetailsBalance > 0 || hasOpenDetailsElement(tailHtml)
 
+    if (advanceTo > this.frozenEnd) {
+      this.accumulateLabelCandidates(complete.slice(this.frozenEnd, advanceTo))
+    }
     this.frozenEnd = advanceTo
     this.frozenSource = complete.slice(0, advanceTo)
     this.lastLinkRefKey = linkRefKey
+    this.lastLinkRefs = linkRefs
 
     // Intra-list bookkeeping indexes top-level children of `completedEl`;
     // inside a frame the shared-list optimization simply stays off.
@@ -1039,12 +1101,14 @@ export class FrozenTailRenderer {
       this.listFrozenLis += countHost.firstElementChild?.childNodes.length ?? 0
       const lastFrozen = deltaItems[deltaItems.length - 1]
       if (lastFrozen) {
+        this.accumulateLabelCandidates(complete.slice(this.frozenEnd, lastFrozen.end))
         this.frozenEnd = lastFrozen.end
         this.frozenSource = complete.slice(0, this.frozenEnd)
       }
     }
     this.listHasTask = hasTask
     this.lastLinkRefKey = linkRefKey
+    this.lastLinkRefs = linkRefs
 
     if (ended) {
       // Promote the shared list to a fully frozen top-level node (the '\n'
@@ -1084,7 +1148,7 @@ export class FrozenTailRenderer {
     // bookkeeping does not model; full-morph keeps it correct (and clears the
     // frames, matching the whole-document morph).
     if (this.fnGaveUp || this.openFrames.length > 0 || complete.includes('<details')) {
-      this.fullMorph(completedEl, complete, tokens, linkRefKey)
+      this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
       return
     }
     const canReuse =
@@ -1181,6 +1245,8 @@ export class FrozenTailRenderer {
     this.frozenNodeCount = 0
     this.resetListState()
     this.lastLinkRefKey = linkRefKey
+    this.lastLinkRefs = linkRefs
+    this.frozenLabelCandidates.clear()
 
     // Re-capture node handles: element children are the body parts in order,
     // then the section element (if any). Whitespace seams are text nodes and do
@@ -1394,6 +1460,7 @@ export class FrozenTailRenderer {
     complete: string,
     tokens: BlockToken[],
     linkRefKey: string,
+    linkRefs: LinkReferenceMap,
   ): void {
     const rawHtml = renderMarkdownUnsafe(complete, { tokens })
     // A still-forming `<details>` reaches here every commit (its unbalanced tag
@@ -1408,6 +1475,8 @@ export class FrozenTailRenderer {
     this.frozenHasHtml = false
     this.frozenNodeCount = 0
     this.lastLinkRefKey = linkRefKey
+    this.lastLinkRefs = new Map(linkRefs)
+    this.frozenLabelCandidates.clear()
     this.resetListState()
     this.resetFootnoteState()
     this.resetFrames()
