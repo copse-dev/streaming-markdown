@@ -79,6 +79,21 @@ repository plus the code-block-heavy case from #155:
 - `synthetic/long-transcript` — all of the above concatenated, the
   long-conversation case where incremental architectures separate from
   re-render-everything ones.
+- `synthetic/raw-html-details (#0004)` — an unclosed raw `<details>` early in
+  the stream, then code-heavy content: the unbounded-fallback trap of
+  [ADR 0004](decisions/0004-sealed-block-forward-only-rendering.md), kept out
+  of the long-transcript concatenation (an open container legitimately
+  re-parents everything after it). **Do not read this fixture's cells as a
+  cross-library speed comparison** — libraries do semantically different work
+  on it. Ours honors the disclosure semantics: the pending tail is *held*
+  while the widget is open (#138), and under passthrough the committed content
+  sits inside a genuinely collapsed element the browser doesn't lay out — so
+  our sanitized/unsafe rows do far less visible work by design. smd renders
+  the tag as literal text and streams everything visibly. The row exists to
+  regression-guard *our own* former O(n²) fallback (multi-second on this
+  fixture before the ADR 0004 Phase 2 re-rooting); the parity row
+  (`htmlPolicy: 'escape'`, tag literalized, nothing held) is the only cell
+  comparable with smd here, and it shows the usual ~2–4× architectural gap.
 
 ### Fairness caveats (read before quoting a number)
 
