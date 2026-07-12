@@ -33,6 +33,15 @@ const budgetPath = resolve(pkgRoot, 'scripts/bundle-size-budget.json')
 interface Entry {
   file: string
   gzipBudget: number
+  /**
+   * Extra specifiers to mark external for THIS entry only, on top of the shared
+   * peer `externals`. Used by the framework wrappers (e.g. `./react`) to
+   * externalize the first-party core they import (`./renderer.js`, `./streaming.js`,
+   * …) so the budget measures the wrapper's OWN marginal cost — in a real consumer
+   * the core is shared with the main entry, imported once — instead of re-counting
+   * the whole parser core (~30 KB) into the subpath's number.
+   */
+  extraExternals?: string[]
 }
 interface Budget {
   note: string
@@ -50,7 +59,10 @@ const update = process.argv.includes('--update')
  * would miss: an externalized peer adds only a ~30-byte `import` statement to
  * the measured output while the consumer's real chunk grows ~70KB unseen.
  */
-async function measure(file: string): Promise<{ gz: number; peerImports: string[] }> {
+async function measure(
+  file: string,
+  extraExternals: string[] = [],
+): Promise<{ gz: number; peerImports: string[] }> {
   const abs = resolve(pkgRoot, file)
   if (!existsSync(abs)) {
     throw new Error(`missing ${file} — run \`npm run build\` before the size check`)
@@ -62,7 +74,7 @@ async function measure(file: string): Promise<{ gz: number; peerImports: string[
     format: 'esm',
     platform: 'browser',
     write: false,
-    external: budget.externals,
+    external: [...budget.externals, ...extraExternals],
     metafile: true,
     logLevel: 'silent',
   })
@@ -110,7 +122,7 @@ const MAIN_ENTRY = '.'
 const peerLeaks: string[] = []
 
 for (const [name, entry] of Object.entries(budget.entries)) {
-  const { gz, peerImports } = await measure(entry.file)
+  const { gz, peerImports } = await measure(entry.file, entry.extraExternals)
   measured[name] = gz
   const pct = (gz / entry.gzipBudget) * 100
   const over = gz > entry.gzipBudget
