@@ -110,16 +110,20 @@ export function morphInnerHtml(container: HTMLElement, html: SanitizedHtml | '')
  * Like {@link morphInnerHtml} but reconciles only the children from `startIndex`
  * onward, leaving the first `startIndex` children (a frozen prefix) untouched.
  * The resulting serialization of the `[startIndex, …)` region is identical to
- * having assigned that region via `innerHTML` (#21).
+ * having assigned that region via `innerHTML` (#21). Returns the parse's
+ * top-level node count — after the reconcile (which trims trailing leftovers)
+ * the container holds exactly `startIndex + count` children, so the caller can
+ * memoize the region's extent without a second, count-only parse (mirrors
+ * {@link morphInnerHtmlRangeFrom}; ADR 0004 Phase 2).
  */
 export function morphInnerHtmlFrom(
   container: HTMLElement,
   startIndex: number,
   html: SanitizedHtml | '',
-): void {
+): number {
   if (html === '') {
     while (container.childNodes.length > startIndex) container.lastChild?.remove()
-    return
+    return 0
   }
   // Shallow-clone the container so `html` parses in an identical context to
   // `container.innerHTML = html`, guaranteeing byte-identical serialization.
@@ -127,7 +131,9 @@ export function morphInnerHtmlFrom(
   // through the Trusted Types policy when one is active.
   const template = container.cloneNode(false) as HTMLElement
   setPresanitizedHtml(template, html)
+  const count = template.childNodes.length
   morphChildren(container, template, startIndex)
+  return count
 }
 
 /**
