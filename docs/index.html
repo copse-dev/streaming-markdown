@@ -215,6 +215,11 @@
       color: var(--text-muted);
     }
 
+    .hero-vs {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
     .stream-dot {
       display: inline-block;
       width: 8px;
@@ -1077,6 +1082,7 @@
       <span class="hero-demo-title">Live stream — <span style="color:var(--accent)">StreamingMarkdownRenderer</span></span>
       <div class="hero-demo-meta">
         <span id="hero-cps">— chars/s</span>
+        <span class="hero-vs" id="hero-vs" title="Compared to ~220 chars/s — the pace a typical frontier LLM streams tokens (~55 tok/s). The renderer is nowhere near the bottleneck.">— vs LLM</span>
         <span id="hero-updates">— updates</span>
         <span class="stream-dot active" id="hero-dot"></span>
       </div>
@@ -2002,20 +2008,53 @@ function followBottom(el) {
 // mode. Stepping one char past the newline keeps the pending tail non-empty
 // across line breaks; a chunk landing between the two newlines of a blank
 // line instead swallows both, committing the block in the same tick.
+// Fixed-step advance used by the interactive comparison panel below (which
+// deliberately paces itself so both emitters can be watched side by side).
 function advancePos(text, pos, step) {
   let next = Math.min(pos + step, text.length);
   if (next < text.length && text[next - 1] === '\n') next++;
   return next;
 }
 
+// The hero streams flat-out to show the renderer is nowhere near the
+// bottleneck. 220 chars/s — the pace a typical frontier model emits tokens
+// (~55 tok/s) — is only the *reference* we compare against, not a cap the
+// renderer imposes.
+const LLM_BASELINE_CPS = 220;
+
+// Per-frame commit sizing. Each animation frame we render the largest slice
+// that still fits inside HERO_FRAME_BUDGET_MS, then adapt toward that budget —
+// so the hero paints as fast as the machine can absorb rather than at a fixed
+// rate, and the counter reports genuine throughput. START/MAX just bound the
+// search; the budget is what actually governs the sustained rate.
+const HERO_FRAME_BUDGET_MS = 9;
+const HERO_START_CHUNK = 512;
+const HERO_MIN_CHUNK = 128;
+const HERO_MAX_CHUNK = 4096;
+
+// A deliberately long transcript so the flat-out stream stays on screen for a
+// couple of seconds instead of finishing in a single frame. Built from the
+// existing presets: the feature-rich blocks (footnotes, one mermaid diagram,
+// KaTeX) appear once up top, then footnote-free blocks repeat to add length
+// without colliding on duplicate footnote ids.
+const HERO_DOC = (() => {
+  const showcase = [PRESETS.mixed, PRESETS.diagrams, PRESETS.math, PRESETS.notes].join('\n\n');
+  const body = [PRESETS.basic, PRESETS.table, PRESETS.code, PRESETS.lists, PRESETS.failures].join('\n\n');
+  let doc = showcase;
+  for (let i = 1; i <= 16; i++) doc += `\n\n---\n\n## Streamed section ${i}\n\n` + body;
+  return doc;
+})();
+
 // ── State ──────────────────────────────────────────────────────────────────
 let heroRenderer = null;
-let heroTimer = null;
+let heroTimer = null;      // restart-after-pause timeout
+let heroRaf = null;        // in-flight animation frame
 let heroPos = 0;
 let heroUpdates = 0;
 let heroStart = 0;
 let heroText = '';
 let heroStreaming = false;
+let heroChunk = 0;         // chars committed per frame; adapts to the machine
 
 let compareTimer = null;
 let comparePos = 0;
@@ -2030,58 +2069,88 @@ let currentPreset = 'mixed';
 const heroOutput = document.getElementById('hero-output');
 const heroDot = document.getElementById('hero-dot');
 const heroCps = document.getElementById('hero-cps');
+const heroVs = document.getElementById('hero-vs');
 const heroUpdatesEl = document.getElementById('hero-updates');
 
+function heroStats(cps) {
+  heroCps.textContent = `${cps.toLocaleString()} chars/s`;
+  heroVs.textContent = `${Math.max(1, Math.round(cps / LLM_BASELINE_CPS)).toLocaleString()}× a typical LLM`;
+  heroUpdatesEl.textContent = `${heroUpdates} updates`;
+}
+
 function heroReset() {
-  if (heroTimer) clearInterval(heroTimer);
+  if (heroTimer) clearTimeout(heroTimer);
+  if (heroRaf) cancelAnimationFrame(heroRaf);
   heroOutput.innerHTML = '';
   heroOutput.classList.remove('no-settle');
   heroOutput.classList.add('is-streaming');
   heroRenderer = new StreamingMarkdownRenderer(heroOutput, renderConfig);
   heroPos = 0;
   heroUpdates = 0;
+  heroChunk = HERO_START_CHUNK;
   heroStart = performance.now();
   heroStreaming = true;
   heroDot.classList.add('active');
   heroOutput.scrollTop = 0;
 }
 
-function heroTick(text) {
-  if (heroPos >= text.length) {
-    heroPos = text.length;
-    clearInterval(heroTimer);
-    heroStreaming = false;
-    heroOutput.classList.remove('is-streaming');
-    heroDot.classList.remove('active');
-    const elapsed = (performance.now() - heroStart) / 1000;
-    heroCps.textContent = `${Math.round(text.length / elapsed).toLocaleString()} chars/s`;
-    heroUpdatesEl.textContent = `${heroUpdates} updates`;
-    // The stream has settled — swap any ```mermaid scaffolding for SVG and any
-    // pending math for rendered KaTeX.
-    hydrateDiagrams(heroOutput);
-    hydrateMath(heroOutput);
-    // restart after pause
-    heroTimer = setTimeout(() => startHero(), 3500);
-    return;
-  }
-  heroPos = advancePos(text, heroPos, 6);
-  const heroPartial = text.slice(0, heroPos);
-  detectExtras(heroPartial);
-  heroRenderer.update(heroPartial);
+function heroFinish() {
+  heroStreaming = false;
+  heroOutput.classList.remove('is-streaming');
+  heroDot.classList.remove('active');
+  // Headline the sustained average over the whole run — the honest end-to-end
+  // throughput, not a peak instant.
+  const elapsed = (performance.now() - heroStart) / 1000 || 0.001;
+  heroStats(Math.round(heroText.length / elapsed));
+  // The stream has settled — swap any ```mermaid scaffolding for SVG and any
+  // pending math for rendered KaTeX.
+  hydrateDiagrams(heroOutput);
+  hydrateMath(heroOutput);
+  // restart after pause
+  heroTimer = setTimeout(() => startHero(), 3500);
+}
+
+// One commit per animation frame, each as large as ~9ms of render allows.
+function heroStep() {
+  if (!heroStreaming) return;
+
+  const renderStart = performance.now();
+  heroPos = Math.min(heroPos + heroChunk, heroText.length);
+  heroRenderer.update(heroText.slice(0, heroPos));
   // Keep the newest content in view as the stream grows. The pane is its own
   // scroll container (overflow-y:auto), so this never moves the page.
   followBottom(heroOutput);
+  const renderMs = performance.now() - renderStart;
   heroUpdates++;
-  const elapsed = (performance.now() - heroStart) / 1000 || 0.001;
-  heroCps.textContent = `${Math.round(heroPos / elapsed).toLocaleString()} chars/s`;
-  heroUpdatesEl.textContent = `${heroUpdates} updates`;
+
+  // Ride the frame budget: grow the next commit when we rendered well under
+  // budget, back off when a frame ran long. This converges on the biggest
+  // slice the machine can paint per frame.
+  if (renderMs > 0.05) {
+    heroChunk = Math.max(
+      HERO_MIN_CHUNK,
+      Math.min(HERO_MAX_CHUNK, Math.round(heroChunk * (HERO_FRAME_BUDGET_MS / renderMs))),
+    );
+  }
+
+  // Live readout is the cumulative average (chars ÷ elapsed) — the true
+  // end-to-end throughput, and smooth by construction so the number stays
+  // legible instead of twitching with each frame. Skip the first ~150ms where
+  // a tiny denominator would swing wildly.
+  const elapsed = (performance.now() - heroStart) / 1000;
+  if (elapsed > 0.15) heroStats(Math.round(heroPos / elapsed));
+
+  if (heroPos >= heroText.length) { heroFinish(); return; }
+  heroRaf = requestAnimationFrame(heroStep);
 }
 
 function startHero() {
-  const text = PRESETS.mixed;
-  heroText = text;
+  heroText = HERO_DOC;
   heroReset();
-  heroTimer = setInterval(() => heroTick(text), 25);
+  // Kick the lazy library loads once up front rather than re-scanning the
+  // growing partial every frame.
+  detectExtras(heroText);
+  heroRaf = requestAnimationFrame(heroStep);
 }
 
 startHero();
