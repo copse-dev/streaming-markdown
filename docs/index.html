@@ -1285,9 +1285,8 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
     <h2>First-party React components</h2>
     <p>React bindings ship as the <code>@copse/streaming-markdown/react</code> subpath — React is an
       optional peer dependency, so it stays out of your bundle until you import it. Two components
-      mirror the core's two rendering paths, with no <code>useEffect</code>/<code>useRef</code>
-      boilerplate and no <code>dangerouslySetInnerHTML</code> in your code: each owns its node and
-      routes every DOM write through the sanitizer internally. Full guide — SSR, the
+      mirror the core's two rendering paths: each owns its node and routes every DOM write through
+      the sanitizer internally. Full guide — SSR, the
       <code>config</code> prop, and a <code>react-markdown</code> migration — in
       <a href="https://github.com/copse-dev/streaming-markdown/blob/main/docs/REACT.md">the React guide</a>.</p>
   </div>
