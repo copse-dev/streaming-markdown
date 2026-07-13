@@ -1336,6 +1336,44 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
 
 <div class="section">
   <div class="section-header">
+    <h2>First-party React components</h2>
+    <p>React bindings ship as the <code>@copse/streaming-markdown/react</code> subpath — React is an
+      optional peer dependency, so it stays out of your bundle until you import it. Two components
+      mirror the core's two rendering paths: each owns its node and routes every DOM write through
+      the sanitizer internally. Full guide — SSR, the
+      <code>config</code> prop, and a <code>react-markdown</code> migration — in
+      <a href="https://github.com/copse-dev/streaming-markdown/blob/main/docs/REACT.md">the React guide</a>.</p>
+  </div>
+  <div class="snippet-grid">
+    <div class="snippet-card">
+      <div class="snippet-card-header">
+        <span>At rest</span> — a complete document, SSR-safe
+      </div>
+      <pre><code><span class="kw">import</span> { <span class="cls">Markdown</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown/react'</span>
+
+<span class="kw">function</span> <span class="fn">Message</span>({ content }) {
+  <span class="cmt">// Owns the node; every write goes through the sanitizer.</span>
+  <span class="kw">return</span> &lt;<span class="cls">Markdown</span> <span class="prop">markdown</span>={content} <span class="prop">className</span>=<span class="str">"streaming-markdown"</span> /&gt;
+}</code></pre>
+    </div>
+
+    <div class="snippet-card">
+      <div class="snippet-card-header">
+        <span>Streaming</span> — incremental DOM per token
+      </div>
+      <pre><code><span class="kw">import</span> { <span class="cls">StreamingMarkdown</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown/react'</span>
+
+<span class="kw">function</span> <span class="fn">Chat</span>({ text }) {
+  <span class="cmt">// Feed the growing text; it patches only the settled</span>
+  <span class="cmt">// tail per token — not a re-render of the whole document.</span>
+  <span class="kw">return</span> &lt;<span class="cls">StreamingMarkdown</span> <span class="prop">markdown</span>={text} <span class="prop">className</span>=<span class="str">"streaming-markdown"</span> /&gt;
+}</code></pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-header">
     <h2>Heavy dependencies are optional — and lazy</h2>
     <p>
       The core bundle carries <strong>no highlight.js, no mermaid, no KaTeX, and no Shiki</strong>,

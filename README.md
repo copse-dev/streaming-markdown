@@ -124,6 +124,33 @@ optional `styles/cjk.css` carries the line-break / spacing CSS the host owns —
 see [CJK / East-Asian text](docs/EXTENDING.md#cjk--east-asian-text). Both are
 off by default; Latin output is byte-identical.
 
+## React
+
+First-party React bindings ship as the `@copse/streaming-markdown/react`
+subpath. React is an *optional* peer dependency, so it stays out of your bundle
+until you import that subpath. Two components mirror the core's two rendering
+paths — no `useEffect`/`useRef` boilerplate and no `dangerouslySetInnerHTML` in
+your code, because each component owns its node and routes every DOM write
+through the sanitizer internally:
+
+```tsx
+import { Markdown, StreamingMarkdown } from '@copse/streaming-markdown/react'
+
+// At rest — a complete document. SSR-safe; every DOM write is sanitized.
+<Markdown markdown={content} />
+
+// Streaming — feed the growing text; the incremental DOM renderer patches only
+// the settled tail per token, not a re-render of the whole document (the thing
+// that makes naive react-markdown-in-a-loop janky).
+<StreamingMarkdown markdown={accumulatedText} />
+```
+
+Both take a per-instance `config` prop (html/scheme policy, `linkDecorator`,
+`fenceHandlers`, math/CJK toggles, …), an `as` prop to pick the container
+element, and forward standard container attributes (`className`, etc.). The full
+guide — SSR and hydration, the `onUpdate` hook for math/diagram backends, and a
+`react-markdown` migration — is in **[`docs/REACT.md`](docs/REACT.md)**.
+
 ## Styling
 
 The renderer emits documented class hooks but ships no styles by default.
