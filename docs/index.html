@@ -937,6 +937,7 @@
       border: 1px solid var(--pending-border);
       padding: 0.6rem 0.75rem;
       overflow-x: auto;
+      overflow-y: hidden;
       font-family: 'SF Mono', 'Fira Code', monospace;
       font-size: 0.85em;
     }
@@ -947,8 +948,10 @@
       font-size: 0.85em;
     }
 
-    /* Rendered KaTeX: center display blocks, let them scroll on overflow. */
-    .compare-panel-body .math-block--rendered { text-align: center; overflow-x: auto; }
+    /* Rendered KaTeX: center display blocks, let them scroll horizontally on
+       overflow. overflow-y stays explicit so the spec doesn't promote it to
+       auto (which puts a spurious vertical scrollbar on tall equations). */
+    .compare-panel-body .math-block--rendered { text-align: center; overflow-x: auto; overflow-y: hidden; }
     .compare-panel-body .math-block--rendered .katex-display { margin: 0.25rem 0; }
     .compare-panel-body .math-inline--rendered { color: var(--text-bright); }
 
@@ -2013,33 +2016,14 @@ footnotes section — with no reflow of the surrounding prose.
 `
 };
 
-// ── Smooth auto-follow ──────────────────────────────────────────────────────
-// Assigning `scrollTop = scrollHeight` on every stream tick snaps the pane a
-// full line at a time. Instead, each streaming pane eases toward the bottom on
-// animation frames, spreading each line-height jump over a few frames. Under
-// prefers-reduced-motion the follow snaps directly, as before.
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-const followers = new Map(); // pane element -> requestAnimationFrame id
-
+// ── Auto-follow ─────────────────────────────────────────────────────────────
+// Pin the streaming pane to the bottom so the newest content stays in view.
+// The stream now reveals sub-line increments each frame (the input smoother in
+// default mode, small budgeted chunks at full speed), so assigning scrollTop
+// directly reads as a smooth, continuous follow — and, unlike easing toward a
+// target that grows every frame, it never lags behind or judders.
 function followBottom(el) {
-  if (reducedMotion.matches) {
-    el.scrollTop = el.scrollHeight;
-    return;
-  }
-  if (followers.has(el)) return; // already easing toward the bottom
-  const step = () => {
-    const target = el.scrollHeight - el.clientHeight;
-    const delta = target - el.scrollTop;
-    if (delta <= 0.5) {
-      el.scrollTop = target;
-      followers.delete(el);
-      return;
-    }
-    // Exponential ease-out with a minimum step so it always converges.
-    el.scrollTop += Math.max(delta * 0.18, Math.min(delta, 1.5));
-    followers.set(el, requestAnimationFrame(step));
-  };
-  followers.set(el, requestAnimationFrame(step));
+  el.scrollTop = el.scrollHeight;
 }
 
 // Never let a simulated chunk end exactly ON a newline: the pending tail
