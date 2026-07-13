@@ -1,6 +1,6 @@
 # 0004 — Bridging the performance gap to smd: sealed-block, forward-only rendering
 
-Status: proposed · Relates to [#157](https://github.com/copse-dev/streaming-markdown/issues/157) (cross-library benchmark), #21 (O(tail) commits), #30 (incremental scanning), #154 (relative regression guard)
+Status: accepted — Phases 0–1 landed, Phase 2 landed in slices (see phase notes), Phase 3 partially landed · Relates to [#157](https://github.com/copse-dev/streaming-markdown/issues/157) (cross-library benchmark), #21 (O(tail) commits), #30 (incremental scanning), #154 (relative regression guard)
 
 ## Context
 
@@ -333,28 +333,87 @@ re-sanitizing + re-parsing + re-diffing it:
   falls back to the exact old full morph on any doubt (a citing set past
   `MAX_LINK_REF_PATCH_PARTS`, intra-list/re-root state, layout mismatch).
 
-Remaining in this phase: sealed-event-driven rendering (consume
-`ScanAdvance.sealed` instead of the delta re-derivation), and the splitter's
-blank-free definition-run hold — the run still oscillates in and out of
-`complete` per definition line, so a document where most parts cite version
-labels (keepachangelog shape) degrades to the bounded full-morph fallback on
-each flip; committing the leading already-terminated definition lines of an
-open run (title-continuation permitting) would remove the flip entirely.
+**Third slice landed — the splitter's blank-free definition-run hold**: the
+tokenizer holds a blank-free run of `[label]: url` lines as ONE block, so the
+whole run used to swing in and out of `complete` per definition line (open
+whenever the run's last line was still streaming), flipping the committed map
+wholesale — and a document where most parts cite version labels
+(keepachangelog shape) fell off the bounded patch path onto a full morph per
+flip. Only the run's FINAL definition can still change under later input (a
+next-line title/destination continuation); every earlier one is followed by
+the next definition's `[` start line, which no title or destination
+continuation can begin with. The splitter now commits those settled leading
+definitions and holds only the last (`lastLinkRefDefStart`), making
+`complete` monotone across a streaming run: each settled definition changes
+exactly one label and lands on the inert-delta or targeted-patch path.
+Measured (5.4 kB keepachangelog-shaped doc, 30 blank-free definitions at the
+bottom, 5-char chunks, jsdom): 1860 ms → ~400 ms, rendered chars 278 k →
+12 k, 30/30 definitions absorbed as patches — now identical to the
+blank-separated case.
 
-A new emitter consumes the events: `sealed` blocks render to DOM exactly once
-and are appended (no string re-render, no serialize-compare, no morph);
-`forming` renders into the pending container as today (holds included);
-`patch` applies its targeted mutation. The frozen-prefix machinery
-(`streaming-frozen-tail.ts`) stops being a per-update *decision* and becomes a
-debug assertion: sealed output must equal what a fresh
-`sanitizeRenderedMarkdown(renderMarkdownUnsafe(complete))` produces —
-exactly the invariant the streaming convergence fuzz already checks, so the
-existing suite carries over as the correctness oracle.
+**Fourth slice landed — the sealed-commit path consumes the scan events**
+(`ScanAdvance` → `FrozenTailRenderer.update`), scoped to keep ONE emitter:
 
-Fallbacks stay: a prefix rewrite (message edit/regeneration), an unfreezable
-raw-HTML span, or any event-stream assertion failure drops that stream to the
-current full-morph path — correct, just not fast — mirroring today's
-`fullMorph` escape hatch.
+- **Render-once for settling blocks (span-keyed adoption)**: the tail memo
+  now records the source spans, render tokens, and link-ref map key its
+  render was a pure function of. A delta whose render tokens, source bytes,
+  and map key match the memo adopts the live nodes with NO re-render, NO
+  sanitize, NO parse, NO diff (`deltaRendersSkipped`) — the block was
+  rendered exactly once, when it was the forming tail; sealing it is a
+  pointer bump. The old render-then-byte-compare adoption remains as the
+  fallback for everything the span proof can't cover (multi-block settles,
+  map changes, framed commits).
+- **The O(prefix) frozen-source byte-check is event-verified**: the commit
+  path consumes the advance's `reset`/`verifiedUpTo` contract — the scanner
+  already byte-verifies its safe prefix per advance, so while the frozen
+  boundary sits inside it the renderer's own per-commit `startsWith` memcmp
+  is skipped (`prefixChecksSkipped`; ~all commits of a steady stream). The
+  check still runs whenever the boundary outruns the scanner's (blankless
+  documents) or the advance reports a reset — a demotion from per-update
+  decision to fallback trigger, exactly this ADR's intent.
+- Measured: work-shape, not wall-clock — on line-granular streams every
+  block renders and parses ~once (CI-guarded by the once-per-block memo
+  test, previously ~twice); on 5-char-chunk streams rendered chars drop
+  2–6% (terms-of-service 13.3 k → 12.6 k) and the per-commit O(prefix)
+  memcmp disappears; published-fixture wall clock is neutral (±3%, within
+  run noise), because per-commit cost there is dominated by the forming
+  tail's legitimate re-renders.
+
+What this slice deliberately does NOT do — kept honest:
+
+- **`ScanAdvance.sealed` tokens are not consumed as the render boundary.**
+  Building it showed the Phase-1 seal predicate (re-tokenization stability)
+  is necessary but *insufficient* for render-once: it seals list items
+  one-by-one inside a still-growing list, where loose/tight is a group-global
+  rendering decision (rendering a sealed item immediately would bake in
+  tightness a later blank retracts), and it seals nothing in blankless runs
+  where the settle rules can freeze immutable blocks (headings, closed
+  fences) — consuming it directly would be wrong for the first shape and a
+  regression for the second. The rendering boundary therefore stays the
+  settle rules (`settledTailStart` + the separator cap), and the event
+  stream's consumed facts are the append-only verification and the sealed
+  definition deltas. A future Phase 1.5 could move the settle rules into the
+  scanner so the boundary itself is push-shaped; that relocates O(tail-token)
+  work, it does not remove any.
+- **The forming region still re-renders per commit** (and morphs into the
+  committed container). That is inherent to mid-stream GFM correctness — the
+  holds and retroactive constructs in the table above — and is where the
+  remaining `renderedChars` live (a long open list/quote re-renders per line
+  until it closes or intra-list mode engages; the blockquote shape from the
+  "known bounds" note remains the worst case).
+- **The frozen-prefix machinery is not reduced to a bare assertion.** It IS
+  the single emitter (no second emitter was added, per the risk note below);
+  what remains per commit after this slice is O(tail) work — the settle walk,
+  the tail render when its inputs changed, the map-key serialize — plus the
+  targeted patches, with the O(prefix) share now event-verified.
+
+Fallbacks stay, unchanged: a prefix rewrite (message edit/regeneration), an
+unfreezable raw-HTML span the probe can't re-root, or any adoption-guard
+mismatch drops that commit to the render-and-compare path or the full morph —
+correct, just not fast — mirroring today's `fullMorph` escape hatch. The
+correctness oracle is unchanged: byte parity with
+`sanitizeRenderedMarkdown(renderMarkdownUnsafe(complete))` at every commit,
+enforced by the convergence fuzz and parity suites.
 
 ### Phase 3 — Patch-budget contract
 
@@ -378,20 +437,36 @@ at the sink for sealed fragments (paid once per block, not once per update),
 which also removes the current sanitize-per-update multiplier without giving up
 the safe default.
 
-## Risks and why now is not yet the time to build
+## Risks — and how the build-gate resolved
 
 - **This is the riskiest kind of change** — the changelog documents the
   mid-stream bugs pure forward-only rendering caused before the current design
   (#77 table-header misrender; #119, #122, #123 pending-motion regressions).
   The mitigations are the convergence fuzz, the #154 guard, and landing the
-  event stream (Phase 1) headless before any DOM change.
-- **The current numbers are already inside frame budget**; the payoff is at
-  the tails. If the Playwright tier shows layout dominating real-browser frame
-  times, Phases 2–3 should wait.
+  event stream (Phase 1) headless before any DOM change. Every Phase 2 slice
+  so far has landed inside those fences: byte-parity oracles at every commit,
+  timing-free counters pinning each new skip, and every guard falling back to
+  the full morph.
+- **The real-browser gate this section set has been evaluated — and passed
+  in favour of building.** The condition was: if the Playwright tier showed
+  layout dominating real-browser frame times, Phases 2–3 should wait. The
+  Chromium attribution in "The direct-DOM floor (measured)" answered it:
+  layout does not dominate — our own string render (45%) and tokenize (16%)
+  do, i.e. the re-derive-the-tail-each-commit architecture, which is exactly
+  what the sealed-commit slices remove piecewise. That is why Phase 2 was
+  built now rather than deferred.
 - **Two emitters during migration** (event-driven and frozen-tail) is real
   maintenance surface; Phase 2 must replace, not add — the ARCHITECTURE.md
   "intentional duplication" note already caps how many emitters this codebase
-  tolerates.
+  tolerates. Held so far: every slice evolved `FrozenTailRenderer` in place
+  (re-root frames, memos, patches, span adoption, event-verified prefix);
+  no second production emitter exists.
 
 Decision: adopt the contract ("O(1) targeted patches, everything else
-append"), land Phase 0 now, and gate Phases 1–3 on the real-browser numbers.
+append") — landed through the Phase 2 slices above. Still open, in order:
+the Phase 3 op-count CI gate (assert per-update DOM mutations / bytes
+re-tokenized in the #154 guard); render-once for multi-block settles (the
+partial adoption still pays one delta render and byte-compares); and, if the
+forming-tail re-render share ever dominates a real profile again, moving the
+settle rules into the scanner as a push-shaped boundary (a relocation, not a
+removal — re-measure first).

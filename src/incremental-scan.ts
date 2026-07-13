@@ -184,6 +184,17 @@ export interface ScanAdvance {
   sealedFootnoteDefs: FootnoteDefinitionMap
   /** The snapshot was not an append of the previous one; the cache restarted. */
   reset: boolean
+  /**
+   * Source offset of the safe boundary AFTER this advance. Contract for
+   * consumers (ADR 0004 Phase 2): every future `advance` on this scanner
+   * either byte-verifies that its source still begins with these
+   * `verifiedUpTo` bytes, or reports `reset: true`. A renderer whose frozen
+   * boundary sits at or below this offset can therefore trust its frozen
+   * source across the next non-reset advance without re-running its own
+   * O(prefix) byte comparison — the per-update prefix check becomes the
+   * scanner's, paid once.
+   */
+  verifiedUpTo: number
 }
 
 /**
@@ -314,6 +325,7 @@ export class IncrementalSourceScanner {
       sealedLinkRefs,
       sealedFootnoteDefs,
       reset,
+      verifiedUpTo: this.safeOffset,
     }
   }
 

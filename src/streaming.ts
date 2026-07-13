@@ -1015,12 +1015,14 @@ export class StreamingMarkdownRenderer {
         removePendingTableRow(this.pendingRowTable)
         this.pendingRowTable = null
       }
-      // Tokenize `complete` once per COMMIT — incrementally (#30) — and cache
-      // on the instance so pending-only frames (the vast majority) never
-      // re-scan at all (#21). When the split committed everything, `blocks`
-      // already is `tokenizeBlocks(complete)`; still feed the scanner so its
-      // link-ref cache and safe boundary advance with it.
-      this.committedTokens = this.completeScanner.tokenize(complete)
+      // Tokenize `complete` once per COMMIT — incrementally (#30), consuming
+      // the full ScanAdvance (ADR 0004 Phase 2): the sealed-event stream's
+      // append-only verification (`reset`/`verifiedUpTo`) replaces the commit
+      // path's own O(prefix) byte re-check, and the sealed definition deltas
+      // already feed the cached maps below. Cache the tokens on the instance
+      // so pending-only frames (the vast majority) never re-scan at all (#21).
+      const advance = this.completeScanner.advance(complete)
+      this.committedTokens = advance.tokens
       this.committedHasPipe = complete.includes('|')
       // Freeze the settled prefix and re-render only the tail group (#21). Blocks
       // that can never change again keep their node identity permanently; the
@@ -1032,6 +1034,7 @@ export class StreamingMarkdownRenderer {
         this.committedTokens,
         this.completeScanner.linkRefs(complete),
         this.completeScanner.footnoteDefs(complete),
+        advance,
       )
       this.lastComplete = complete
       // A commit restructures the committed subtree, so the fast-path node
