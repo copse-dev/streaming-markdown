@@ -162,7 +162,7 @@ jobs:
       # isn't re-fetched every time. Keyed on the locked playwright-core version
       # so a version bump busts the cache and pulls the matched build.
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
