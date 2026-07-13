@@ -153,6 +153,9 @@ The document grows on every `update()`. Three things bite:
    `scroll-behavior: auto`.
 3. **Respect the user.** Once they scroll up to read, stop pinning; resume only when they
    return to the bottom. Track a `stick` flag off the pane's own scroll events.
+4. **Native scroll anchoring.** Engines adjust `scrollTop` on layout growth to hold an
+   in-view node steady — with a per-frame JS pin that is two writers per frame and reads
+   as shimmer. Set `overflow-anchor: none` on panes you scroll yourself.
 
 ## Snippet
 
@@ -171,13 +174,31 @@ export function installAutoScroll(pane) {
 ```
 
 ```css
-/* Keep the pin instant even under a page-level `scroll-behavior: smooth`. */
-.chat-pane { overflow-y: auto; scroll-behavior: auto; }
+/* Instant pin even under page-level smooth scrolling; no anchoring fights. */
+.chat-pane { overflow-y: auto; scroll-behavior: auto; overflow-anchor: none; }
 ```
 
 The `< 4` px threshold absorbs sub-pixel rounding; widen it if your line-height is large.
-For a showcase that should always follow (no reader to respect), drop the `stick` flag and
-pin unconditionally.
+Keep the `stick` override even in a showcase: the in-pane footnote navigation recipe below
+scrolls the pane on click, and an unconditional pin snaps it straight back.
+
+## CSS scroll-snap variant (zero scroll JS)
+
+The pin can be pure CSS: make the pane a snap container and snap to a 1px sentinel kept
+as its **last child** — the engine itself re-pins after every layout growth, and
+`proximity` releases the pin when the reader scrolls away and re-arms when they return
+(the `stick` flag for free):
+
+```css
+.chat-pane { scroll-snap-type: y proximity; scroll-behavior: auto; overflow-anchor: none; }
+.chat-pane .snap-anchor { scroll-snap-align: end; height: 1px; }
+```
+
+The sentinel must stay the last child — re-append it after any wholesale `innerHTML`
+replace. Two caveats: re-snap-on-growth timing is less uniform across engines than the
+JS pin, so check your target browsers; and a snapped-to-bottom pane keeps a committed
+footnotes section in view while streaming, so pair it with the footnotes recipe below.
+The docs demo and playground use this variant.
 
 ---
 
@@ -259,3 +280,70 @@ The same `config` works for `renderStreamingMarkdown` and
 always on — dangerous schemes are already rejected by the allowlist before the
 decorator runs; layer `MarkdownConfig.linkImagePolicy` on top to restrict
 which *origins* links may point at (see EXTENDING.md).
+
+# Keep the footnotes section out of the way while streaming
+
+A footnote *definition* commits the trailing `<section class="footnotes">` the
+moment it lands — mid-reply for real LLM output. The renderer pins the section
+below the streaming tail (#220), which is the correct final-document order,
+but if your auto-scroll pins the pane to the **container bottom**, the section
+is what sits in view, juddering, while the actual text streams above it.
+
+The renderer can't defer the section itself: it only ever sees a growing
+string, so it has no end-of-stream signal, and keying on "no pending tail"
+would flicker the section in and out at every blank line between blocks. Both
+fixes below live in the host, which knows more than the renderer does.
+
+## Hide the section while the stream is live (what the demo uses)
+
+Hide the section under a class toggled **once per stream** — on at the first
+token, off at close — so it appears exactly once, settled. This is the natural
+partner of the CSS scroll-snap pin above (a snapped-to-bottom pane would
+otherwise keep the section in view):
+
+```css
+.is-streaming section.footnotes { display: none; }
+```
+
+Two things to handle: don't derive the toggle from render state (e.g. "no
+pending element right now") — that flickers at every blank line between
+blocks; and guard in-pane footnote-link clicks while hidden (the target has no
+box to scroll to — check `target.getClientRects().length`). At settle, after
+dropping the class, one smooth scroll to the bottom brings the revealed
+section into view — skip it when the reader has scrolled away.
+
+## Or: anchor a JS follow above the section
+
+If you have no reliable stream lifecycle to key the hide on, follow the newest
+**content** instead of the container bottom: while a trailing footnotes
+section exists, scroll so the pane ends at the section's top. The section
+stays rendered — just below the fold, like any content the reader hasn't
+scrolled to yet — the streaming tail stays in view, nothing hides or pops in,
+and **no end-of-stream signal is needed**:
+
+```js
+function followTarget(el) {
+  const section = el.querySelector('section.footnotes')
+  if (section) {
+    const top = section.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+    return Math.max(0, top - el.clientHeight)
+  }
+  return Math.max(0, el.scrollHeight - el.clientHeight)
+}
+// per update (combined with the auto-scroll recipe's `stick` flag, measured
+// against followTarget rather than scrollHeight):
+//   if (stick) host.scrollTop = followTarget(host)
+// when the stream ends (only if still stuck):
+//   host.scrollTo({ top: host.scrollHeight, behavior: 'smooth' })
+```
+
+This composes with the auto-scroll recipe's JS pin — same `stick` override,
+same `overflow-anchor: none`, just a section-aware target — and with the
+in-pane footnote-navigation recipe: a mid-stream click on a ref scrolls down
+into the below-the-fold section, the `stick` flag releases, and the reader can
+jump back with the backref. Cache the section lookup if you call it per frame
+— it is a stable, frozen node once committed.
+
+Footnote *references* keep upgrading to numbered links live under both
+patterns; only the section's presentation differs — hidden until settle, or
+rendered just below the fold.
