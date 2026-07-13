@@ -890,6 +890,20 @@
       justify-content: center;
     }
 
+    /* While pending, the escaped source wears the same pending chrome as every
+       other streaming block (tint + accent border + muted text) instead of
+       falling through to the generic dark `pre` and reading as an already
+       committed code block. This is the exact two-phase contract math follows
+       (`.math-block--pending pre.math`) — its direct analog — so a streaming
+       run shows one consistent "not yet rendered" cue across diagrams, math,
+       and prose. Hydration swaps the `<pre>` for SVG, lifting the tint. */
+    .compare-panel-body .mermaid-diagram--pending pre.mermaid {
+      background: var(--pending-bg);
+      border-color: var(--pending-border);
+      color: var(--pending-text);
+      border-radius: 3px;
+    }
+
     .compare-panel-body .mermaid-diagram--rendered {
       background: #f6f8fa;
       border: 1px solid var(--border);
