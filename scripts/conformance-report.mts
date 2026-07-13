@@ -5,13 +5,25 @@
 // those numbers drifts out of sync, so this script derives the whole report from
 // the JSONs instead — run it and paste, never re-type the figures.
 //
-//   npm run report:conformance     # print the Markdown report to stdout
+//   npm run report:conformance          # print the Markdown report to stdout
+//   npm run report:conformance:check    # CI gate — fail if the docs drifted
 //
-// Pure and read-only: it reads the four baselines and writes nothing (no network,
-// no filesystem writes). It never regenerates the baselines — that is the job of
-// the `UPDATE_*_BASELINE=1 npm test` re-baseline flows.
+// `--check` reads the living docs (see `CHECKED_DOCS`) and verifies that every
+// conformance fraction they cite (`N/652`, `N/672`, `N/588`, `N/609`) matches a
+// value the baselines actually produce — so the prose can never silently drift
+// from the fixtures again. It is the reason the numbers keep needing correction:
+// a generator alone only helps if you remember to run it; this makes CI remember.
+//
+// Pure and read-only: it reads the four baselines (and, in `--check`, the docs)
+// and writes nothing (no network, no filesystem writes). It never regenerates the
+// baselines — that is the job of the `UPDATE_*_BASELINE=1 npm test` re-baseline flows.
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+
+// Living docs whose cited conformance numbers `--check` keeps honest. Point-in-time
+// ADRs that record a snapshot are intentionally excluded — only docs meant to stay
+// current are gated. Extend this list to gate more.
+const CHECKED_DOCS = ['docs/ARCHITECTURE.md'] as const
 
 // Sections that fail by design under the pinned `htmlPolicy: 'escape'` harness
 // (sanitize-at-the-sink escapes untrusted HTML rather than passing it through).
@@ -188,10 +200,108 @@ function extensionTable(data: Baseline): string {
   ].join('\n')
 }
 
+/**
+ * Map each conformance denominator the docs may cite (a spec total, or an
+ * in-scope total after excluding the HTML sections) to the set of numerators the
+ * baselines actually produce for it. Any `N/denominator` in the docs whose N is
+ * not in this set is stale.
+ */
+function validNumeratorsByDenominator(loaded: Loaded[]): Map<number, Set<number>> {
+  const valid = new Map<number, Set<number>>()
+  const add = (denominator: number, numerator: number): void => {
+    const set = valid.get(denominator) ?? new Set<number>()
+    set.add(numerator)
+    valid.set(denominator, set)
+  }
+  for (const entry of loaded) {
+    add(entry.data.total, entry.data.passing.length) // e.g. 652 -> {579, 583}
+    const scope = inScope(entry.data)
+    add(scope.total, scope.pass) // e.g. 588 -> {569, 572}
+  }
+  return valid
+}
+
+interface Drift {
+  doc: string
+  line: number
+  fraction: string
+  numerator: number
+  denominator: number
+  expected: number[]
+}
+
+/**
+ * `--check`: fail if any conformance fraction cited in the living docs disagrees
+ * with the baselines. Data-driven (denominator → valid numerators), so it is
+ * robust to rewording — only the numbers are asserted, not the surrounding prose.
+ * Markdown emphasis is stripped first, so a bolded numerator still reads as a number.
+ */
+async function runCheck(loaded: Loaded[]): Promise<void> {
+  const valid = validNumeratorsByDenominator(loaded)
+  const fraction = /(\d+)\s*\/\s*(\d+)/g
+  const drifts: Drift[] = []
+
+  for (const doc of CHECKED_DOCS) {
+    let raw: string
+    try {
+      raw = await readFile(resolve(doc), 'utf8')
+    } catch (err) {
+      console.error(
+        `conformance-report --check: could not read ${doc}: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      process.exit(1)
+    }
+    raw.split('\n').forEach((rawLine, index) => {
+      const line = rawLine.replace(/\*/g, '') // drop markdown emphasis around numbers
+      for (const match of line.matchAll(fraction)) {
+        const numerator = Number(match[1])
+        const denominator = Number(match[2])
+        const expected = valid.get(denominator)
+        if (!expected) continue // not a conformance denominator — ignore
+        if (!expected.has(numerator)) {
+          drifts.push({
+            doc,
+            line: index + 1,
+            fraction: `${numerator}/${denominator}`,
+            numerator,
+            denominator,
+            expected: [...expected].sort((a, b) => a - b),
+          })
+        }
+      }
+    })
+  }
+
+  if (drifts.length === 0) {
+    const denoms = [...valid.keys()].sort((a, b) => a - b).join(', ')
+    console.log(
+      `conformance-report --check: OK — every cited fraction (denominators ${denoms}) matches the baselines.`,
+    )
+    return
+  }
+
+  console.error('conformance-report --check: FAILED — docs cite conformance numbers that no longer match the baselines:\n')
+  for (const d of drifts) {
+    console.error(
+      `  ${d.doc}:${d.line}  ${d.fraction} — expected ${d.expected.map((n) => `${n}/${d.denominator}`).join(' or ')}`,
+    )
+  }
+  console.error(
+    '\nFix the prose to match, or if the baselines legitimately changed run the' +
+      ' `UPDATE_*_BASELINE=1 npm test` flows first. `npm run report:conformance` prints the current numbers.',
+  )
+  process.exit(1)
+}
+
 async function main(): Promise<void> {
   const loaded: Loaded[] = await Promise.all(
     BASELINES.map(async (ref) => ({ ...ref, data: await readBaseline(ref) })),
   )
+
+  if (process.argv.slice(2).includes('--check')) {
+    await runCheck(loaded)
+    return
+  }
 
   const out: string[] = []
   out.push('# Conformance report')

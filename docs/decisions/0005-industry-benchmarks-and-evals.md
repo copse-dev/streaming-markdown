@@ -18,7 +18,7 @@ whole proposal below is "feed more industry corpora through them":
    upstream tag/commit, verify a SHA-256, and keep it gitignored. Any external
    corpus can be onboarded this way without vendoring or license entanglement.
 2. **Baseline-JSON ratchet.** The CommonMark suite (583/652 examples, spec
-   0.31.2) and GFM suite (581/672) don't demand 100% — they pin the exact
+   0.31.2) and GFM suite (593/672) don't demand 100% — they pin the exact
    passing set in a committed baseline and fail on *any* delta, with an
    `UPDATE_*_BASELINE=1` escape hatch. Regressions and improvements both
    surface in review. The coverage gate (`scripts/coverage-gate.mts`) is the
