@@ -67,7 +67,7 @@ jobs:
       # through a pull request" rule (GH013) that rejects a direct push by the
       # default GITHUB_TOKEN (github-actions[bot]). The token expires in ~1h and
       # is scoped to this repo's contents — nothing long-lived lives in CI.
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
