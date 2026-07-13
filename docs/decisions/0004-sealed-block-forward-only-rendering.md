@@ -151,9 +151,11 @@ rewrite), verified headless against `tokenizeBlocks`/collector equivalence at
 every prefix (`incremental-scan-sealed.test.ts`). The scanner also maintains
 the footnote-definition map incrementally (`footnoteDefs()`), now threaded
 into the frozen-tail commit path — the footnote share of limitation K is
-O(tail) per update instead of O(all blocks). Remaining for Phase 2: patch
-*target* resolution (which committed blocks a new definition upgrades) and the
-event-driven emitter itself.
+O(tail) per update instead of O(all blocks). Patch *target* resolution (which
+committed blocks a new definition upgrades) landed with the Phase 2
+sealed-commit slice below; remaining is the event-driven emitter itself
+(consume `ScanAdvance.sealed` instead of re-deriving the delta from
+`settledTailStart` each commit).
 
 `incremental-scan.ts` already computes the safe boundary (the sealing
 predicate: a complete blank after a non-extendable block, or a later terminated
@@ -201,11 +203,51 @@ the Phase 0 verdict (cliffs and tails before medians):
   unchanged, and `synthetic/raw-html-details (#0004)` is now a published
   benchmark fixture so it cannot silently regress.
 
+**Second slice landed — sealed-commit memos and targeted link-reference
+patches** (`streaming-frozen-tail.ts` `commitRanges`/`patchFrozenLinkRefs`,
+`streaming-commit-memo.test.ts`): the generic commit path now trusts — under
+byte-exact proofs — the DOM the previous commit produced, instead of
+re-sanitizing + re-parsing + re-diffing it:
+
+- **Delta adopt-in-place / extension adoption**: the blocks settling in a
+  commit usually ARE last frame's tail. When the delta (or its first
+  top-level part) equals the memoized tail byte-for-byte at the same root,
+  position, and '\n' seam, the frozen boundary advances over the live nodes
+  with no sanitize/parse/diff; only genuinely new parts are parsed. The
+  partial split is taken only when both halves are independently freezable —
+  the same per-fragment-sanitize assumption the frozen boundary itself rests
+  on, at the same top-level group granularity.
+- **Tail reuse**: a commit whose tail re-renders byte-identically keeps the
+  live tail nodes and only trims stale trailing children. To uphold the
+  memo's DOM-trust invariant, the streaming renderer sweeps its pending-tail
+  artifacts BEFORE the commit morphs run (byte-equivalent to the old
+  morph-side removal) and hydration invalidates the memo.
+- **Targeted link-reference patches (limitation J)**: a definition arriving
+  for a label that frozen content cites re-renders and morphs ONLY the frozen
+  top-level parts whose source mentions a changed label — resolved against a
+  verified alternating part/seam node layout, per-part bookkeeping
+  accumulated at freeze time — instead of full-morphing the document per
+  definition line. Symmetric over additions, removals, and value changes,
+  which also absorbs the definition-run retreat (the splitter holds a
+  blank-free run as one open block, so `complete` legitimately retreats past
+  committed definitions and returns); the frozen boundary is now capped
+  before trailing separator tokens so the prefix survives that retreat.
+  Measured (5.1 kB doc, 30 definitions at the bottom each cited above, 200
+  updates, jsdom): blank-separated definitions p95 32 ms → 4.2 ms, max 37 ms
+  → 10.6 ms, total 1078 ms → ~310 ms, rendered chars 224 k → 19.6 k, all 30
+  definitions absorbed as patches. Every skip and patch is pinned by
+  timing-free diagnostics (`parsedChars`, `deltaCommitsSkipped`,
+  `deltaPrefixesAdopted`, `tailMorphsSkipped`, `linkRefPatchCommits`) and
+  falls back to the exact old full morph on any doubt (a citing set past
+  `MAX_LINK_REF_PATCH_PARTS`, intra-list/re-root state, layout mismatch).
+
 Remaining in this phase: sealed-event-driven rendering (consume
-`ScanAdvance.sealed` instead of the delta re-derivation), and targeted
-link-reference patches (limitation J still full-morphs on a late definition —
-the other fallback cliff, and the likely source of the residual per-update
-`max` outliers).
+`ScanAdvance.sealed` instead of the delta re-derivation), and the splitter's
+blank-free definition-run hold — the run still oscillates in and out of
+`complete` per definition line, so a document where most parts cite version
+labels (keepachangelog shape) degrades to the bounded full-morph fallback on
+each flip; committing the leading already-terminated definition lines of an
+open run (title-continuation permitting) would remove the flip entirely.
 
 A new emitter consumes the events: `sealed` blocks render to DOM exactly once
 and are appended (no string re-render, no serialize-compare, no morph);
@@ -228,6 +270,12 @@ Promote the contract to an enforced invariant: per update, work is
 O(new bytes) + O(pending tail) + O(1) patches. Add op-count assertions to the
 #154 bench guard (DOM mutations per update, bytes re-tokenized per update) so a
 regression in *shape* fails CI even when wall-clock noise hides it.
+
+First counters landed with the Phase 2 sealed-commit slice:
+`FrozenTailRenderer.parsedChars` (sanitized chars actually fed to a parse +
+DOM diff, as opposed to `renderedChars`) plus per-skip counters, asserted
+deterministically in `streaming-commit-memo.test.ts` — the measurement half
+of this phase; the CI gate over per-update op counts is still to come.
 
 ### Expected end state
 
