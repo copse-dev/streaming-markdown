@@ -38,6 +38,15 @@ describe('renderEmphasisDelimiters (delimiter-stack AST)', () => {
     assert.equal(renderEmphasisDelimiters('*foo**bar***'), '<em>foo<strong>bar</strong></em>')
   })
 
+  // These equal-length delimiter runs NEST rather than merge. That is the
+  // canonical `process_emphasis` result and matches CommonMark ≥0.30 (spec.txt
+  // #417, #464–#466, #468 as pinned via `commonmark-spec`). Note the older GFM
+  // spec (cmark-gfm 0.29, tests/fixtures/gfm/spec.txt #398/#426/#434–#436/
+  // #473–#475/#477) expects the MERGED form (`****foo****` → `<strong>foo</strong>`);
+  // the two specs contradict each other 1:1 on exactly these inputs, so the
+  // renderer cannot satisfy both. It tracks current CommonMark — do NOT "fix"
+  // this to merge, as that regresses the CommonMark conformance baseline by the
+  // same count it would gain in the GFM one.
   it('nests multiple strong delimiters per CommonMark (#417, #464–#466, #468)', () => {
     assert.equal(
       renderEmphasisDelimiters('foo******bar*********baz'),
