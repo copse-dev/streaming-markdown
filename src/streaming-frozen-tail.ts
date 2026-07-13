@@ -995,13 +995,14 @@ export class FrozenTailRenderer {
     }
     // Never advance the frozen boundary past trailing SEPARATOR tokens
     // (blanks and link-ref definition lines). They render nothing, so
-    // freezing them buys no per-commit work — and a still-growing definition
-    // run RETREATS out of `complete` whenever its next line starts streaming
-    // (the splitter holds the whole blank-free run as one open block), which
-    // would invalidate a frozen prefix that had swallowed it: a full morph
-    // per definition line, in both directions — the oscillation half of
-    // limitation J. Kept in the tail, the prefix stays valid across the
-    // retreat and the map flip lands on the targeted patch path above.
+    // freezing them buys no per-commit work — and a still-growing blank-free
+    // definition run EXTENDS its single block token as later definition lines
+    // commit (the splitter releases a run's settled leading definitions while
+    // holding only its last), so a frozen boundary placed after the token
+    // would sit mid-token one commit later (`tokenStraddles`): a full morph
+    // per definition line. Kept in the tail, the prefix stays valid as the
+    // run grows and each newly settled definition lands on the inert-delta or
+    // targeted-patch path above.
     // Never move the frozen boundary backward either (see above).
     let renderEnd = 0
     for (let i = lowerBound(tokens, Math.max(settledOffset, this.frozenEnd)) - 1; i >= 0; i--) {

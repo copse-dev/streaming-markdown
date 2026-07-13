@@ -396,6 +396,53 @@ function tryLinkRefDefBlock(lines: ScannedLine[], i: number): number | null {
 }
 
 /**
+ * Offset within `runText` — the source slice of a `link_ref_def` block token —
+ * where its LAST definition starts (ADR 0004 Phase 2).
+ *
+ * The tokenizer holds a blank-free run of definitions as ONE block, so while
+ * the run's final line is still streaming the whole block is `open` — but only
+ * that final definition can actually still change (absorb a next-line title or
+ * destination continuation, extend its own last line, or fail to parse and
+ * become a paragraph). Every earlier definition in the run is already followed
+ * by the next definition's `[` start line, and no title or destination
+ * continuation can begin with `[` (titles open with `"`, `'` or `(`;
+ * a continued destination line would have been consumed by that definition's
+ * own parse), so later input can never re-parse those leading definitions.
+ * The streaming splitter therefore commits everything before this offset
+ * instead of holding — and re-exposing — the whole run per streamed character.
+ *
+ * Mirrors the greedy consume loop of {@link tryLinkRefDefBlock} (which produced
+ * the block token from the same text), so it reproduces the same definition
+ * boundaries; any divergence stops early, which is merely conservative (a
+ * larger pending hold, never a wrong commit).
+ */
+export function lastLinkRefDefStart(runText: string): number {
+  let offset = 0
+  let lastStart = 0
+  while (offset < runText.length) {
+    let k = offset
+    let indent = 0
+    while (runText[k] === ' ' && indent < 4) {
+      k++
+      indent++
+    }
+    /* c8 ignore next -- conservative guard mirroring tryLinkRefDefBlock: the
+       block token's extent is exactly its parsed definitions, so re-parsing the
+       same slice cannot hit a non-definition segment. */
+    if (indent > 3 || runText[k] !== '[') break
+    /* c8 ignore next -- same: a footnote definition ends the run before the
+       token is ever produced, so it cannot appear inside `runText`. */
+    if (runText[k + 1] === '^' && isFootnoteDefLine(runText.slice(offset))) break
+    const def = parseLinkReferenceDefinitionAt(runText, k)
+    /* c8 ignore next -- same conservative mirror; see above. */
+    if (!def || !isValidReferenceLabel(def.label)) break
+    lastStart = offset
+    offset = def.end
+  }
+  return lastStart
+}
+
+/**
  * Whether a block fragment's last block is a paragraph still open for lazy
  * continuation, descending through nested blockquotes and list items
  * (spec 250/251/292).
