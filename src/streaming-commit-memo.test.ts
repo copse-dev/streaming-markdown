@@ -219,21 +219,49 @@ describe('targeted link-ref part patches (limitation J, ADR 0004 Phase 2)', () =
     assert.ok(host.innerHTML.includes('<a href="/live">ref</a>'))
   })
 
-  it('falls back on a value change (streaming title) rather than patching', () => {
-    // Commit 2 upgrades the reference when `[x]: /u` arrives (one targeted
-    // patch). Commit 3 CHANGES that definition's value — a next-line title
-    // attaches to it — which is never patchable: the full morph keeps output
-    // byte-identical (drive() asserts parity), and the counter must not move.
+  it('patches a value change (streaming title) without a full morph', () => {
+    // Commit 2 upgrades the reference when `[x]: /u` arrives. Commit 3
+    // CHANGES that definition's value — a next-line title attaches to it —
+    // which re-patches the same citing part under the new map. drive()
+    // asserts byte-parity with the whole-string render at every commit.
     const commits = [
       'see [x] here\n\nfiller\n\n',
       'see [x] here\n\nfiller\n\n[x]: /u\n',
       'see [x] here\n\nfiller\n\n[x]: /u\n"Title"\n\nend\n\n',
     ]
     const { ft, host } = drive(commits)
-    assert.equal(ft.linkRefPatchCommits, 1, 'the arrival patches; the value change full-morphs')
+    assert.equal(ft.linkRefPatchCommits, 2, 'the arrival and the value change both patch')
     // The title itself is stripped by the test sanitizer profile; the parity
     // assertions inside drive() are the real oracle for the value change.
     assert.ok(host.innerHTML.includes('<a href="/u">x</a>'))
+  })
+
+  it('absorbs a definition-run retreat/return (removals) as patches, not full morphs', () => {
+    // The splitter holds a blank-free definition run as one open block, so
+    // `complete` legitimately RETREATS past all committed definitions when
+    // the next line starts streaming and returns when it ends. Each flip
+    // changes the whole map; both directions must land on the targeted patch
+    // path, keep byte-parity, and leave non-citing frozen nodes untouched.
+    const body = 'cites [a] and [b]\n\nplain paragraph\n\n'
+    const commits = [
+      `${body}[a]: /a\n[b]: /b\n`, // run committed
+      body, // retreat: next def line started streaming
+      `${body}[a]: /a\n[b]: /b\n[c]: /c\n`, // return with one more def
+    ]
+    const host = document.createElement('div')
+    const ft = new FrozenTailRenderer()
+    ft.update(host, body, tokenizeBlocks(body))
+    const plain = host.querySelectorAll('p')[1]
+    for (const complete of commits) {
+      ft.update(host, complete, tokenizeBlocks(complete))
+      assert.equal(
+        host.innerHTML,
+        sanitizeRenderedMarkdown(renderMarkdownUnsafe(complete)),
+        `parity after ${JSON.stringify(complete.slice(-20))}`,
+      )
+    }
+    assert.equal(ft.linkRefPatchCommits, 3, 'add, retreat, and return all patch')
+    assert.equal(host.querySelectorAll('p')[1], plain, 'the non-citing paragraph keeps its node')
   })
 
   it('declines the patch when a frozen slot is not the element the records expect', () => {
@@ -265,6 +293,17 @@ describe('targeted link-ref part patches (limitation J, ADR 0004 Phase 2)', () =
     ft.update(host, withDef, tokenizeBlocks(withDef))
     assert.equal(ft.linkRefPatchCommits, 0, 'tampered seam declines the patch')
     assert.equal(host.innerHTML, sanitizeRenderedMarkdown(renderMarkdownUnsafe(withDef)))
+  })
+
+  it('falls back to one full morph when a definition touches too many parts', () => {
+    // Per-part patching pays a sanitize + parse per part; past a handful the
+    // single whole-document morph is cheaper, so a definition cited by many
+    // frozen parts declines the patch. Byte-parity is unaffected either way.
+    const body =
+      Array.from({ length: 12 }, (_, i) => `Paragraph ${String(i)} cites [hub] again.`).join('\n\n') + '\n\n'
+    const { ft, host } = drive([body, `${body}[hub]: /many\n\ntrailer\n\n`])
+    assert.equal(ft.linkRefPatchCommits, 0, 'a widely-cited label takes the full morph')
+    assert.ok(host.innerHTML.includes('<a href="/many">hub</a>'))
   })
 
   it('falls back when a frozen raw part breaks the one-element-per-part layout (passthrough)', () => {

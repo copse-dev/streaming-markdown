@@ -94,6 +94,14 @@ const RENDER_OPTS = TOP_LEVEL_RENDER_OPTS
 // this mode removes.
 const INTRA_LIST_MIN_ITEMS = 4
 
+// Maximum frozen parts a targeted link-ref patch may re-render before the
+// commit falls back to one full morph instead (ADR 0004 Phase 2). Each
+// patched part pays its own sanitize + parse; a handful is far cheaper than
+// re-rendering the document, but past this the single whole-document
+// sanitize wins on per-call overhead. Purely a cost trade — both paths are
+// byte-identical.
+const MAX_LINK_REF_PATCH_PARTS = 8
+
 /**
  * How a block kind behaves at the settled/tail boundary:
  *
@@ -649,20 +657,25 @@ export class FrozenTailRenderer {
   }
 
   /**
-   * Targeted limitation-J patch (ADR 0004 Phase 2): a link-ref definition
-   * arrived whose label may be referenced by frozen content. Re-render and
-   * morph in place ONLY the frozen top-level parts whose source contains a
-   * matching bracketed span, leaving every other frozen node untouched, so a
-   * definition-bearing document (CHANGELOG-style: definitions at the bottom,
-   * referenced above) stops paying a full-document morph per definition.
+   * Targeted limitation-J patch (ADR 0004 Phase 2): the committed link-ref
+   * map changed in a way that may rewrite frozen content — a definition
+   * arrived for a referenced label, or a still-streaming definition run
+   * retreated out of `complete` (removals) or re-parsed with a new value.
+   * A block's render depends on the map only through the labels of its own
+   * bracketed spans, so re-render and morph in place ONLY the frozen
+   * top-level parts whose source contains a span matching a CHANGED label,
+   * leaving every other frozen node untouched — a definition-bearing document
+   * (CHANGELOG-style: definitions at the bottom, referenced above) stops
+   * paying a full-document morph per definition line.
    *
    * Returns false — the caller full-morphs, today's exact behaviour — on ANY
-   * doubt: a non-additive map change, intra-list / re-root / unreliable-part
-   * state, a frozen region whose live layout does not verify as strictly
-   * alternating (one element per part, one '\n' seam between parts), or a
-   * patched part that does not re-render to exactly one element. On success
-   * the caller continues the ordinary commit under the new map (the delta and
-   * tail render with it anyway).
+   * doubt: intra-list / re-root / unreliable-part state, a frozen region
+   * whose live layout does not verify as strictly alternating (one element
+   * per part, one '\n' seam between parts), a patched part that does not
+   * re-render to exactly one element, or a citing set too large for per-part
+   * work to beat one whole-document morph. On success the caller continues
+   * the ordinary commit under the new map (the delta and tail render with it
+   * anyway).
    */
   private patchFrozenLinkRefs(
     completedEl: HTMLElement,
@@ -676,16 +689,17 @@ export class FrozenTailRenderer {
     if (!this.frozenPartsReliable || this.listSig !== null || this.openFrames.length > 0) {
       return false
     }
-    // Only purely-additive changes are patchable: a removal or value change
-    // can rewrite blocks this path has no record of (e.g. the pending region).
-    if (linkRefs.size < this.lastLinkRefs.size) return false
-    for (const [label, ref] of this.lastLinkRefs) {
-      const next = linkRefs.get(label)
-      if (!next || next.href !== ref.href || (next.title ?? '') !== (ref.title ?? '')) return false
+    // Labels whose entry differs between the committed maps, in either
+    // direction (added, removed, or value changed).
+    const changedLabels = new Set<string>()
+    for (const [label, ref] of linkRefs) {
+      const prev = this.lastLinkRefs.get(label)
+      if (!prev || prev.href !== ref.href || (prev.title ?? '') !== (ref.title ?? '')) {
+        changedLabels.add(label)
+      }
     }
-    const newLabels = new Set<string>()
-    for (const label of linkRefs.keys()) {
-      if (!this.lastLinkRefs.has(label)) newLabels.add(label)
+    for (const label of this.lastLinkRefs.keys()) {
+      if (!linkRefs.has(label)) changedLabels.add(label)
     }
 
     const parts = this.frozenParts
@@ -708,11 +722,26 @@ export class FrozenTailRenderer {
       }
     }
 
-    let touched = false
+    // Collect the citing parts first and patch only a SMALL set: each patched
+    // part pays its own sanitize + parse, so beyond a handful the one big
+    // full-morph sanitize is cheaper (and byte-identical). A whole-map flip
+    // that touches most parts (a long definition run retreating out of
+    // `complete` in a document where every section cites its version label)
+    // therefore falls back, while the targeted case — one definition
+    // upgrading its few citing blocks — stays O(citing parts).
+    const affected: number[] = []
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]
-      if (!part || !sourceMentionsLabel(complete.slice(part.start, part.end), newLabels)) continue
-      touched = true
+      if (part && sourceMentionsLabel(complete.slice(part.start, part.end), changedLabels)) {
+        affected.push(i)
+      }
+    }
+    if (affected.length > MAX_LINK_REF_PATCH_PARTS) return false
+
+    for (const i of affected) {
+      const part = parts[i]
+      /* c8 ignore next -- `affected` indices come from the loop above */
+      if (!part) return false
       const from = lowerBound(tokens, part.start)
       const to = lowerBound(tokens, part.end)
       const rendered = renderBlocksToParts(complete, tokens.slice(from, to), {
@@ -749,7 +778,7 @@ export class FrozenTailRenderer {
       }
       part.rawHtml = newHtml
     }
-    if (touched) this.linkRefPatchCommits++
+    if (affected.length > 0) this.linkRefPatchCommits++
     return true
   }
 
@@ -931,15 +960,17 @@ export class FrozenTailRenderer {
     }
     // A committed link-ref map change can rewrite earlier blocks (limitation
     // J) — but only blocks that actually reference one of the labels the
-    // change touched. When the change is purely additive (append-only streams
-    // only ever ADD labels; first definition wins) and none of the new labels
-    // appears among the bracketed spans of the frozen source, the frozen DOM
-    // provably cannot change: adopt the new map and stay on the fast path.
-    // When a new label IS possibly referenced, re-render and morph only the
-    // frozen parts whose source contains a matching bracketed span (the
-    // targeted patch of ADR 0004 Phase 2), then continue the ordinary commit
-    // under the new map. Anything else — removals, value changes, or any
-    // patch guard tripping — keeps today's full-morph fallback.
+    // change touched. When the change is purely additive (streams mostly only
+    // ADD labels; first definition wins) and none of the new labels appears
+    // among the bracketed spans of the frozen source, the frozen DOM provably
+    // cannot change: adopt the new map and stay on the fast path. Any other
+    // change — a possibly-referenced new label, a removal or value change
+    // (the still-growing definition run the splitter holds retreats out of
+    // `complete` and returns, flipping the whole map) — re-renders and morphs
+    // only the frozen parts whose source contains a span matching a CHANGED
+    // label (the targeted patch of ADR 0004 Phase 2), then continues the
+    // ordinary commit under the new map. Any patch guard tripping keeps
+    // today's full-morph fallback.
     if (linkRefKey !== this.lastLinkRefKey && !this.linkRefDeltaIsInert(linkRefs)) {
       if (!this.patchFrozenLinkRefs(completedEl, complete, tokens, linkRefs)) {
         this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
@@ -962,8 +993,26 @@ export class FrozenTailRenderer {
       if (outcome === 'handled') return
       // 'sealed' → continue below with the advanced frozen boundary.
     }
-    // Never move the frozen boundary backward (see above).
-    const advanceTo = Math.max(settledOffset, this.frozenEnd)
+    // Never advance the frozen boundary past trailing SEPARATOR tokens
+    // (blanks and link-ref definition lines). They render nothing, so
+    // freezing them buys no per-commit work — and a still-growing definition
+    // run RETREATS out of `complete` whenever its next line starts streaming
+    // (the splitter holds the whole blank-free run as one open block), which
+    // would invalidate a frozen prefix that had swallowed it: a full morph
+    // per definition line, in both directions — the oscillation half of
+    // limitation J. Kept in the tail, the prefix stays valid across the
+    // retreat and the map flip lands on the targeted patch path above.
+    // Never move the frozen boundary backward either (see above).
+    let renderEnd = 0
+    for (let i = lowerBound(tokens, Math.max(settledOffset, this.frozenEnd)) - 1; i >= 0; i--) {
+      const token = tokens[i]
+      if (!token) break
+      if (settleClassOf(token.kind) !== 'separator') {
+        renderEnd = token.end
+        break
+      }
+    }
+    const advanceTo = Math.max(Math.min(settledOffset, renderEnd), this.frozenEnd)
 
     // Newly-settled delta `[frozenEnd, advanceTo)` and tail `[advanceTo, end)`.
     // Tokens are sorted, so both are contiguous slices around two binary-searched
@@ -1395,23 +1444,28 @@ export class FrozenTailRenderer {
 
     // Walk the unfrozen region: interleaved blanks plus items that continue the
     // signature. Loose evidence is exactly scanListGroup's rule, applied
-    // incrementally — a blank run counts only when a continuing item follows;
-    // evidence inside the frozen region was accumulated when those items froze.
+    // incrementally — a blank run counts only when a continuing item follows,
+    // and only BETWEEN items: with the frozen boundary capped before trailing
+    // separators, the walk can start at a blank that precedes the group
+    // (frozen boundary still outside the list), which is not loose evidence.
+    // Evidence inside the frozen region was accumulated when those items froze.
     const unfrozenItems: BlockToken[] = []
     let looseEvidence = false
     let blankPending = false
+    let seenItem = this.listFrozenLis > 0
     let ended = false
     for (let i = lowerBound(tokens, this.frozenEnd); i < tokens.length; i++) {
       const token = tokens[i]
       if (!token) break
       if (token.kind === 'blank') {
-        blankPending = true
+        if (seenItem) blankPending = true
         continue
       }
       if (
         token.kind === 'list_item' &&
         listSliceContinuesGroup(sig, complete.slice(token.start, token.end))
       ) {
+        seenItem = true
         if (blankPending) looseEvidence = true
         blankPending = false
         if (listItemSliceIsMultiParagraph(complete.slice(token.start, token.end))) {
