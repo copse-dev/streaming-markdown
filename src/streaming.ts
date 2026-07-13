@@ -919,6 +919,38 @@ export class StreamingMarkdownRenderer {
    */
   pendingFastPathHits = 0
   private readonly frozenTail = new FrozenTailRenderer()
+
+  /**
+   * Timing-free work-shape counters, summed across this renderer's scanners
+   * and commit path (ADR 0004 Phase 3). These are what the long-document
+   * doubling guards assert on: totals that must stay ~O(new bytes) over an
+   * append-only stream (`scannedChars`, `suffixTokensScanned`, `renderedChars`,
+   * `parsedChars`), and the rewrite-guard comparison count (`prefixChecks`),
+   * which must stay ~one per scanner call — a second O(prefix) memcmp per
+   * update was a measured super-linear term on multi-hundred-kB streams.
+   * @experimental Diagnostics for tests/benchmarks, not a stable API (#147).
+   */
+  diagnostics(): {
+    scannedChars: number
+    suffixTokensScanned: number
+    prefixChecks: number
+    prefixBytesCompared: number
+    renderedChars: number
+    parsedChars: number
+    pendingFastPathHits: number
+  } {
+    return {
+      scannedChars: this.contentScanner.scannedChars + this.completeScanner.scannedChars,
+      suffixTokensScanned:
+        this.contentScanner.suffixTokensScanned + this.completeScanner.suffixTokensScanned,
+      prefixChecks: this.contentScanner.prefixChecks + this.completeScanner.prefixChecks,
+      prefixBytesCompared:
+        this.contentScanner.prefixBytesCompared + this.completeScanner.prefixBytesCompared,
+      renderedChars: this.frozenTail.renderedChars,
+      parsedChars: this.frozenTail.parsedChars,
+      pendingFastPathHits: this.pendingFastPathHits,
+    }
+  }
   // Incremental scanners (#30): re-tokenize / re-scan only past the last safe
   // boundary instead of the whole string every update. One per source stream —
   // the raw content and the committed prefix advance differently.

@@ -172,7 +172,14 @@ function advanceSafeBoundary(
  * previously emitted events are void and the consumer must rebuild.
  */
 export interface ScanAdvance {
-  /** All tokens of the snapshot — byte-identical to `tokenizeBlocks(source)`. */
+  /**
+   * All tokens of the snapshot — byte-identical to `tokenizeBlocks(source)`.
+   * The array is the scanner's live buffer, valid only until the next
+   * `advance`/`tokenize` call on the same scanner (which truncates and extends
+   * it in place — copying it per update was a measured super-linear
+   * long-document term, ADR 0004 Phase 3). Slice it to retain a snapshot; the
+   * token OBJECTS are immutable and safe to hold.
+   */
   tokens: BlockToken[]
   /** Tokens sealed by THIS advance (fire-once, document order). */
   sealed: BlockToken[]
@@ -230,6 +237,23 @@ export class IncrementalSourceScanner {
    * a deterministic, timing-free regression test reads it.
    */
   scannedChars = 0
+  /**
+   * Diagnostic: number of full-prefix rewrite-guard comparisons (`startsWith`)
+   * actually executed. The long-document invariant (ADR 0004 Phase 3) is at
+   * most ONE per scanner call — the definition views must ride {@link advance}'s
+   * verification via the `source === lastSource` identity fast path instead of
+   * re-running their own. Each check is O(prefix), so a second one per call
+   * showed up as a super-linear term on multi-hundred-kB streams.
+   */
+  prefixChecks = 0
+  /** Diagnostic: total bytes those rewrite-guard comparisons scanned (informational). */
+  prefixBytesCompared = 0
+  /**
+   * Diagnostic: suffix tokens built across all advances. O(new bytes) per
+   * append-only stream while the safe boundary tracks the tail — the token
+   * companion to {@link scannedChars}, read by the Phase 3 doubling guard.
+   */
+  suffixTokensScanned = 0
 
   private resetCache(): void {
     this.tokens = []
@@ -259,26 +283,39 @@ export class IncrementalSourceScanner {
    */
   advance(source: string): ScanAdvance {
     let reset = false
+    this.prefixChecks++
+    this.prefixBytesCompared += this.safePrefix.length
     if (!source.startsWith(this.safePrefix)) {
       this.resetCache()
       reset = true
     }
     const prevSafeTokenCount = this.safeTokenCount
+    const prevSafeOffset = this.safeOffset
 
     const suffix = source.slice(this.safeOffset)
     this.scannedChars += suffix.length
     const suffixTokens = tokenizeBlocks(suffix)
-    const shifted =
-      this.safeOffset === 0
-        ? suffixTokens
-        : suffixTokens.map((t) => ({
-            kind: t.kind,
-            status: t.status,
-            start: t.start + this.safeOffset,
-            end: t.end + this.safeOffset,
-          }))
-    const tokens =
-      this.safeTokenCount === 0 ? shifted : this.tokens.slice(0, this.safeTokenCount).concat(shifted)
+    this.suffixTokensScanned += suffixTokens.length
+    // Rebuild IN PLACE: truncate to the sealed prefix and append the shifted
+    // suffix. `slice(0, safeTokenCount).concat(...)` here copied every sealed
+    // token object reference per update — O(total blocks) churn per update,
+    // one of the measured super-linear long-document terms (ADR 0004 Phase 3).
+    // The returned array is therefore only valid until the next
+    // `advance`/`tokenize` call (see {@link ScanAdvance.tokens}).
+    const tokens = this.tokens
+    tokens.length = this.safeTokenCount
+    if (this.safeOffset === 0) {
+      for (const t of suffixTokens) tokens.push(t)
+    } else {
+      for (const t of suffixTokens) {
+        tokens.push({
+          kind: t.kind,
+          status: t.status,
+          start: t.start + this.safeOffset,
+          end: t.end + this.safeOffset,
+        })
+      }
+    }
 
     // Advance the safe boundary for the NEXT call, folding the newly-safe
     // region's link-reference and footnote definitions into the cached maps
@@ -315,6 +352,9 @@ export class IncrementalSourceScanner {
     this.safeTokenCount = advanced.tokenCount
     this.safeOffset = advanced.offset
     this.lastNonBlankKind = advanced.lastNonBlankKind
+    // NOTE: a `safePrefix += delta` rope here measured ~2× WORSE at 400 kB —
+    // `startsWith` flattens the rope (an O(prefix) copy + allocation per
+    // update), while V8's `slice` is an O(1) SlicedString view. Keep the slice.
     this.safePrefix = source.slice(0, this.safeOffset)
     this.tokens = tokens
     this.lastSource = source
@@ -336,18 +376,26 @@ export class IncrementalSourceScanner {
    * anything else falls back to a full scan.
    */
   linkRefs(source: string): LinkReferenceMap {
-    if (!source.startsWith(this.safePrefix)) {
-      return collectLinkReferenceDefinitions(source)
+    // The streaming hot path passes the exact string instance the latest
+    // `advance` verified, so the identity check replaces a second O(prefix)
+    // rewrite-guard memcmp per commit (a measured super-linear long-document
+    // term — ADR 0004 Phase 3). Any other string still gets the full check.
+    const isLatest = source === this.lastSource
+    if (!isLatest) {
+      this.prefixChecks++
+      this.prefixBytesCompared += this.safePrefix.length
+      if (!source.startsWith(this.safePrefix)) {
+        return collectLinkReferenceDefinitions(source)
+      }
     }
     const merged = new Map(this.refs)
     // When asked about the string the scanner just tokenized (the streaming
     // hot path), reuse those tokens for the unsealed suffix instead of
     // re-tokenizing it — the second tail tokenization per commit the #154
     // guard flagged. Any other string still gets a correct fresh scan.
-    const suffixRefs =
-      source === this.lastSource
-        ? collectLinkReferenceDefinitions(source, this.tokens.slice(this.safeTokenCount))
-        : collectLinkReferenceDefinitions(source.slice(this.safeOffset))
+    const suffixRefs = isLatest
+      ? collectLinkReferenceDefinitions(source, this.tokens.slice(this.safeTokenCount))
+      : collectLinkReferenceDefinitions(source.slice(this.safeOffset))
     for (const [label, ref] of suffixRefs) {
       if (!merged.has(label)) merged.set(label, ref)
     }
@@ -364,15 +412,20 @@ export class IncrementalSourceScanner {
    * back to a full scan.
    */
   footnoteDefs(source: string): FootnoteDefinitionMap {
-    if (!source.startsWith(this.safePrefix)) {
-      return collectFootnoteDefinitions(source)
+    // Same identity fast path as {@link linkRefs} — see the note there.
+    const isLatest = source === this.lastSource
+    if (!isLatest) {
+      this.prefixChecks++
+      this.prefixBytesCompared += this.safePrefix.length
+      if (!source.startsWith(this.safePrefix)) {
+        return collectFootnoteDefinitions(source)
+      }
     }
     const merged = new Map(this.fnDefs)
     // Same token reuse as {@link linkRefs} — see the note there.
-    const suffixDefs =
-      source === this.lastSource
-        ? collectFootnoteDefinitions(source, this.tokens.slice(this.safeTokenCount))
-        : collectFootnoteDefinitions(source.slice(this.safeOffset))
+    const suffixDefs = isLatest
+      ? collectFootnoteDefinitions(source, this.tokens.slice(this.safeTokenCount))
+      : collectFootnoteDefinitions(source.slice(this.safeOffset))
     for (const [label, def] of suffixDefs) {
       if (!merged.has(label)) merged.set(label, def)
     }
