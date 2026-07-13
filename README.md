@@ -184,6 +184,29 @@ variables, and native-nesting note — are in [`docs/EXTENDING.md`](docs/EXTENDI
   caveats, and the latest published results.
 - **[`docs/SECURITY.md`](docs/SECURITY.md)** — the sanitize-at-the-sink security
   model, a threat model, trust boundaries, and hardening knobs.
+- **[`docs/GITHUB-PARITY.md`](docs/GITHUB-PARITY.md)** — the by-design
+  divergences from github.com rendering, validated against GitHub's actual
+  comment HTML, and which gaps close via configuration.
+
+## Stability & versioning
+
+The package follows [semver](https://semver.org). The contract covers:
+
+- **The main entry's exports** (`src/index.ts`) — every symbol is stable; the
+  pre-1.0 `@experimental` tier (ambient-config introspection getters and
+  low-level renderer internals) was removed from the entry at 1.0.
+- **The subpath entries** (`/sanitizers/*`, `/highlighters/*`, `/math/katex`,
+  `/diagrams/mermaid`, `/inline/emoji`, `/cjk`, `/entities/full`, `/smoothing`,
+  `/react`, `/host/workspace`) and the CSS entry points.
+- **Default output stability.** The CommonMark/GFM conformance baselines and
+  the "byte-identical until you opt in" property (math syntax, link/image
+  policy, entity tables) are part of the contract — changes to default output
+  are breaking changes.
+
+Streaming *pending-state* markup (`stream-pending-*` classes and transient
+structure) is a rendering behaviour, not a wire format: its invariants (no raw
+syntax flash; convergence with the at-rest render) are stable, its exact
+transient DOM is not.
 
 ## Development
 

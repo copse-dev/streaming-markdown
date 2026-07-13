@@ -225,3 +225,37 @@ The `- 12` leaves breathing room above the target. `behavior: 'smooth'` override
 own `scroll-behavior`, so this stays smooth even when the pane is set to `auto` for the
 auto-scroll pin above. Works for refs (jump down to the definition) and backrefs (jump back
 up to the reference) alike, and for any scroll pane since it walks up to the nearest one.
+
+# External-link `rel` / `target` attributes
+
+The built-in link output is neutral (#112): a rendered `<a>` carries only
+`href` (and `title`). When the markdown is **untrusted model/agent output**,
+external links in it are attacker-influenceable, so you likely want what
+GitHub emits on user content — `rel="nofollow ugc noopener noreferrer"` and
+`target="_blank"` on external links. That is a host policy, so it rides the
+`linkDecorator` seam rather than changing the default (decision in #218).
+
+## Snippet
+
+A decorator **replaces** the neutral default, so re-emit `title` yourself:
+
+```ts
+import { renderMarkdown, escapeHtml, type MarkdownConfig } from '@copse/streaming-markdown'
+
+const untrustedLinkDecorator = ({ href, title }) => {
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+  const external = /^https?:\/\//i.test(href)
+  return external
+    ? `${titleAttr} rel="nofollow ugc noopener noreferrer" target="_blank"`
+    : titleAttr
+}
+
+const config: MarkdownConfig = { linkDecorator: untrustedLinkDecorator }
+renderMarkdown(markdown, config)
+```
+
+The same `config` works for `renderStreamingMarkdown` and
+`new StreamingMarkdownRenderer(host, config)`. Scheme safety is separate and
+always on — dangerous schemes are already rejected by the allowlist before the
+decorator runs; layer `MarkdownConfig.linkImagePolicy` on top to restrict
+which *origins* links may point at (see EXTENDING.md).
