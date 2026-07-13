@@ -1049,7 +1049,12 @@
     /* ── Footnotes (#72) ─────────────────────────────────────
        Superscript refs in prose; a <section class="footnotes"> with an <ol>
        builds up at the document tail as definitions stream in. */
-    .compare-panel-body sup.footnote-ref { font-size: 0.7em; }
+    /* line-height: 0 keeps the raised superscript from growing its line box —
+       otherwise every `[^a]` → <sup> upgrade mid-stream nudges the paragraph
+       taller and everything below it shifts (visible jitter per definition). */
+    .hero-output sup.footnote-ref,
+    .compare-panel-body sup.footnote-ref { font-size: 0.7em; line-height: 0; }
+    .hero-output sup.footnote-ref a,
     .compare-panel-body sup.footnote-ref a { text-decoration: none; }
     .compare-panel-body .footnotes {
       margin-top: 1rem;

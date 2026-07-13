@@ -277,7 +277,11 @@
   /* GFM footnotes (#72): superscript refs and the trailing section. */
   & sup.footnote-ref {
     font-size: 0.75em;
-    line-height: 1;
+    /* 0, not 1: a raised superscript with any line box can still grow its
+       line, so a mid-stream `[^a]` -> <sup> upgrade nudges the paragraph
+       taller and shifts everything below it (streaming jitter). A zero-height
+       inline box never affects line layout; the glyph renders unchanged. */
+    line-height: 0;
   }
   & sup.footnote-ref a {
     text-decoration: none;
