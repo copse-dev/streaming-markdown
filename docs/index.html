@@ -1282,6 +1282,60 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
 
 <div class="section">
   <div class="section-header">
+    <h2>React in a few lines</h2>
+    <p>The core is framework-agnostic, so there is no React dependency to install — wrapping it is a
+      tiny pattern. At rest is a memoized <code>dangerouslySetInnerHTML</code> (the output is already
+      sanitized). Streaming hands the growing string to one long-lived
+      <code>StreamingMarkdownRenderer</code>: React owns the <code>&lt;div&gt;</code>, the renderer owns
+      its children, so each token is an incremental DOM patch — not a re-render of the whole document.
+      Full guide, SSR notes, and a <code>react-markdown</code> migration in
+      <a href="https://github.com/copse-dev/streaming-markdown/blob/main/docs/REACT.md">the React guide</a>.</p>
+  </div>
+  <div class="snippet-grid">
+    <div class="snippet-card">
+      <div class="snippet-card-header">
+        <span>At rest</span> — memoized, sanitized HTML
+      </div>
+      <pre><code><span class="kw">import</span> { <span class="fn">useMemo</span> } <span class="kw">from</span> <span class="str">'react'</span>
+<span class="kw">import</span> { <span class="fn">renderMarkdown</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown'</span>
+
+<span class="kw">export function</span> <span class="cls">Markdown</span>({ content }) {
+  <span class="cmt">// renderMarkdown output is sanitized (fail-closed) — safe for dSIH.</span>
+  <span class="kw">const</span> html = <span class="fn">useMemo</span>(() =&gt; <span class="fn">renderMarkdown</span>(content), [content])
+  <span class="kw">return</span> &lt;<span class="cls">div</span> <span class="prop">dangerouslySetInnerHTML</span>={{ __html: html }} /&gt;
+}</code></pre>
+    </div>
+
+    <div class="snippet-card">
+      <div class="snippet-card-header">
+        <span>Streaming</span> — the renderer owns the node's children
+      </div>
+      <pre><code><span class="kw">import</span> { <span class="fn">useEffect</span>, <span class="fn">useRef</span> } <span class="kw">from</span> <span class="str">'react'</span>
+<span class="kw">import</span> { <span class="cls">StreamingMarkdownRenderer</span> } <span class="kw">from</span> <span class="str">'@copse/streaming-markdown'</span>
+
+<span class="kw">export function</span> <span class="cls">StreamingMarkdown</span>({ content }) {
+  <span class="kw">const</span> host = <span class="fn">useRef</span>(<span class="kw">null</span>)
+  <span class="kw">const</span> renderer = <span class="fn">useRef</span>(<span class="kw">null</span>)
+
+  <span class="cmt">// Construct once — keep the JSX element empty so React never fights it.</span>
+  <span class="fn">useEffect</span>(() =&gt; {
+    renderer.<span class="prop">current</span> = <span class="kw">new</span> <span class="cls">StreamingMarkdownRenderer</span>(host.<span class="prop">current</span>)
+    <span class="kw">return</span> () =&gt; host.<span class="prop">current</span>?.<span class="fn">replaceChildren</span>()
+  }, [])
+
+  <span class="cmt">// Re-feed the full text; it patches only the settled tail — O(delta).</span>
+  <span class="fn">useEffect</span>(() =&gt; {
+    renderer.<span class="prop">current</span>?.<span class="prop">update</span>(content)
+  }, [content])
+
+  <span class="kw">return</span> &lt;<span class="cls">div</span> <span class="prop">ref</span>={host} /&gt;
+}</code></pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-header">
     <h2>Heavy dependencies are optional — and lazy</h2>
     <p>
       The core bundle carries <strong>no highlight.js, no mermaid, no KaTeX, and no Shiki</strong>,
