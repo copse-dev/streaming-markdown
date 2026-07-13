@@ -2030,6 +2030,30 @@ function followBottom(el) {
   el.scrollTop = el.scrollHeight;
 }
 
+// Footnote refs and backrefs live inside fixed-height streaming panes. A bare
+// `#id` jump scrolls *every* scrollable ancestor — including the page (animated
+// by `html { scroll-behavior: smooth }`) — and stamps the URL hash. Keep the
+// navigation inside the pane the link lives in: scroll just that pane, smoothly,
+// and leave the page and hash untouched.
+function scrollingAncestor(el) {
+  for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+    const oy = getComputedStyle(n).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n;
+  }
+  return null;
+}
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('sup.footnote-ref a[href^="#"], a.footnote-backref[href^="#"]');
+  if (!a) return;
+  const pane = scrollingAncestor(a);
+  if (!pane) return; // not inside a scrollable pane — let the browser handle it
+  const target = pane.querySelector(`#${CSS.escape(decodeURIComponent(a.getAttribute('href').slice(1)))}`);
+  if (!target) return;
+  e.preventDefault();
+  const top = pane.scrollTop + (target.getBoundingClientRect().top - pane.getBoundingClientRect().top) - 12;
+  pane.scrollTo({ top, behavior: 'smooth' });
+});
+
 // Never let a simulated chunk end exactly ON a newline: the pending tail
 // (everything after the last newline) would be empty for one whole tick, so
 // the open block's highlight would drop for a frame and reappear when the
