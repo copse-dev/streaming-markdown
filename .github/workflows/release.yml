@@ -168,7 +168,17 @@ jobs:
           # setup-node step above), so no npm self-upgrade is needed here.
           # publishConfig pins the public registry + `--access public`, and
           # provenance is attached automatically under trusted publishing.
-          npm publish
+          #
+          # Prereleases (any version with a `-` segment, e.g. 1.0.0-rc.1)
+          # publish under the `next` dist-tag so a plain
+          # `npm install @copse/streaming-markdown` keeps resolving to the
+          # last stable release; stable versions publish as `latest` (npm's
+          # default). Promote an rc later with
+          # `npm dist-tag add @copse/streaming-markdown@<ver> latest`.
+          case "${{ steps.version.outputs.version }}" in
+            *-*) npm publish --tag next ;;
+            *)   npm publish ;;
+          esac
 
       - name: Push commit and tag
         if: ${{ !inputs.dry_run }}

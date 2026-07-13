@@ -38,9 +38,14 @@ describe('GFM footnotes at rest (#72)', () => {
     assert.match(html, /<a href="#fnref-x" class="footnote-backref"[^>]*>↩<\/a>/)
   })
 
-  it('leaves unresolved references literal (like unresolved link refs)', () => {
+  it('keeps unresolved references literal, wrapped in the styling hook (#230)', () => {
+    // The literal text is preserved (GitHub-identical prose); the wrapper span
+    // lets streaming hosts hide/dim a citation until its definition arrives.
     const html = renderMarkdownUnsafe('Nothing defines this[^ghost].')
-    assert.equal(html, '<p>Nothing defines this[^ghost].</p>')
+    assert.equal(
+      html,
+      '<p>Nothing defines this<span class="footnote-ref-unresolved">[^ghost]</span>.</p>',
+    )
   })
 
   it('drops definitions that are never referenced (GitHub behavior)', () => {

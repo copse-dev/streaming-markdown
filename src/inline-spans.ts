@@ -15,7 +15,7 @@ import {
   restoreInlinePassHtml,
 } from './inline-passes.ts'
 import { renderStrikethrough } from './inline-strikethrough.ts'
-import { getActiveFootnoteContext, renderFootnoteRefs } from './footnotes.ts'
+import { isFootnotesEnabled, renderFootnoteRefs } from './footnotes.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 
 /**
@@ -44,7 +44,12 @@ function applyInlinePasses(t: string, stage: InlinePassStage): string {
  * resolution reads `[` as a label opener, and code spans never trigger.
  */
 function applyFootnoteRefs(t: string): string {
-  if (getActiveFootnoteContext() === null || !t.includes('[^')) return t
+  // Gate on the feature, not the context: the pending-line path renders with
+  // no active context, and its complete-but-unresolvable refs must still wrap
+  // (#230) so they can be styled consistently with the committed render. With
+  // `footnotes: false` this pass is skipped outright and `[^label]` stays
+  // literal, byte-identical to a footnote-free build.
+  if (!isFootnotesEnabled() || !t.includes('[^')) return t
   return t
     .split(INLINE_HTML_SHIELD_RE)
     .map((segment, index) =>

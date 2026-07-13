@@ -14,6 +14,7 @@ in #114). Closes the tracking issue #219.
 | **Single-tilde strikethrough** (`~one~`) | struck (`<del>`) | left literal | Deliberate (#613) — a lone `~` (`20~25`, arithmetic) is never a marker, avoiding false-positive strikes. GitHub accepts one-or-two tildes; smd requires `~~`. |
 | **Angle autolink, non-allowlisted scheme** (`<irc://…>`) | brackets stripped → plain text (not a live link) | left literal `&lt;irc://…&gt;` (not a live link) | Scheme **allow-list**, fail-closed (#139). Same security outcome — neither produces a live `irc:` link; only cosmetic (brackets). |
 | **Raw HTML blocks / inline** (`<div>`, `<script>`) | escaped via the GFM tagfilter | passed through and sanitized at the sink | Both end up inert; the architectures differ. smd's sink sanitizer is the single trust boundary (see [SECURITY.md](SECURITY.md) and [decision 0002](decisions/0002-raw-html-passthrough-default.md)); `htmlPolicy: 'escape'` / `'escape-all'` restore literalization per render. |
+| **Unresolved footnote ref** (`[^x]` with no definition) | plain literal text | literal text wrapped in `<span class="footnote-ref-unresolved">` | Visually identical; the wrapper is a styling hook for streaming hosts, where "unresolved" almost always means "definition hasn't arrived *yet*" — hide/dim it until the ref upgrades to a numbered link in place (#230). A ref followed by `(`/`[` still falls through to link resolution, matching GitHub. |
 
 ## Parity available via configuration
 

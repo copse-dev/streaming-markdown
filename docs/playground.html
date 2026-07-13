@@ -362,8 +362,26 @@
       padding: 1rem;
       height: 420px;
       overflow-y: auto;
+      /* CSS stick-to-bottom: snap to the pane's bottom sentinel; `proximity`
+         releases when the reader scrolls away (see index.html). */
+      scroll-snap-type: y proximity;
+      scroll-behavior: auto;
+      overflow-anchor: none;
       font-size: 0.9rem;
       flex: 1;
+    }
+
+    .stream-snap-anchor {
+      scroll-snap-align: end;
+      height: 1px;
+    }
+
+    /* Hold the footnotes section while a stream is live; it appears once, at
+       settle (class toggled once per stream — see index.html). Unresolved
+       [^label] citations hide the same way until their definitions commit. */
+    .stream-live section.footnotes,
+    .stream-live .footnote-ref-unresolved {
+      display: none;
     }
 
     /* ── Rendered content styles ─────────────────────────── */
@@ -522,7 +540,8 @@
     @keyframes stream-settle { from { opacity: 0.55; } to { opacity: 1; } }
 
     /* ── Footnotes ───────────────────────────────────────── */
-    .panel-body sup.footnote-ref { font-size: 0.7em; }
+    /* line-height: 0 stops ref upgrades growing their line box (see index.html). */
+    .panel-body sup.footnote-ref { font-size: 0.7em; line-height: 0; }
     .panel-body sup.footnote-ref a { text-decoration: none; }
     .panel-body .footnotes {
       margin-top: 1rem;
@@ -982,6 +1001,8 @@ function reset() {
   naive.colourMetrics();
   lib.colourMetrics();
   lib.el.classList.remove('is-streaming');
+  naive.el.classList.remove('stream-live');
+  lib.el.classList.remove('stream-live');
   libRenderer = new StreamingMarkdownRenderer(lib.el, renderConfig);
   pos = 0;
 }
@@ -992,6 +1013,8 @@ function play() {
   const step = Number(chunkSlider.value);
   const interval = Number(speedSlider.value);
   lib.el.classList.add('is-streaming');
+  naive.el.classList.add('stream-live');
+  lib.el.classList.add('stream-live');
   setStatus('streaming', 'streaming…');
 
   timer = setInterval(() => {
@@ -999,6 +1022,17 @@ function play() {
       stop();
       lib.el.classList.remove('is-streaming');
       setStatus('done', 'settled');
+      // Reveal the footnotes section held hidden during the stream, then ease
+      // each pane to the true bottom — but only for a reader still near the
+      // tail; settling must not yank one who scrolled away.
+      naive.el.classList.remove('stream-live');
+      lib.el.classList.remove('stream-live');
+      for (const el of [naive.el, lib.el]) {
+        const fromBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
+        if (fromBottom < el.clientHeight * 1.5 && el.scrollHeight > el.clientHeight + 1) {
+          el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        }
+      }
       return;
     }
     pos = advance(text, pos, step);
@@ -1008,13 +1042,27 @@ function play() {
     // subtree. renderMarkdown returns sanitized HTML; setSanitizedHtml assigns
     // it through the same sink the library uses (Trusted Types-safe).
     setSanitizedHtml(naive.el, renderMarkdown(prefix, renderConfig));
-    naive.el.scrollTop = naive.el.scrollHeight;
+    ensureSnapAnchor(naive.el);
 
     // Incremental path: patch the DOM in place, holding unfinished blocks in a
     // pending state that already carries their final layout.
     libRenderer.update(prefix);
-    lib.el.scrollTop = lib.el.scrollHeight;
+    ensureSnapAnchor(lib.el);
   }, interval);
+}
+
+// The following is CSS scroll-snap (see .panel-body / .stream-snap-anchor in
+// the styles above, and the rationale in index.html): the pane snaps to a 1px
+// sentinel kept as its last child and the engine re-pins on every layout
+// growth. The naive pane replaces its innerHTML wholesale each tick, so its
+// sentinel is re-appended per tick.
+function ensureSnapAnchor(el) {
+  const last = el.lastElementChild;
+  if (last && last.classList.contains('stream-snap-anchor')) return;
+  const anchor = document.createElement('div');
+  anchor.className = 'stream-snap-anchor';
+  anchor.setAttribute('aria-hidden', 'true');
+  el.append(anchor);
 }
 
 function selectSample(name) {

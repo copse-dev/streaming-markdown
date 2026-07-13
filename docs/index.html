@@ -268,9 +268,16 @@
       padding: 1.5rem;
       height: 360px;
       overflow-y: auto;
-      /* JS pins these panes to the bottom each frame; keep the pin instant so
-         the page-level `scroll-behavior: smooth` can never animate (lag) it. */
+      /* CSS-only stick-to-bottom: the pane is a snap container and snaps to
+         the 1px .stream-snap-anchor sentinel kept as its last child, so the
+         ENGINE re-pins after every layout growth — no per-frame JS scrollTop
+         writes at all. `proximity` releases the pin when the reader scrolls
+         away and re-arms when they return. scroll-behavior stays `auto` so
+         the page-level smooth rule can't animate (lag) the re-snap;
+         overflow-anchor stays off so anchoring never fights the snap. */
+      scroll-snap-type: y proximity;
       scroll-behavior: auto;
+      overflow-anchor: none;
       font-size: 0.95rem;
     }
 
@@ -473,8 +480,36 @@
          growth never shifts the page content below the panels. */
       height: 380px;
       overflow-y: auto;
-      scroll-behavior: auto; /* keep the JS bottom-pin instant (see .hero-output) */
+      scroll-snap-type: y proximity; /* CSS stick-to-bottom (see .hero-output) */
+      scroll-behavior: auto;
+      overflow-anchor: none;
       font-size: 0.9rem;
+    }
+
+    /* The snap target for the CSS stick-to-bottom: a 1px sentinel each driver
+       keeps as its pane's last child (re-appended by ensureSnapAnchor for the
+       panes that replace their innerHTML wholesale per tick). */
+    .stream-snap-anchor {
+      scroll-snap-align: end;
+      height: 1px;
+    }
+
+    /* While a stream is live, the committed footnotes section stays out of
+       the flow (#220): with the pane snapped to its bottom sentinel the
+       section would otherwise sit pinned in view, juddering, for the whole
+       stream. The class toggles ONCE per stream — on at start, off at settle
+       — so there is no mid-stream flicker; the section appears once, when
+       the reply is done. */
+    .is-streaming section.footnotes {
+      display: none;
+    }
+
+    /* A not-yet-resolved citation renders as its literal [^label] text wrapped
+       in this marker span (#230). Hide it while the stream is live — the ref
+       upgrades to a numbered link in place the moment its definition commits,
+       and anything still unresolved reappears as literal text at settle. */
+    .is-streaming .footnote-ref-unresolved {
+      display: none;
     }
 
     /* ── Rendered content styles ─────────────────────────── */
@@ -594,6 +629,7 @@
       background: var(--pending-bg);
       border-color: var(--pending-border);
     }
+
 
     /* Muted text marks only the UNCOMMITTED text: the whole block while it is
        fully pending, then just the continuation span (via `.stream-pending`)
@@ -1021,7 +1057,12 @@
     /* ── Footnotes (#72) ─────────────────────────────────────
        Superscript refs in prose; a <section class="footnotes"> with an <ol>
        builds up at the document tail as definitions stream in. */
-    .compare-panel-body sup.footnote-ref { font-size: 0.7em; }
+    /* line-height: 0 keeps the raised superscript from growing its line box —
+       otherwise every `[^a]` → <sup> upgrade mid-stream nudges the paragraph
+       taller and everything below it shifts (visible jitter per definition). */
+    .hero-output sup.footnote-ref,
+    .compare-panel-body sup.footnote-ref { font-size: 0.7em; line-height: 0; }
+    .hero-output sup.footnote-ref a,
     .compare-panel-body sup.footnote-ref a { text-decoration: none; }
     .compare-panel-body .footnotes {
       margin-top: 1rem;
@@ -2036,8 +2077,10 @@ An unknown marker like \`> [!FOO]\` falls through to a plain blockquote.
 ### Footnotes
 
 Streaming markdown began as a renderer for LLM chat UIs[^chat], where models
-emit citations[^cite] as footnote references constantly. The footnotes section
-below builds up as each definition streams in.
+emit citations[^cite] as footnote references constantly. References upgrade to
+numbered links as their definitions stream in; the footnotes section itself
+appears once, when the reply settles, so the streaming text never judders
+above it.
 
 [^chat]: Tokens arrive incrementally, so blocks must render before they finish.
 [^cite]: References are numbered in first-use order; unresolved ones stay literal text.
@@ -2077,21 +2120,54 @@ const answer = compute(42)
 ## Late footnote definition
 
 A reference like this[^late] renders as literal \`[^late]\` text until its
-definition streams in below, then upgrades to a numbered link and grows the
-footnotes section — with no reflow of the surrounding prose.
+definition streams in below, then upgrades to a numbered link in place — with
+no reflow of the surrounding prose. The renderer keeps the footnotes section
+pinned below the streaming tail; this demo holds it out of view until the
+reply settles, then reveals it once.
 
 [^late]: Defined after the reference, exactly how LLM citations arrive.
 `
 };
 
 // ── Auto-follow ─────────────────────────────────────────────────────────────
-// Pin the streaming pane to the bottom so the newest content stays in view.
-// The stream now reveals sub-line increments each frame (the input smoother in
+// Pin the streaming pane to the newest CONTENT so it stays in view. The
+// stream reveals sub-line increments each frame (the input smoother in
 // default mode, small budgeted chunks at full speed), so assigning scrollTop
 // directly reads as a smooth, continuous follow — and, unlike easing toward a
 // target that grows every frame, it never lags behind or judders.
-function followBottom(el) {
-  el.scrollTop = el.scrollHeight;
+//
+// The newest content is NOT always the container bottom: once a footnote
+// definition commits, the footnotes section is pinned at the very bottom with
+// the streaming tail above it (#220). Anchoring the follow to the section's
+// top keeps the tail — the text being typed — in view and the section below
+// the fold for the whole stream: nothing hides, nothing pops in, and no
+// end-of-stream signal is needed. The settle paths then ease the pane to the
+// true bottom so the section arrives on screen once the reply is done. See
+// the recipe in docs/RECIPES.md.
+// The following is CSS scroll-snap now (see .stream-snap-anchor): each pane
+// snaps to a 1px sentinel kept as its last child, the engine re-pins after
+// every layout growth, and `proximity` hands control to a reader who scrolls
+// away and back. The only JS left is keeping the sentinel alive — the
+// string-emitter panes replace their innerHTML wholesale each tick — plus a
+// settle-time nudge for engines that don't re-snap when the hidden footnotes
+// section pops back into the flow.
+function ensureSnapAnchor(el) {
+  const last = el.lastElementChild;
+  if (last && last.classList.contains('stream-snap-anchor')) return;
+  const anchor = document.createElement('div');
+  anchor.className = 'stream-snap-anchor';
+  anchor.setAttribute('aria-hidden', 'true');
+  el.append(anchor);
+}
+// Bring the just-revealed footnotes section into view at stream end — only
+// for a reader still at the tail; never yank one who scrolled away. The
+// section un-hides right before this runs, so "at the tail" allows for its
+// height (up to 1.5 viewports from the bottom).
+function revealSettledBottom(el) {
+  const fromBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
+  if (fromBottom < el.clientHeight * 1.5 && el.scrollHeight > el.clientHeight + 1) {
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }
 }
 
 // Footnote refs and backrefs live inside fixed-height streaming panes. A bare
@@ -2114,6 +2190,9 @@ document.addEventListener('click', (e) => {
   const target = pane.querySelector(`#${CSS.escape(decodeURIComponent(a.getAttribute('href').slice(1)))}`);
   if (!target) return;
   e.preventDefault();
+  // Mid-stream the footnotes section is display:none (revealed at settle) —
+  // a ref target without a box has nowhere to scroll to; swallow the click.
+  if (target.getClientRects().length === 0) return;
   const top = pane.scrollTop + (target.getBoundingClientRect().top - pane.getBoundingClientRect().top) - 12;
   pane.scrollTo({ top, behavior: 'smooth' });
 });
@@ -2154,10 +2233,11 @@ const HERO_MAX_CHUNK = 4096;
 // Footnote definitions stay exactly where each preset drops them (mid-
 // document, how LLM citations really arrive): the footnotes section commits
 // as soon as the first definition does and stays pinned at the very bottom
-// while later content streams in ABOVE it (#220). The demo used to hoist all
-// definitions to the end of the transcript to hide the pending tail rendering
-// below the section; the renderer now handles the real shape, so the hoist is
-// gone and the hero doubles as a live check of that ordering.
+// while later content streams in ABOVE it (#220). Presentation is CSS-only:
+// the pane snap-pins to its bottom sentinel (.stream-snap-anchor) and the
+// section is display:none while `.is-streaming` is on — toggled once per
+// stream, so it appears exactly once, at settle (revealSettledBottom then
+// eases it into view).
 
 // Seal the transcript with a trailing newline so its final line commits — an
 // unterminated last line stays a pending block and never settles.
@@ -2268,13 +2348,15 @@ function heroFinish() {
   // pending math for rendered KaTeX.
   hydrateDiagrams(heroOutput);
   hydrateMath(heroOutput);
+  // Ease the footnotes section (hidden during the stream) into view.
+  revealSettledBottom(heroOutput);
   // Hold the settled transcript up so the reader can scroll back, then replay.
   heroTimer = setTimeout(() => startHero(), HERO_REPLAY_PAUSE_MS);
 }
 
 // Records one revealed frame and reports the measured (real) throughput.
 function heroFrame() {
-  followBottom(heroOutput);
+  ensureSnapAnchor(heroOutput);
   heroUpdates++;
   // Cumulative average (chars ÷ elapsed) — the true end-to-end rate, smooth by
   // construction so the readout stays legible. Skip the first ~150ms where a
@@ -2436,6 +2518,8 @@ function startCompare() {
       hydrateDiagrams(domOutput);
       hydrateMath(stringOutput);
       hydrateMath(domOutput);
+      revealSettledBottom(stringOutput);
+      revealSettledBottom(domOutput);
       return;
     }
 
@@ -2454,8 +2538,8 @@ function startCompare() {
 
     // Keep the newest content in view; each panel is its own scroll container,
     // so this never moves the page.
-    followBottom(stringOutput);
-    followBottom(domOutput);
+    ensureSnapAnchor(stringOutput);
+    ensureSnapAnchor(domOutput);
 
     compareUpdates++;
     const elapsed = performance.now() - compareStart;
@@ -2544,6 +2628,8 @@ function normalizeStreamOutput(html) {
   tmp.querySelectorAll('.stream-pending').forEach((el) => {
     if (el.hidden || !el.textContent.trim()) el.remove();
   });
+  // The scroll-snap sentinel is driver scaffolding, not rendered content.
+  tmp.querySelectorAll('.stream-snap-anchor').forEach((el) => el.remove());
   return tmp.innerHTML.trim();
 }
 
@@ -2656,7 +2742,7 @@ function startSmoothDemo() {
     update: (t) => {
       smoothFrames++;
       smoothRenderer.update(t);
-      followBottom(smoothOutput);
+      ensureSnapAnchor(smoothOutput);
       smoothStats.innerHTML = `<span class="stat-val">${smoothFrames}</span> frames`;
     },
     charsPerSecond: SMOOTH_CPS,
@@ -2675,6 +2761,8 @@ function startSmoothDemo() {
       rawOutput.classList.remove('is-streaming');
       smoothOutput.classList.remove('is-streaming');
       checkSmoothConvergence();
+      revealSettledBottom(rawOutput);
+      revealSettledBottom(smoothOutput);
       return;
     }
     pos = advanceBurst(text, pos);
@@ -2683,7 +2771,7 @@ function startSmoothDemo() {
 
     // Raw pane: commit the burst immediately — the jumpy baseline.
     rawRenderer.update(partial);
-    followBottom(rawOutput);
+    ensureSnapAnchor(rawOutput);
     rawStats.innerHTML = `<span class="stat-val">${bursts}</span> bursts`;
 
     // Smoothed pane: hand the same growing target to the smoother.
