@@ -242,6 +242,8 @@
     276,
     277,
     278,
+    279,
+    280,
     281,
     282,
     283,
@@ -654,7 +656,7 @@
       "total": 48
     },
     "Task list items (extension)": {
-      "pass": 0,
+      "pass": 2,
       "total": 2
     },
     "Lists": {
@@ -728,7 +730,7 @@
       "total": 8
     },
     "Task list items (extension)": {
-      "pass": 0,
+      "pass": 2,
       "total": 2
     },
     "Strikethrough (extension)": {
