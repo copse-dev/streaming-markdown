@@ -209,16 +209,28 @@
     .hero-demo-meta {
       display: flex;
       align-items: center;
-      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 0.5rem 1rem;
       font-size: 0.75rem;
       font-family: 'SF Mono', 'Fira Code', monospace;
       color: var(--text-muted);
     }
+    .hero-demo-meta > * { white-space: nowrap; }
 
     .hero-vs {
       color: var(--accent);
       font-weight: 600;
     }
+
+    .hero-speed-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .hero-speed-toggle input { cursor: pointer; accent-color: var(--accent); }
 
     .stream-dot {
       display: inline-block;
@@ -1081,8 +1093,11 @@
     <div class="hero-demo-bar">
       <span class="hero-demo-title">Live stream — <span style="color:var(--accent)">StreamingMarkdownRenderer</span></span>
       <div class="hero-demo-meta">
+        <label class="hero-speed-toggle" title="Off: stream at a typical LLM pace (~100 tok/s). On: let the renderer paint as fast as this machine can — it's nowhere near the bottleneck.">
+          <input type="checkbox" id="hero-fullspeed"> full speed
+        </label>
         <span id="hero-cps">— chars/s</span>
-        <span class="hero-vs" id="hero-vs" title="Compared to ~220 chars/s — the pace a typical frontier LLM streams tokens (~55 tok/s). The renderer is nowhere near the bottleneck.">— vs LLM</span>
+        <span class="hero-vs" id="hero-vs" title="Baseline: ~100 tok/s (~400 chars/s), a typical frontier-model streaming rate.">— vs LLM</span>
         <span id="hero-updates">— updates</span>
         <span class="stream-dot active" id="hero-dot"></span>
       </div>
@@ -2016,31 +2031,36 @@ function advancePos(text, pos, step) {
   return next;
 }
 
-// The hero streams flat-out to show the renderer is nowhere near the
-// bottleneck. 220 chars/s — the pace a typical frontier model emits tokens
-// (~55 tok/s) — is only the *reference* we compare against, not a cap the
-// renderer imposes.
-const LLM_BASELINE_CPS = 220;
+// The hero's default pace mirrors a typical frontier model streaming tokens —
+// ~100 tok/s — so it reads like a real chat. Full-speed mode then shows how
+// much headroom the renderer has above that. ~4 chars/token is the rough
+// English average used to turn tokens into the chars the renderer counts.
+const TYPICAL_LLM_TOK_S = 100;
+const CHARS_PER_TOKEN = 4;
+const LLM_BASELINE_CPS = TYPICAL_LLM_TOK_S * CHARS_PER_TOKEN; // ~400 chars/s
 
-// Per-frame commit sizing. Each animation frame we render the largest slice
-// that still fits inside HERO_FRAME_BUDGET_MS, then adapt toward that budget —
-// so the hero paints as fast as the machine can absorb rather than at a fixed
-// rate, and the counter reports genuine throughput. START/MAX just bound the
-// search; the budget is what actually governs the sustained rate.
+// Full-speed per-frame commit sizing. Each animation frame we render the
+// largest slice that still fits inside HERO_FRAME_BUDGET_MS, then adapt toward
+// that budget — so the hero paints as fast as the machine can absorb rather
+// than at a fixed rate, and the counter reports genuine throughput. START/MAX
+// just bound the search; the budget is what actually governs the rate.
 const HERO_FRAME_BUDGET_MS = 9;
 const HERO_START_CHUNK = 512;
 const HERO_MIN_CHUNK = 128;
 const HERO_MAX_CHUNK = 4096;
 
-// A deliberately long transcript so the flat-out stream stays on screen for a
-// couple of seconds instead of finishing in a single frame. Built from the
-// existing presets: the feature-rich blocks (footnotes, one mermaid diagram,
-// KaTeX) appear once up top, then footnote-free blocks repeat to add length
-// without colliding on duplicate footnote ids.
-const HERO_DOC = (() => {
-  const showcase = [PRESETS.mixed, PRESETS.diagrams, PRESETS.math, PRESETS.notes].join('\n\n');
+// Default mode streams a compact, feature-rich transcript (footnotes, one
+// mermaid diagram, KaTeX) — short enough to finish in a few seconds at LLM
+// pace, then settle and hydrate.
+const HERO_DOC_NORMAL = [PRESETS.mixed, PRESETS.diagrams, PRESETS.math, PRESETS.notes].join('\n\n');
+
+// Full-speed mode streams a deliberately long transcript so the flat-out
+// reveal stays on screen for a couple of seconds instead of finishing in a
+// single frame. The feature-rich blocks appear once up top, then footnote-free
+// blocks repeat to add length without colliding on duplicate footnote ids.
+const HERO_DOC_FULL = (() => {
   const body = [PRESETS.basic, PRESETS.table, PRESETS.code, PRESETS.lists, PRESETS.failures].join('\n\n');
-  let doc = showcase;
+  let doc = HERO_DOC_NORMAL;
   for (let i = 1; i <= 16; i++) doc += `\n\n---\n\n## Streamed section ${i}\n\n` + body;
   return doc;
 })();
@@ -2054,7 +2074,8 @@ let heroUpdates = 0;
 let heroStart = 0;
 let heroText = '';
 let heroStreaming = false;
-let heroChunk = 0;         // chars committed per frame; adapts to the machine
+let heroChunk = 0;         // chars committed per frame (full-speed); adapts to the machine
+let heroFullSpeed = false; // stream flat-out vs at a typical LLM pace
 
 let compareTimer = null;
 let comparePos = 0;
@@ -2071,10 +2092,13 @@ const heroDot = document.getElementById('hero-dot');
 const heroCps = document.getElementById('hero-cps');
 const heroVs = document.getElementById('hero-vs');
 const heroUpdatesEl = document.getElementById('hero-updates');
+const heroFullSpeedCheck = document.getElementById('hero-fullspeed');
 
 function heroStats(cps) {
   heroCps.textContent = `${cps.toLocaleString()} chars/s`;
-  heroVs.textContent = `${Math.max(1, Math.round(cps / LLM_BASELINE_CPS)).toLocaleString()}× a typical LLM`;
+  heroVs.textContent = heroFullSpeed
+    ? `${Math.max(1, Math.round(cps / LLM_BASELINE_CPS)).toLocaleString()}× a typical LLM`
+    : `≈ ${Math.round(cps / CHARS_PER_TOKEN).toLocaleString()} tok/s · LLM pace`;
   heroUpdatesEl.textContent = `${heroUpdates} updates`;
 }
 
@@ -2110,12 +2134,21 @@ function heroFinish() {
   heroTimer = setTimeout(() => startHero(), 3500);
 }
 
-// One commit per animation frame, each as large as ~9ms of render allows.
-function heroStep() {
+// One frame of the stream. In full-speed mode each commit is as large as ~9ms
+// of render allows; otherwise the position is clocked to a fixed LLM pace.
+// `now` is the frame timestamp from requestAnimationFrame.
+function heroStep(now) {
   if (!heroStreaming) return;
 
   const renderStart = performance.now();
-  heroPos = Math.min(heroPos + heroChunk, heroText.length);
+  if (heroFullSpeed) {
+    heroPos = Math.min(heroPos + heroChunk, heroText.length);
+  } else {
+    // Time-based reveal: position tracks elapsed × the typical LLM rate, so the
+    // pace is steady and machine-independent — it reads like a real chat.
+    const elapsedSec = (now - heroStart) / 1000;
+    heroPos = Math.min(heroText.length, Math.ceil(elapsedSec * LLM_BASELINE_CPS));
+  }
   heroRenderer.update(heroText.slice(0, heroPos));
   // Keep the newest content in view as the stream grows. The pane is its own
   // scroll container (overflow-y:auto), so this never moves the page.
@@ -2123,10 +2156,10 @@ function heroStep() {
   const renderMs = performance.now() - renderStart;
   heroUpdates++;
 
-  // Ride the frame budget: grow the next commit when we rendered well under
-  // budget, back off when a frame ran long. This converges on the biggest
-  // slice the machine can paint per frame.
-  if (renderMs > 0.05) {
+  // Full speed only: ride the frame budget — grow the next commit when we
+  // rendered well under budget, back off when a frame ran long. This converges
+  // on the biggest slice the machine can paint per frame.
+  if (heroFullSpeed && renderMs > 0.05) {
     heroChunk = Math.max(
       HERO_MIN_CHUNK,
       Math.min(HERO_MAX_CHUNK, Math.round(heroChunk * (HERO_FRAME_BUDGET_MS / renderMs))),
@@ -2145,13 +2178,20 @@ function heroStep() {
 }
 
 function startHero() {
-  heroText = HERO_DOC;
+  heroFullSpeed = heroFullSpeedCheck.checked;
+  heroText = heroFullSpeed ? HERO_DOC_FULL : HERO_DOC_NORMAL;
   heroReset();
   // Kick the lazy library loads once up front rather than re-scanning the
   // growing partial every frame.
   detectExtras(heroText);
   heroRaf = requestAnimationFrame(heroStep);
 }
+
+// Flipping the toggle restarts the stream in the chosen mode straight away.
+heroFullSpeedCheck.addEventListener('change', () => {
+  if (heroTimer) clearTimeout(heroTimer);
+  startHero();
+});
 
 startHero();
 
