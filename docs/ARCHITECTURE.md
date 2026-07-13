@@ -205,10 +205,22 @@ When extending the renderer or its CSS, preserve these rules:
   4-space indent, plus lazy first-paragraph continuation; footnotes inside
   blockquotes are out of scope. Slugs are deterministic (`footnotes.ts`),
   attribute-safe, and collision-disambiguated; the sanitizer allowlists
-  `section` + `id` and its element gate strips any id outside the
-  `fn-…`/`fnref-…` shape. The reference state is a per-render
-  `FootnoteContext` installed by `renderMarkdown`, so both streaming emitters
-  (which render through it) converge. Streaming: a half-typed `[^lab` holds
+  `section`/`h2` + `id` and its element gate strips any id outside the
+  `fn-…`/`fnref-…`/`…footnote-label` shape. The section carries GitHub's a11y
+  hooks — `data-footnotes`, a visually-hidden `<h2 id="…footnote-label"
+  class="sr-only">Footnotes</h2>`, `data-footnote-ref` + `aria-describedby` on
+  each ref, and `data-footnote-backref` + `aria-label="Back to reference N"` on
+  each backref (allowlisted in `sanitize.ts`). Because smd's primary use is a
+  chat UI stacking many rendered messages on one page, every footnote id and its
+  anchor can be namespaced with a per-render `footnoteIdPrefix`
+  (`MarkdownConfig`, default `''` → byte-identical to prior output): with a
+  distinct prefix per message, `fn-<prefix><slug>` / `fnref-<prefix><slug>` /
+  `<prefix>footnote-label` never collide across messages. The prefix must be
+  host-supplied, deterministic, and stable across incremental updates (no
+  `Math.random()`/`Date.now()`), captured once on the `FootnoteContext`. The
+  reference state is a per-render `FootnoteContext` installed by
+  `renderMarkdown`, so both streaming emitters (which render through it)
+  converge. Streaming: a half-typed `[^lab` holds
   via `footnoteHoldStart` (composed into `pendingHoldIndex` like the
   strikethrough hold), pending definition lines hold entirely
   (`isPendingFootnoteDefLine`), and the trailing section re-renders as

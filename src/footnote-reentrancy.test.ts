@@ -48,14 +48,14 @@ describe('footnote-context reentrancy (#144)', () => {
     assert.doesNotMatch(html, /After\[\^b\]/)
     // Outer numbering is uninterrupted (1, then 2) — the inner render neither
     // consumed an outer number nor reset the sequence.
-    assert.match(html, /href="#fn-a" id="fnref-a">1</)
-    assert.match(html, /href="#fn-b" id="fnref-b">2</)
+    assert.match(html, /href="#fn-a" id="fnref-a"[^>]*>1</)
+    assert.match(html, /href="#fn-b" id="fnref-b"[^>]*>2</)
     // Both outer definitions appear in the trailing section.
     assert.match(html, /<li id="fn-a">/)
     assert.match(html, /<li id="fn-b">/)
     // The nested render produced its own, independent numbering (its ref is #1
     // within its own context, not #2 of the outer document).
-    assert.match(html, /<div class="recursed">.*href="#fn-x" id="fnref-x">1<.*<\/div>/s)
+    assert.match(html, /<div class="recursed">.*href="#fn-x" id="fnref-x"[^>]*>1<.*<\/div>/s)
   })
 
   it('a ref after the nested render resolves even when the outer has no earlier ref', () => {

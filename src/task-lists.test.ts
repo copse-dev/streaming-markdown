@@ -10,7 +10,7 @@ describe('GFM task lists (#614)', () => {
     assert.equal(
       renderMarkdownUnsafe('- [ ] Ship feature'),
       '<ul class="contains-task-list"><li class="task-list-item">' +
-        '<input type="checkbox" disabled> Ship feature</li></ul>',
+        '<input type="checkbox" class="task-list-item-checkbox" disabled aria-label="Incomplete task"> Ship feature</li></ul>',
     )
   })
 
@@ -18,23 +18,23 @@ describe('GFM task lists (#614)', () => {
     assert.equal(
       renderMarkdownUnsafe('- [x] Done'),
       '<ul class="contains-task-list"><li class="task-list-item">' +
-        '<input type="checkbox" disabled checked> Done</li></ul>',
+        '<input type="checkbox" class="task-list-item-checkbox" disabled checked aria-label="Completed task"> Done</li></ul>',
     )
-    assert.match(renderMarkdownUnsafe('- [X] Done'), /<input type="checkbox" disabled checked>/)
+    assert.match(renderMarkdownUnsafe('- [X] Done'), /<input type="checkbox" class="task-list-item-checkbox" disabled checked/)
   })
 
   it('keeps inline markdown in the item body', () => {
     const html = renderMarkdownUnsafe('- [x] Ship `pkg` and **bold**')
     assert.match(
       html,
-      /<input type="checkbox" disabled checked> Ship <code>pkg<\/code> and <strong>bold<\/strong>/,
+      /<input type="checkbox"[^>]*checked[^>]*> Ship <code>pkg<\/code> and <strong>bold<\/strong>/,
     )
   })
 
   it('mixes task and plain items in one list', () => {
     const html = renderMarkdownUnsafe('- [ ] todo\n- plain item')
     assert.match(html, /^<ul class="contains-task-list">/)
-    assert.match(html, /<li class="task-list-item"><input type="checkbox" disabled> todo<\/li>/)
+    assert.match(html, /<li class="task-list-item"><input type="checkbox"[^>]*> todo<\/li>/)
     assert.match(html, /<li>plain item<\/li>/)
   })
 
@@ -48,7 +48,7 @@ describe('GFM task lists (#614)', () => {
     // The nested list is itself a task list containing the checked child.
     assert.match(
       html,
-      /<ul class="contains-task-list"><li class="task-list-item"><input type="checkbox" disabled checked> child<\/li><\/ul>/,
+      /<ul class="contains-task-list"><li class="task-list-item"><input type="checkbox"[^>]*checked[^>]*> child<\/li><\/ul>/,
     )
   })
 
@@ -61,7 +61,7 @@ describe('GFM task lists (#614)', () => {
   it('supports an empty checkbox with no trailing text', () => {
     assert.equal(
       renderMarkdownUnsafe('- [x]'),
-      '<ul class="contains-task-list"><li class="task-list-item"><input type="checkbox" disabled checked></li></ul>',
+      '<ul class="contains-task-list"><li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled checked aria-label="Completed task"></li></ul>',
     )
   })
 })
@@ -72,6 +72,9 @@ describe('task-list sanitizer surface (#614)', () => {
     assert.match(html, /<input[^>]*type="checkbox"[^>]*>/)
     assert.match(html, /disabled/)
     assert.match(html, /checked/)
+    // The a11y name + class survive sanitization (#217).
+    assert.match(html, /aria-label="Completed task"/)
+    assert.match(html, /class="task-list-item-checkbox"/)
   })
 
   it('drops any non-checkbox <input> and forces the checkbox read-only', () => {
@@ -104,7 +107,7 @@ describe('task lists while streaming (#614)', () => {
     // The streaming path sanitizes, so `disabled` serializes as `disabled=""`.
     assert.match(
       renderStreamingMarkdown(full),
-      /<input type="checkbox" disabled(?:="")?> streaming task/,
+      /<input type="checkbox"[^>]*> streaming task/,
     )
   })
 })

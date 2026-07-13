@@ -89,10 +89,20 @@ const ALLOWED_ATTR = [
   'type',
   'checked',
   'disabled',
-  // GFM footnote anchors (#72): `id="fn-…"`/`id="fnref-…"` jump targets. The
-  // element gate below strips any id outside that renderer-emitted shape, so
-  // sanitized fragments can never mint arbitrary page-global names.
+  // GFM footnote anchors (#72): `id="fn-…"`/`id="fnref-…"` jump targets, plus the
+  // section's `id="footnote-label"` heading. The element gate below strips any id
+  // outside that renderer-emitted shape, so sanitized fragments can never mint
+  // arbitrary page-global names.
   'id',
+  // GFM footnote / task-list accessibility hooks (#216/#217): `aria-label` on
+  // task checkboxes and backrefs, `aria-describedby` linking a ref to the
+  // footnotes heading, and the `data-footnote*` semantic markers GitHub emits.
+  // All presentational/semantic only — no XSS surface.
+  'aria-label',
+  'aria-describedby',
+  'data-footnotes',
+  'data-footnote-ref',
+  'data-footnote-backref',
 ]
 
 /**
@@ -190,10 +200,11 @@ export interface SanitizeExtension {
 // The single per-element gate the active backend runs for every kept element.
 // Backend-independent so the security posture is identical across DOMPurify and
 // the native Sanitizer API.
-// The only ids the renderer emits: footnote jump targets (#72). Anything else
-// is stripped so allowlisting `id` cannot enable DOM clobbering of arbitrary
-// page-global names.
-const FOOTNOTE_ID_RE = /^fn(?:ref)?-[A-Za-z0-9_-]+$/
+// The only ids the renderer emits: footnote jump targets (`fn-…`/`fnref-…`, each
+// optionally carrying a per-render `footnoteIdPrefix`) and the section's
+// `footnote-label` heading (#72/#216). Anything else is stripped so allowlisting
+// `id` cannot enable DOM clobbering of arbitrary page-global names.
+const FOOTNOTE_ID_RE = /^(?:fn(?:ref)?-[A-Za-z0-9_-]+|[A-Za-z0-9_-]*footnote-label)$/
 
 function gateElement(node: Element, tagName: string): void {
   // The DOMPurify backend's hook also fires for text/comment nodes, which
