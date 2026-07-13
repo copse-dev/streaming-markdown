@@ -1,8 +1,9 @@
 # UI recipes
 
-Widgets layered on top of rendered markdown — copy buttons on code blocks, download
-links, carets — aren't part of the library; you add them in your own app using the
-emitted class hooks. This covers **copy buttons on code blocks**.
+Widgets and behaviours layered on top of rendered markdown — copy buttons, auto-scroll,
+in-pane navigation — aren't part of the library; you add them in your own app using the
+emitted class hooks. This covers **copy buttons on code blocks**, **auto-scrolling to the
+bottom while streaming**, and **keeping footnote links inside a scroll container**.
 
 ## The catch
 
@@ -133,3 +134,94 @@ emitter can't touch it. Same delegation and `textContent` rules apply.
 `navigator.clipboard.writeText` needs a secure context (HTTPS/localhost) and a user
 gesture (the click). The snippet falls back to a hidden `<textarea>` +
 `execCommand('copy')` for insecure contexts and older engines.
+
+---
+
+# Auto-scroll to the bottom while streaming
+
+Keep the newest line in view as content grows, without fighting a reader who scrolls up.
+
+## The catch
+
+The document grows on every `update()`. Three things bite:
+
+1. **Ease vs. pin.** Animating toward `scrollHeight` lags a target that moves every frame
+   and reads as judder. Assign `scrollTop = scrollHeight` directly — the stream reveals
+   sub-line increments, so a direct pin looks continuous.
+2. **`scroll-behavior: smooth`.** A page-level smooth rule can make some engines animate
+   the programmatic pin (so it never catches up). Set the scroll pane to
+   `scroll-behavior: auto`.
+3. **Respect the user.** Once they scroll up to read, stop pinning; resume only when they
+   return to the bottom. Track a `stick` flag off the pane's own scroll events.
+
+## Snippet
+
+```js
+export function installAutoScroll(pane) {
+  let stick = true;
+  // A user scroll that leaves the bottom releases the pin; returning re-arms it.
+  pane.addEventListener('scroll', () => {
+    stick = pane.scrollHeight - pane.clientHeight - pane.scrollTop < 4;
+  });
+  // Call after each update() (or from a MutationObserver on the sink).
+  return function follow() {
+    if (stick) pane.scrollTop = pane.scrollHeight;
+  };
+}
+```
+
+```css
+/* Keep the pin instant even under a page-level `scroll-behavior: smooth`. */
+.chat-pane { overflow-y: auto; scroll-behavior: auto; }
+```
+
+The `< 4` px threshold absorbs sub-pixel rounding; widen it if your line-height is large.
+For a showcase that should always follow (no reader to respect), drop the `stick` flag and
+pin unconditionally.
+
+---
+
+# Keep footnote links inside a scroll container
+
+GFM footnotes emit `<sup class="footnote-ref"><a href="#fn-…">` references and
+`<a href="#fnref-…" class="footnote-backref">` backrefs. Inside a fixed-height message
+pane, the default `#id` jump is wrong.
+
+## The catch
+
+A bare fragment jump scrolls **every** scrollable ancestor to reveal the target — including
+the page (animated by any `html { scroll-behavior: smooth }`) — and stamps the URL hash. In
+a chat pane that yanks the whole page and leaves a stale `#fn-…` in the address bar.
+
+## Snippet
+
+Intercept clicks on the footnote anchors, scroll only the pane they live in, and leave the
+page and hash untouched. One delegated listener; survives re-renders.
+
+```js
+export function installFootnoteNav(root = document) {
+  function scrollingAncestor(el) {
+    for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+      const oy = getComputedStyle(n).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n;
+    }
+    return null;
+  }
+  root.addEventListener('click', (e) => {
+    const a = e.target.closest('sup.footnote-ref a[href^="#"], a.footnote-backref[href^="#"]');
+    if (!a) return;
+    const pane = scrollingAncestor(a);
+    if (!pane) return; // not in a scroll pane — let the browser handle it
+    const target = pane.querySelector(`#${CSS.escape(decodeURIComponent(a.getAttribute('href').slice(1)))}`);
+    if (!target) return;
+    e.preventDefault();
+    const top = pane.scrollTop + (target.getBoundingClientRect().top - pane.getBoundingClientRect().top) - 12;
+    pane.scrollTo({ top, behavior: 'smooth' });
+  });
+}
+```
+
+The `- 12` leaves breathing room above the target. `behavior: 'smooth'` overrides the pane's
+own `scroll-behavior`, so this stays smooth even when the pane is set to `auto` for the
+auto-scroll pin above. Works for refs (jump down to the definition) and backrefs (jump back
+up to the reference) alike, and for any scroll pane since it walks up to the nearest one.

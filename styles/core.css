@@ -62,7 +62,12 @@
   /* Fenced/indented code keeps its own whitespace and never inherits inline
      `code` chrome; scroll instead of widening the container. */
   & pre {
+    /* overflow-y explicit so overflow-x: auto doesn't get it promoted to auto
+       (a spurious vertical scrollbar from sub-pixel content extent). The block
+       auto-sizes to its lines by default. If you cap code-block height, set
+       `overflow-y: auto` yourself to restore vertical scroll. */
     overflow-x: auto;
+    overflow-y: hidden;
     white-space: pre;
   }
   & pre code {
@@ -78,7 +83,13 @@
     white-space: pre-wrap;
   }
   & .math-block--rendered {
+    /* Horizontal scroll for wide equations. overflow-y must be set explicitly:
+       leaving it `visible` makes the spec promote it to `auto` alongside
+       overflow-x, and KaTeX's sub-pixel vertical extent then trips a spurious
+       vertical scrollbar. The block auto-sizes to its content, so nothing real
+       is ever clipped. */
     overflow-x: auto;
+    overflow-y: hidden;
   }
 
   /* Blowout guards: keep wide tables and rendered diagrams inside the column. */
@@ -89,5 +100,13 @@
     display: block;
     max-width: 100%;
     height: auto;
+  }
+
+  /* Reserve height while the diagram is pending so hydrating the escaped
+     source into an SVG doesn't shove the content (and scroll position) below
+     it — the same "pending carries its committed size" contract the pending
+     headings follow. Overridable: set `--sm-diagram-min-height: 0` to opt out. */
+  & .mermaid-diagram {
+    min-height: var(--sm-diagram-min-height, 160px);
   }
 }

@@ -239,8 +239,13 @@
     margin: var(--sm-space-sm, 8px) 0;
     font-size: var(--sm-font-size-sm, 0.85em);
     white-space: normal;
-    /* Scroll only when a cell has an unbreakable run (e.g. a long hash). */
+    /* Scroll only when a cell has an unbreakable run (e.g. a long hash).
+       overflow-y stays explicit: left visible, the spec promotes it to auto
+       alongside overflow-x, and sub-pixel row/border extents then trip a
+       spurious vertical scrollbar. The table auto-sizes to its rows, so hidden
+       clips nothing real (and still clips square cell corners to the radius). */
     overflow-x: auto;
+    overflow-y: hidden;
   }
   & th,
   & td {
