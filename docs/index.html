@@ -2151,27 +2151,24 @@ const HERO_START_CHUNK = 512;
 const HERO_MIN_CHUNK = 128;
 const HERO_MAX_CHUNK = 4096;
 
-// Collect every footnote *definition* to the very end of the transcript,
-// leaving the inline references in place. Concatenated presets would otherwise
-// each drop their definitions mid-document, so the footnotes section would
-// render above the still-streaming pending line. Pulled to the bottom, it
-// renders once — only when the stream finally reaches it, exactly like a real
-// single model reply.
-function footnotesAtEnd(md) {
-  const defs = [];
-  const body = md
-    .replace(/^\[\^[^\]]+\]:.*$/gm, (line) => { defs.push(line.trim()); return ''; })
-    .replace(/\n{3,}/g, '\n\n')
-    .trimEnd();
-  // Trailing newline so the final footnote definition (the last line) actually
-  // seals — an unterminated last line stays a pending block and never commits.
-  return defs.length ? `${body}\n\n${defs.join('\n')}\n` : md;
+// Footnote definitions stay exactly where each preset drops them (mid-
+// document, how LLM citations really arrive): the footnotes section commits
+// as soon as the first definition does and stays pinned at the very bottom
+// while later content streams in ABOVE it (#220). The demo used to hoist all
+// definitions to the end of the transcript to hide the pending tail rendering
+// below the section; the renderer now handles the real shape, so the hoist is
+// gone and the hero doubles as a live check of that ordering.
+
+// Seal the transcript with a trailing newline so its final line commits — an
+// unterminated last line stays a pending block and never settles.
+function sealDoc(md) {
+  return md.endsWith('\n') ? md : `${md}\n`;
 }
 
 // Default mode streams a compact, feature-rich transcript (footnotes, one
 // mermaid diagram, KaTeX) — short enough to finish in a few seconds at LLM
 // pace, then settle and hydrate.
-const HERO_DOC_NORMAL = footnotesAtEnd(
+const HERO_DOC_NORMAL = sealDoc(
   [PRESETS.mixed, PRESETS.diagrams, PRESETS.math, PRESETS.notes].join('\n\n'),
 );
 
@@ -2179,13 +2176,13 @@ const HERO_DOC_NORMAL = footnotesAtEnd(
 // reveal stays on screen for a couple of seconds instead of finishing in one
 // frame. The feature-rich blocks (incl. every footnote reference) appear once
 // up top; footnote-free blocks then repeat to add length without colliding on
-// duplicate footnote ids. Definitions still collect at the very bottom.
+// duplicate footnote ids.
 const HERO_DOC_FULL = (() => {
   const showcase = [PRESETS.mixed, PRESETS.diagrams, PRESETS.math, PRESETS.notes, PRESETS.failures].join('\n\n');
   const body = [PRESETS.basic, PRESETS.table, PRESETS.code, PRESETS.lists].join('\n\n');
   let doc = showcase;
   for (let i = 1; i <= 16; i++) doc += `\n\n---\n\n## Streamed section ${i}\n\n` + body;
-  return footnotesAtEnd(doc);
+  return sealDoc(doc);
 })();
 
 // How long the settled transcript stays up before the stream replays, giving

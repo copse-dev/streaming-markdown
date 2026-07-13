@@ -68,30 +68,53 @@ const LIST_CONTINUATION_CLASS = 'stream-pending-list-continuation'
 const PARAGRAPH_CONTINUATION_CLASS = 'stream-pending-paragraph-continuation'
 const TRAILING_OPEN_LI_CLOSE_RE = /(<li(?:\s[^>]*)?>)([\s\S]*?)(<\/li>\s*<\/(?:ul|ol)>)\s*$/
 
-// Pending tail elements always live at the very end of `stream-complete`: a
-// pending block is appended as the last direct child, and a pending list item /
-// continuation span lives inside the trailing list (the last element child).
-// Every clear runs *before* the next pending element is appended, so the target
-// is always within the last element child at query time. Scoping the pending
-// queries there instead of `querySelector`-ing the whole committed subtree turns
-// an O(prefix)-per-frame DOM scan into O(tail) — the dominant residual cost of a
-// long stream once the committed prefix is frozen (#21 follow-up). jsdom's
-// `:scope >`/descendant selectors still walk the full subtree, so this matters.
+// Pending tail elements live at the very end of `stream-complete` — the last
+// direct child, or the child immediately before a trailing footnotes section
+// (#220): the committed section is pinned at the very bottom, so a pending
+// block is inserted before it, and a pending list item / continuation span
+// lives inside the trailing content element. Every clear runs *before* the
+// next pending element is attached, so the target is always within the tail
+// content element at query time. Scoping the pending queries there instead of
+// `querySelector`-ing the whole committed subtree turns an O(prefix)-per-frame
+// DOM scan into O(tail) — the dominant residual cost of a long stream once the
+// committed prefix is frozen (#21 follow-up). jsdom's `:scope >`/descendant
+// selectors still walk the full subtree, so this matters.
+
+/** The trailing committed footnotes section, when it is the last element child. */
+function trailingFootnotesSection(completedEl: HTMLElement): Element | null {
+  const last = completedEl.lastElementChild
+  return last && last.tagName === 'SECTION' && last.classList.contains('footnotes') ? last : null
+}
+
+/**
+ * The element the pending-tail machinery treats as the tail: the last element
+ * child, or — when the committed output ends with the footnotes section — the
+ * element immediately before it (#220). The section itself is never a
+ * pending-tail host, and it grows with the document (N `<li>`), so it is
+ * skipped by construction rather than walked per update (#133).
+ */
+function tailContentElement(completedEl: HTMLElement): Element | null {
+  const section = trailingFootnotesSection(completedEl)
+  return section ? section.previousElementSibling : completedEl.lastElementChild
+}
+
+/** Attach a pending tail element: before a trailing footnotes section, else appended (#220). */
+function appendPendingTail(completedEl: HTMLElement, el: Element): void {
+  const section = trailingFootnotesSection(completedEl)
+  if (section) completedEl.insertBefore(el, section)
+  else completedEl.append(el)
+}
 
 /** A pending descendant (continuation span, pending `<li>`) inside the trailing element. */
 function tailPendingDescendant(completedEl: HTMLElement, cls: string, tagName?: string): Element | null {
-  const last = completedEl.lastElementChild
+  const last = tailContentElement(completedEl)
   if (!last) return null
-  // The committed footnotes section is never a pending-tail host, and it grows
-  // with the document (N `<li>`), so walking it per update is the residual O(n)
-  // cost of a footnote stream (#133). Skip it — the pending tail is a sibling.
-  if (last.tagName === 'SECTION' && last.classList.contains('footnotes')) return null
   return findDescendantByClass(last, cls, tagName)
 }
 
-/** A pending block element attached directly to `completedEl` (always the last child). */
+/** A pending block element attached directly to `completedEl` (the tail content element). */
 function tailDirectPendingBlock(completedEl: HTMLElement, excludeLi: boolean): Element | null {
-  const last = completedEl.lastElementChild
+  const last = tailContentElement(completedEl)
   if (!last || !last.classList.contains(BLOCK_PENDING_CLASS)) return null
   if (excludeLi && last.tagName === 'LI') return null
   return last
@@ -198,9 +221,9 @@ function appendListPendingHtml(
   // (e.g. `</blockquote>`), so a pending top-level bullet must become a new
   // sibling list rather than being injected into the quote (#109). This mirrors
   // the DOM emitter's `findTrailingListHost`, which reuses the trailing list
-  // only when it is the last element child of `stream-complete`. Requiring the
-  // list to end the output also excludes the trailing footnotes section (#72),
-  // which ends with `</section>` rather than `</ul>`/`</ol>`.
+  // only when it is the tail content element of `stream-complete`. The caller
+  // passes the committed BODY — a trailing footnotes section (#72) is already
+  // split off, and the returned HTML is re-joined above it (#220).
   const close = `</${listTag}>`
   if (rendered.endsWith(close)) {
     const closeIndex = rendered.length - close.length
@@ -216,7 +239,7 @@ function appendListPendingHtml(
 }
 
 function findTrailingListHost(completedEl: HTMLElement, listTag: 'ul' | 'ol'): HTMLElement | null {
-  const last = completedEl.lastElementChild
+  const last = tailContentElement(completedEl)
   if (last instanceof Element && last.tagName === listTag.toUpperCase()) {
     return last as HTMLElement
   }
@@ -243,7 +266,7 @@ function syncListPendingDom(
      driven directly. */
   if (!active || !pendingInner) {
     existingPendingLi?.remove()
-    const last = completedEl.lastElementChild
+    const last = tailContentElement(completedEl)
     if (last && last.tagName === listTag.toUpperCase() && last.childNodes.length === 0) {
       last.remove()
     }
@@ -277,7 +300,7 @@ function syncListPendingDom(
         const created = document.createElement(listTag)
         const ordered = pendingListOrderedMarker(pending)
         if (ordered !== null && listTag === 'ol') created.setAttribute('start', ordered)
-        completedEl.append(created)
+        appendPendingTail(completedEl, created)
         return created
       })()
   }
@@ -371,8 +394,8 @@ function inlinePendingSpanHtml(pendingInner: string): string {
 function findOpenListItemHost(completedEl: HTMLElement): HTMLElement | null {
   // The open list item that a pending line continues is the last item of the
   // trailing list; the callers clear any trailing pending block first, so that
-  // list is the last element child (scoped lookup instead of an O(prefix) scan).
-  const last = completedEl.lastElementChild
+  // list is the tail content element (scoped lookup instead of an O(prefix) scan).
+  const last = tailContentElement(completedEl)
   if (!(last instanceof HTMLElement) || (last.tagName !== 'UL' && last.tagName !== 'OL')) {
     return null
   }
@@ -422,7 +445,7 @@ function appendParagraphContinuationHtml(rendered: string, pendingInner: string)
 
 /** The trailing committed paragraph a pending continuation renders into. */
 function findTrailingParagraphHost(completedEl: HTMLElement): HTMLElement | null {
-  const last = completedEl.lastElementChild
+  const last = tailContentElement(completedEl)
   if (!(last instanceof HTMLElement) || last.tagName !== 'P') return null
   // A pending paragraph *block* is also a trailing <p> — never nest into it.
   if (last.classList.contains(BLOCK_PENDING_CLASS)) return null
@@ -552,7 +575,7 @@ function syncBlockPendingDom(
   if (!el || el.tagName.toLowerCase() !== tag) {
     existing?.remove()
     el = document.createElement(tag)
-    completedEl.append(el)
+    appendPendingTail(completedEl, el)
   }
   el.className = blockPendingClassName(pending, openListItemFirstLine)
   const ordered = pendingListOrderedMarker(pending)
@@ -722,8 +745,8 @@ function armPendingFastPath(
     if (host) el = firstDirectChild(host, null, PARAGRAPH_CONTINUATION_CLASS)
   }
   if (!el) {
-    // Standalone pending paragraph block — always the last direct child.
-    const last = completedEl.lastElementChild
+    // Standalone pending paragraph block — the tail content element (#220).
+    const last = tailContentElement(completedEl)
     if (
       last &&
       last.tagName === 'P' &&
@@ -823,6 +846,28 @@ export function renderStreamingMarkdown(
   return withConfig(options, () => asSanitizedHtml(renderStreamingMarkdownCore(content)))
 }
 
+/**
+ * Split committed rendered HTML into the body and a trailing footnotes
+ * section (with its preceding block-seam newline), so pending-tail HTML can be
+ * spliced between them — the section stays pinned at the very bottom with the
+ * pending tail above it (#220), mirroring the DOM emitter's
+ * {@link appendPendingTail}. `body + section` is byte-identical to the input.
+ */
+function splitTrailingFootnoteSection(rendered: string): { body: string; section: string } {
+  if (rendered.endsWith('</section>')) {
+    // Matches both the raw and sanitizer-serialized forms of the open tag
+    // emitted by `wrapFootnoteSection` (`data-footnotes` / `data-footnotes=""`).
+    let idx = rendered.lastIndexOf('<section class="footnotes" data-footnotes')
+    if (idx !== -1) {
+      // Keep the between-blocks `\n` seam with the section, so body-anchored
+      // splices (`…</p>$`, `…</ol>$`) still see the block close at the end.
+      if (rendered[idx - 1] === '\n') idx--
+      return { body: rendered.slice(0, idx), section: rendered.slice(idx) }
+    }
+  }
+  return { body: rendered, section: '' }
+}
+
 function renderStreamingMarkdownCore(content: string): string {
   const split = splitForStreaming(content)
   const { complete, pending, openListItemFirstLine, blocks } = split
@@ -855,8 +900,12 @@ function renderStreamingMarkdownCore(content: string): string {
     return `${rendered}${formingHtml}`
   }
   if (!pending) return rendered
+  // Block-level pending tails splice against the body, ABOVE a trailing
+  // footnotes section (#220) — matching the DOM emitter, where the pending
+  // element is inserted before the committed `section.footnotes`.
+  const { body, section } = splitTrailingFootnoteSection(rendered)
   if (pendingLineBelongsInTable(complete, pending, completeTokensForPending)) {
-    return appendPendingTableRowHtml(rendered, pending)
+    return `${appendPendingTableRowHtml(body, pending)}${section}`
   }
   const pendingInner = sanitizeRenderedMarkdown(
     renderPendingInlineMarkdown(pending, openListItemFirstLine),
@@ -864,24 +913,27 @@ function renderStreamingMarkdownCore(content: string): string {
   if (!pendingInner) return rendered
 
   if (isParagraphContinuationPending(split)) {
-    const inserted = appendParagraphContinuationHtml(rendered, pendingInner)
-    if (inserted) return inserted
+    const inserted = appendParagraphContinuationHtml(body, pendingInner)
+    if (inserted) return `${inserted}${section}`
   }
 
   if (isListContinuationPending(pending, openListItemFirstLine)) {
     const contHtml = blockPendingHtml(pending, pendingInner, openListItemFirstLine)
-    const inserted = insertBeforeTrailingListClose(rendered, contHtml)
-    if (inserted) return inserted
+    const inserted = insertBeforeTrailingListClose(body, contHtml)
+    if (inserted) return `${inserted}${section}`
   }
 
   if (pendingListMarkerLength(pending) !== null) {
-    return appendListPendingHtml(rendered, pending, pendingInner, openListItemFirstLine)
+    return `${appendListPendingHtml(body, pending, pendingInner, openListItemFirstLine)}${section}`
   }
 
-  const pendingHtml = isBlockLevelPending(pending, openListItemFirstLine)
-    ? blockPendingHtml(pending, pendingInner, openListItemFirstLine)
-    : inlinePendingSpanHtml(pendingInner)
-  return `${rendered}${pendingHtml}`
+  // The inline (non-block-level) pending span stays after the whole committed
+  // output: the DOM emitter renders it in the host-level `stream-pending`
+  // element, which follows `.stream-complete` (and any section inside it).
+  if (!isBlockLevelPending(pending, openListItemFirstLine)) {
+    return `${rendered}${inlinePendingSpanHtml(pendingInner)}`
+  }
+  return `${body}${blockPendingHtml(pending, pendingInner, openListItemFirstLine)}${section}`
 }
 
 /**
@@ -1196,10 +1248,7 @@ export class StreamingMarkdownRenderer {
    * found; a trailing footnotes section is skipped (the content precedes it).
    */
   private findLastCommittedTable(): HTMLTableElement | null {
-    let el: Element | null = this.completedEl?.lastElementChild ?? null
-    if (el && el.tagName === 'SECTION' && el.classList.contains('footnotes')) {
-      el = el.previousElementSibling
-    }
+    let el: Element | null = this.completedEl ? tailContentElement(this.completedEl) : null
     for (; el; el = el.lastElementChild) {
       if (el.tagName === 'TABLE') return el as HTMLTableElement
     }
