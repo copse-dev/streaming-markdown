@@ -117,19 +117,143 @@ describe('tail reuse (unchanged tail skips sanitize + parse + diff)', () => {
   })
 })
 
-describe('parsed-work stays below rendered-work on a steady stream (CI guard)', () => {
-  it('adoption keeps cumulative parse work under the no-memo bound', () => {
-    // Streamed at commit granularity through the real splitter. Every block
-    // is rendered once as the tail and once as the settling delta; without
-    // the memo both renders are parsed, with it the identical settle parse
-    // is skipped — so parsedChars must undercut renderedChars by at least
-    // the adopted share. The exact counters pin the skips deterministically.
+describe('span-keyed sealed-commit adoption (render-once, ADR 0004 Phase 2)', () => {
+  it('a settling tail is adopted with NO re-render (renderedChars stays flat)', () => {
+    const host = document.createElement('div')
+    const ft = new FrozenTailRenderer()
+    ft.update(host, 'alpha beta\n', tokenizeBlocks('alpha beta\n'))
+    const renderedAfterTail = ft.renderedChars
+    const md = 'alpha beta\n\ngamma\n'
+    ft.update(host, md, tokenizeBlocks(md))
+    assert.equal(host.innerHTML, sanitizeRenderedMarkdown(renderMarkdownUnsafe(md)))
+    assert.equal(ft.deltaRendersSkipped, 1, 'the settling paragraph was adopted by span')
+    assert.equal(ft.deltaCommitsSkipped, 1)
+    // The settle commit rendered ONLY the new tail (`<p>gamma</p>`), not the
+    // adopted delta — sealed blocks render to DOM exactly once.
+    assert.equal(ft.renderedChars, renderedAfterTail + '<p>gamma</p>'.length)
+  })
+
+  it('declines when the bytes under the memoized span changed (tail rewrite)', () => {
+    // frozenEnd is still 0 (nothing settled), so the frozen-prefix guard
+    // cannot see a rewrite confined to the tail — the adoption's own byte
+    // check must. Same span, same kind, different bytes.
+    const host = document.createElement('div')
+    const ft = new FrozenTailRenderer()
+    ft.update(host, 'ab\n', tokenizeBlocks('ab\n'))
+    const md = 'xy\n\nz\n'
+    ft.update(host, md, tokenizeBlocks(md))
+    assert.equal(host.innerHTML, sanitizeRenderedMarkdown(renderMarkdownUnsafe(md)))
+    assert.equal(ft.deltaRendersSkipped, 0, 'changed bytes must decline the span adoption')
+  })
+
+  it('declines when the link-reference map changed since the tail rendered', () => {
+    // The tail cites [x]; the settle commit also brings the definition. The
+    // memoized render has the literal `[x]`, a fresh render resolves it — the
+    // map-key mismatch declines the adoption and the fresh render wins.
+    const commits = ['see [x] now\n', 'see [x] now\n\n[x]: /u\n\nend\n\n']
+    const { ft, host } = drive(commits)
+    assert.equal(ft.deltaRendersSkipped, 0, 'a map change must decline the span adoption')
+    assert.ok(host.innerHTML.includes('<a href="/u">x</a>'), 'the fresh render resolved the ref')
+  })
+
+  it('declines when the settling group grew past the memoized tokens (list growth)', () => {
+    // Tail = a 2-item list; the settle commit adds a third item before the
+    // group closes. The delta's render tokens no longer match the memo, and
+    // the whole group renders fresh (grouping decisions are group-global).
+    const { ft, host } = drive(['- a\n- b\n', '- a\n- b\n- c\n\nafter\n\n'])
+    assert.equal(ft.deltaRendersSkipped, 0)
+    assert.equal(host.querySelectorAll('li').length, 3)
+  })
+
+  it('adopts a list group that settles unchanged (next block still forming)', () => {
+    // The following open paragraph settles the group exactly as memoized:
+    // same items, same spans, same bytes — adopted without a render, and the
+    // trailing blank is no loose evidence, so tight rendering is preserved.
+    const { ft, host } = drive(['- a\n- b\n', '- a\n- b\n\nafter still open'])
+    assert.equal(ft.deltaRendersSkipped, 1)
+    assert.ok(!host.innerHTML.includes('<li><p>'), 'the adopted list stays tight')
+  })
+})
+
+describe('event-verified prefix trust (ScanAdvance.verifiedUpTo)', () => {
+  it('advance-driven commits skip the O(prefix) byte re-check once the scanner has verified it', () => {
+    const md = 'one\n\ntwo\n\nthree\n\nfour\n\nfive\n\n'
+    const host = document.createElement('div')
+    const scratch = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    for (let cut = 1; cut <= md.length; cut++) r.update(md.slice(0, cut))
+    const ft = (r as unknown as { frozenTail: FrozenTailRenderer }).frozenTail
+    assert.ok(
+      ft.prefixChecksSkipped > 0,
+      'steady append-only commits ride the scanner-verified prefix',
+    )
+    scratch.innerHTML = String(sanitizeRenderedMarkdown(renderMarkdownUnsafe(splitForStreaming(md).complete)))
+    const el = host.querySelector('.stream-complete')
+    assert.ok(el instanceof HTMLElement)
+    assert.equal(el.innerHTML, scratch.innerHTML)
+  })
+
+  it('a prefix rewrite (regeneration) still drops to the full-morph fallback', () => {
+    // The rewrite crosses the scanner's safe boundary, so the advance reports
+    // reset and the frozen-source check runs (and fails) — output rebuilt.
+    const host = document.createElement('div')
+    const scratch = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    r.update('alpha original\n\nbeta\n\ngamma tail\n')
+    r.update('alpha REWRITTEN\n\nbeta two\n\ndelta tail\n')
+    const complete = splitForStreaming('alpha REWRITTEN\n\nbeta two\n\ndelta tail\n').complete
+    scratch.innerHTML = String(sanitizeRenderedMarkdown(renderMarkdownUnsafe(complete)))
+    const el = host.querySelector('.stream-complete')
+    assert.ok(el instanceof HTMLElement)
+    assert.equal(el.innerHTML, scratch.innerHTML)
+  })
+
+  it('a rewrite past the scanner boundary but under the frozen boundary keeps the full check', () => {
+    // A blankless document never advances the scanner's safe boundary
+    // (verifiedUpTo stays 0), while the settle rules freeze the heading —
+    // frozenEnd > verifiedUpTo at the rewrite commit, so the trust must NOT
+    // engage there and the frozen-source memcmp catches the rewrite. (The
+    // scanner itself cannot: its whole prefix is unverified, so it reports no
+    // reset for this rewrite.)
+    const host = document.createElement('div')
+    const scratch = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    r.update('# head\npara one\n')
+    const ft = (r as unknown as { frozenTail: FrozenTailRenderer }).frozenTail
+    const skipsBefore = ft.prefixChecksSkipped
+    r.update('# HEAD\nrewritten body\n')
+    assert.equal(
+      ft.prefixChecksSkipped,
+      skipsBefore,
+      'the rewrite commit must run the full frozen-source check',
+    )
+    const complete = splitForStreaming('# HEAD\nrewritten body\n').complete
+    scratch.innerHTML = String(sanitizeRenderedMarkdown(renderMarkdownUnsafe(complete)))
+    const el = host.querySelector('.stream-complete')
+    assert.ok(el instanceof HTMLElement)
+    assert.equal(el.innerHTML, scratch.innerHTML)
+  })
+})
+
+describe('render- and parse-work stay near the once-per-block floor on a steady stream (CI guard)', () => {
+  it('span adoption keeps cumulative render AND parse work near one visit per block', () => {
+    // Streamed at line granularity through the real splitter (line-shaped
+    // chunks keep the forming tail stable between commits; character-level
+    // hold jitter legitimately re-renders the open tail and is covered by
+    // the parity suites). Every block is rendered once as the tail; at
+    // settle, the span-keyed adoption (ADR 0004 Phase 2 sealed-commit path)
+    // proves the delta's inputs unchanged and re-uses the memoized render —
+    // no second render, no sanitize, no parse, no diff. So BOTH cumulative
+    // counters must stay near one visit per block (the whole-document render
+    // length plus per-commit '\n' leads), where the pre-memo path paid two
+    // renders + two parses and the byte-compare memo still paid the second
+    // render.
     const md =
       Array.from({ length: 12 }, (_, i) => `Paragraph ${String(i)} with **bold** and \`code\`.`).join('\n\n') + '\n'
     const host = document.createElement('div')
     const ft = new FrozenTailRenderer()
     let last = ''
-    for (let cut = 1; cut <= md.length; cut++) {
+    for (let cut = md.indexOf('\n') + 1; cut <= md.length; cut = md.indexOf('\n', cut) + 1 || md.length + 1) {
       const complete = splitForStreaming(md.slice(0, cut)).complete
       if (complete === last) continue
       ft.update(host, complete, tokenizeBlocks(complete))
@@ -145,8 +269,21 @@ describe('parsed-work stays below rendered-work on a steady stream (CI guard)', 
         `${String(ft.deltaCommitsSkipped)} full + ${String(ft.deltaPrefixesAdopted)} partial`,
     )
     assert.ok(
-      ft.parsedChars < ft.renderedChars,
-      `parsedChars ${String(ft.parsedChars)} should stay below renderedChars ${String(ft.renderedChars)}`,
+      ft.deltaRendersSkipped >= 10,
+      `expected most settling deltas to be adopted without re-rendering, got ` +
+        String(ft.deltaRendersSkipped),
+    )
+    // One visit per block ≈ the whole-document render, plus one '\n' lead per
+    // commit; 1.5× headroom keeps the bound robust while still failing hard
+    // if any per-commit second visit (render or parse) creeps back in.
+    const wholeDoc = String(sanitizeRenderedMarkdown(renderMarkdownUnsafe(last))).length
+    assert.ok(
+      ft.renderedChars < wholeDoc * 1.5,
+      `renderedChars ${String(ft.renderedChars)} exceeds the once-per-block bound (${String(wholeDoc)} rendered doc)`,
+    )
+    assert.ok(
+      ft.parsedChars < wholeDoc * 1.5,
+      `parsedChars ${String(ft.parsedChars)} exceeds the once-per-block bound (${String(wholeDoc)} rendered doc)`,
     )
   })
 })

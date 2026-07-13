@@ -49,6 +49,7 @@ import {
   type BlockKind,
   type BlockToken,
 } from './block-tokenizer.ts'
+import { type ScanAdvance } from './incremental-scan.ts'
 import {
   listGroupCloseTag,
   listGroupOpenTag,
@@ -248,6 +249,39 @@ function tokenStraddles(tokens: BlockToken[], offset: number): boolean {
 }
 
 /**
+ * The tokens of a slice that actually render output. Blank / link-ref /
+ * footnote-def tokens render nothing (`renderBlockParts` skips them), so two
+ * token slices with the same render tokens over the same source bytes render
+ * identically — the comparison behind the span-keyed memo adoption below.
+ */
+function filterRenderTokens(tokens: BlockToken[]): BlockToken[] {
+  return tokens.filter(
+    (t) => t.kind !== 'blank' && t.kind !== 'link_ref_def' && t.kind !== 'footnote_def',
+  )
+}
+
+/**
+ * Whether two render-token lists cover the same blocks: same kinds over the
+ * same source spans. Status is deliberately NOT compared: the block renderer
+ * reads it only to pair a paragraph with an `ambiguous` (unterminated) setext
+ * underline, and an unterminated token can only ever be the LAST token of a
+ * snapshot — a settling delta contains none, and a token with an identical
+ * span in a later snapshot is unterminated iff it was before (the span either
+ * gains the newline or merges into a larger block, changing `end` either
+ * way). Everything else the renderer emits is a function of (kind, source
+ * bytes, neighbors), which these fields plus the caller's byte check pin.
+ */
+function sameRenderTokens(a: BlockToken[], b: BlockToken[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = b[i]
+    if (!x || !y || x.kind !== y.kind || x.start !== y.start || x.end !== y.end) return false
+  }
+  return true
+}
+
+/**
  * Stable serialization of the committed link-reference map (invalidation guard).
  * JSON-encoded entries keep field and entry boundaries unambiguous with only
  * printable characters (raw control-byte separators would make this source file
@@ -434,6 +468,20 @@ function detailsBalance(html: string): number {
 }
 
 /**
+ * The tail's per-part render plus the span bookkeeping the tail memo records
+ * for the NEXT commit's span-keyed adoption (ADR 0004 Phase 2): the render
+ * tokens the tail covered, the exact source bytes under them, and the
+ * link-ref map key they rendered under.
+ */
+interface TailCommitInfo {
+  parts: RenderedPart[]
+  renderTokens: BlockToken[]
+  srcStart: number
+  srcText: string
+  linkRefKey: string
+}
+
+/**
  * Incremental committed-prefix renderer. Owns the frozen/tail split of a single
  * `completedEl`; call {@link reset} when that element is rebuilt (see gap D).
  */
@@ -500,6 +548,23 @@ export class FrozenTailRenderer {
    */
   deltaPrefixesAdopted = 0
   /**
+   * Diagnostic: commits whose settling delta was adopted WITHOUT even
+   * re-rendering it (ADR 0004 Phase 2 sealed-commit path): the delta's render
+   * tokens, source bytes, and link-ref map matched the memoized tail by span,
+   * so the block provably renders byte-identically to the string already in
+   * the DOM — sealed blocks render to DOM exactly once. A strict subset of
+   * {@link deltaCommitsSkipped} (which also counts render-then-byte-compare
+   * adoptions). Never consumed by production code.
+   */
+  deltaRendersSkipped = 0
+  /**
+   * Diagnostic: commits that skipped the O(prefix) frozen-source byte
+   * comparison because the driving {@link ScanAdvance} had already verified
+   * the prefix (`verifiedUpTo` at or past the frozen boundary, no reset since
+   * the boundary was recorded). Never consumed by production code.
+   */
+  prefixChecksSkipped = 0
+  /**
    * Diagnostic: commits whose tail rendered byte-identically to the previous
    * commit's (same root, boundary, and seam), so the live tail nodes were kept
    * verbatim without a sanitize + parse + diff. Never consumed by production
@@ -539,7 +604,7 @@ export class FrozenTailRenderer {
    * parse's top-level node count, establishing the invariant the skips rely
    * on: the live children `[atNodeCount, atNodeCount + nodeCount)` of `root`
    * serialize exactly as `parse(sanitize(lead + rawHtml))` until the next
-   * commit. `partCount`/`balanced` gate the partial (extension) adoption: it
+   * commit. `parts`/`balanced` gate the partial (extension) adoption: it
    * needs the memo to be a single top-level group whose raw tags are balanced,
    * so per-fragment sanitization composes across the adoption boundary —
    * exactly the existing frozen-boundary assumption, at the same granularity.
@@ -547,6 +612,18 @@ export class FrozenTailRenderer {
    * (full morph, re-root frames, intra-list mode, footnote mode, out-of-band
    * hydration via {@link invalidateDomMemo}) nulls it — a stale memo must
    * never be trusted, a missing one only costs a re-parse.
+   *
+   * The span fields (`srcStart`/`srcText`/`renderTokens`/`parts`/
+   * `linkRefKey`) additionally let the NEXT commit adopt the memoized nodes
+   * without re-rendering the settling delta at all (the sealed-commit path,
+   * ADR 0004 Phase 2): when the delta's render tokens equal `renderTokens`
+   * over unchanged source bytes under an unchanged link-ref map, the render
+   * is a pure function of inputs proven identical, so `rawHtml` — and
+   * therefore the live DOM — already IS what a fresh render would produce.
+   * This rests on the same determinism assumption the frozen prefix itself
+   * rests on (re-rendering identical committed source under this renderer's
+   * frozen config yields identical bytes); a backend that mutated its output
+   * mid-stream would already diverge the never-re-rendered frozen region.
    */
   private tailMemo: {
     root: HTMLElement
@@ -554,9 +631,27 @@ export class FrozenTailRenderer {
     lead: '' | '\n'
     rawHtml: string
     nodeCount: number
-    partCount: number
     balanced: boolean
+    /** Source offset of the first render token this tail covered. */
+    srcStart: number
+    /** The exact source bytes `[srcStart, last render token end)`. */
+    srcText: string
+    /** The tail's render tokens (kind/span; see {@link sameRenderTokens}). */
+    renderTokens: BlockToken[]
+    /** The tail's rendered parts (source spans + raw HTML) for adoption. */
+    parts: RenderedPart[]
+    /** `serializeLinkRefs` of the map the tail rendered under. */
+    linkRefKey: string
   } | null = null
+  /**
+   * Prefix length of the last advance-driven commit's source that the driving
+   * scanner promises to re-verify (or report `reset`) on its next advance —
+   * see {@link ScanAdvance.verifiedUpTo}. While the frozen boundary sits at
+   * or below it, the per-commit O(prefix) `startsWith` re-check is redundant
+   * and is skipped ({@link prefixChecksSkipped}); any commit not driven by an
+   * advance zeroes it, so direct callers keep today's full check.
+   */
+  private prefixVerifiedUpTo = 0
 
   /**
    * Drop the DOM-trust memo after out-of-band mutation of committed nodes —
@@ -881,6 +976,7 @@ export class FrozenTailRenderer {
     this.frozenLabelCandidates.clear()
     this.committedHasOpenDetails = false
     this.tailMemo = null
+    this.prefixVerifiedUpTo = 0
     this.frozenParts = []
     this.frozenPartsReliable = true
     this.resetListState()
@@ -898,6 +994,14 @@ export class FrozenTailRenderer {
    * `collectFootnoteDefinitions(complete)` (threaded from the caller's
    * incremental scanner, #30 / ADR 0004 Phase 1 — saves the per-commit
    * O(prefix) definition scans).
+   *
+   * `advance`, when given, must be the {@link ScanAdvance} the caller's OWN
+   * scanner returned for exactly this `complete` (one advance per commit, the
+   * production shape in streaming.ts). Its `reset`/`verifiedUpTo` contract
+   * lets this commit skip the O(prefix) frozen-source byte re-check — the
+   * event stream carries the append-only proof, so the per-update prefix
+   * decision degrades to a fallback trigger (ADR 0004 Phase 2). Without it
+   * (direct callers, tests) every commit keeps today's full check.
    */
   update(
     completedEl: HTMLElement,
@@ -905,6 +1009,7 @@ export class FrozenTailRenderer {
     tokens: BlockToken[],
     providedLinkRefs?: LinkReferenceMap,
     providedFootnoteDefs?: FootnoteDefinitionMap,
+    advance?: ScanAdvance,
   ): void {
     if (complete === '') {
       if (completedEl.childNodes.length > 0) completedEl.replaceChildren()
@@ -954,7 +1059,24 @@ export class FrozenTailRenderer {
     }
     if (this.fnActive || this.fnGaveUp) this.resetFootnoteState()
 
-    if (!complete.startsWith(this.frozenSource) || tokenStraddles(tokens, this.frozenEnd)) {
+    // Prefix integrity. When this commit is driven by a ScanAdvance whose
+    // scanner already byte-verified at least the frozen prefix against the
+    // previous snapshot (no reset since the frozen source was recorded), the
+    // O(prefix) `startsWith` memcmp here is the same check paid twice — trust
+    // the event stream and skip it (ADR 0004 Phase 2: the per-update prefix
+    // decision becomes a fallback trigger). The straddle check always runs:
+    // it guards token-boundary drift under byte-identical prefixes, which no
+    // byte comparison can see. Blankless documents can freeze past the
+    // scanner's safe boundary (`frozenEnd > verifiedUpTo`); those keep the
+    // full check.
+    const prefixVerified =
+      advance !== undefined && !advance.reset && this.frozenEnd <= this.prefixVerifiedUpTo
+    this.prefixVerifiedUpTo = advance !== undefined && !advance.reset ? advance.verifiedUpTo : 0
+    if (prefixVerified) this.prefixChecksSkipped++
+    if (
+      (!prefixVerified && !complete.startsWith(this.frozenSource)) ||
+      tokenStraddles(tokens, this.frozenEnd)
+    ) {
       this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
       return
     }
@@ -1023,110 +1145,180 @@ export class FrozenTailRenderer {
     const deltaTokens = tokens.slice(deltaFrom, deltaTo)
     const tailTokens = tokens.slice(deltaTo)
 
-    // Rendered as per-part units purely for the memo comparisons; the joined
-    // strings are byte-identical to `renderBlocks` over the same tokens (the
-    // renderBlocksToParts contract), so every guard below sees exactly what it
-    // always saw.
-    const deltaParts = deltaTokens.length
-      ? renderBlocksToParts(complete, deltaTokens, { linkRefs, ...RENDER_OPTS })
-      : []
-    const tailParts = tailTokens.length
-      ? renderBlocksToParts(complete, tailTokens, { linkRefs, ...RENDER_OPTS })
-      : []
-    const deltaHtml = deltaParts.map((p) => p.html).join('\n')
-    const tailHtml = tailParts.map((p) => p.html).join('\n')
-
-    // A close tag for an open frame means later content pops OUT of the frame
-    // in the whole-string parse; per-fragment parsing drops the stray close, so
-    // the framed fast path cannot express it. One full morph rebuilds — and the
-    // now-balanced region then freezes wholesale through the ordinary path.
-    if (this.openFrames.length > 0 && this.frameCloseAppeared(deltaHtml, tailHtml)) {
-      this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
-      return
+    // The tail's per-part render and span bookkeeping, shared by both commit
+    // shapes below (the memo seed for the NEXT commit's adoption decisions).
+    const tailRenderTokens = filterRenderTokens(tailTokens)
+    const tailInfoOf = (parts: RenderedPart[]): TailCommitInfo => {
+      const first = tailRenderTokens[0]
+      const last = tailRenderTokens[tailRenderTokens.length - 1]
+      return {
+        parts,
+        renderTokens: tailRenderTokens,
+        srcStart: first?.start ?? 0,
+        srcText: first && last ? complete.slice(first.start, last.end) : '',
+        linkRefKey,
+      }
     }
 
-    // An unbalanced raw tag in the delta used to be terminally unfreezable:
-    // whole-string sanitization keeps the element open across later blocks,
-    // per-fragment sanitization closes it early, and the fallback repeated on
-    // every commit (frozenEnd stuck) — the O(n²) cliff of docs/decisions/0004.
-    // The tag-count scan is only an over-approximation though, so ask the
-    // parser what actually stays open at the delta's EOF (Phase 2):
-    //   - nothing (`[]`) — the imbalance self-healed (an unclosed `<details>`
-    //     inside a `</li>`-closed list item): the delta is safe to freeze;
-    //   - a chain of safe container elements — re-root: commit the delta, then
-    //     append all later content INSIDE the open element(s), exactly where
-    //     the whole-string parse puts it;
-    //   - anything else (formatting tags, parser-magic elements, unknown) —
-    //     today's full-morph fallback.
-    let rerootChain: string[] | null = null
-    if (deltaHtml !== '' && hasUnfreezableRawHtml(deltaHtml)) {
-      const chain = getHtmlPolicy() === 'passthrough' ? openElementChainAtEof(deltaHtml) : null
-      if (chain === null || (chain.length > 0 && !chain.every((tag) => SAFE_REROOT_TAGS.has(tag)))) {
+    // ---- Sealed-commit span adoption (ADR 0004 Phase 2) -------------------
+    // The blocks settling this commit usually ARE last frame's tail. When the
+    // delta's render tokens (kind + source span), the source bytes those
+    // tokens cover (including interleaved separators, whose bytes decide
+    // loose/tight grouping), and the link-reference map all equal the
+    // memoized tail's, the delta render is a pure function of inputs proven
+    // identical — so the memoized raw string, and the live DOM built from it,
+    // already ARE what re-rendering would produce. The settling blocks are
+    // adopted with NO render, NO sanitize, NO parse, NO diff: sealed blocks
+    // render to DOM exactly once. Declined (falling back to the render +
+    // byte-compare paths below, byte-identical output either way) when any
+    // input differs, when re-root frames are open (their close-tag scan needs
+    // the delta string), or when the memoized render's raw tags are not
+    // freezable as a fragment (the same guard a fresh delta must pass —
+    // declining routes it through the probe/re-root machinery below).
+    const memo = this.tailMemo
+    const deltaRenderTokens = filterRenderTokens(deltaTokens)
+    if (
+      memo !== null &&
+      this.openFrames.length === 0 &&
+      deltaRenderTokens.length > 0 &&
+      memo.root === completedEl &&
+      memo.atNodeCount === this.frozenNodeCount &&
+      memo.lead === (this.frozenHasHtml ? '\n' : '') &&
+      memo.linkRefKey === linkRefKey &&
+      sameRenderTokens(memo.renderTokens, deltaRenderTokens) &&
+      complete.startsWith(memo.srcText, memo.srcStart) &&
+      !hasUnfreezableRawHtml(memo.rawHtml)
+    ) {
+      // (The tail here is never token-empty: an adopted delta was last
+      // frame's still-forming tail, and settling it requires at least a
+      // trailing separator token after it — renderBlocksToParts over
+      // separators is a cheap no-op returning [].)
+      const tailParts = renderBlocksToParts(complete, tailTokens, { linkRefs, ...RENDER_OPTS })
+      const tailHtml = tailParts.map((p) => p.html).join('\n')
+      this.renderedChars += tailHtml.length
+      // Advance the frozen boundary over the memoized nodes; the memoized
+      // parts become the frozen part records (what the byte-compare adoption
+      // would have pushed from an identical fresh render).
+      this.frozenNodeCount += memo.nodeCount
+      this.frozenHasHtml = true
+      for (const part of memo.parts) {
+        this.frozenParts.push({ start: part.start, end: part.end, rawHtml: part.html })
+      }
+      this.deltaCommitsSkipped++
+      this.deltaRendersSkipped++
+      this.tailMemo = null
+      this.commitRanges(completedEl, '', tailHtml, [], tailInfoOf(tailParts))
+      // #138 (see below): the adopted delta's raw render carries the frozen
+      // `<details>` balance exactly as a fresh render would.
+      this.frozenDetailsBalance += detailsBalance(memo.rawHtml)
+      this.committedHasOpenDetails =
+        this.frozenDetailsBalance > 0 || hasOpenDetailsElement(tailHtml)
+    } else {
+      // Rendered as per-part units purely for the memo comparisons; the joined
+      // strings are byte-identical to `renderBlocks` over the same tokens (the
+      // renderBlocksToParts contract), so every guard below sees exactly what it
+      // always saw.
+      const deltaParts = deltaTokens.length
+        ? renderBlocksToParts(complete, deltaTokens, { linkRefs, ...RENDER_OPTS })
+        : []
+      const tailParts = tailTokens.length
+        ? renderBlocksToParts(complete, tailTokens, { linkRefs, ...RENDER_OPTS })
+        : []
+      const deltaHtml = deltaParts.map((p) => p.html).join('\n')
+      const tailHtml = tailParts.map((p) => p.html).join('\n')
+
+      // A close tag for an open frame means later content pops OUT of the frame
+      // in the whole-string parse; per-fragment parsing drops the stray close, so
+      // the framed fast path cannot express it. One full morph rebuilds — and the
+      // now-balanced region then freezes wholesale through the ordinary path.
+      if (this.openFrames.length > 0 && this.frameCloseAppeared(deltaHtml, tailHtml)) {
         this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
         return
       }
-      if (chain.length > 0) rerootChain = chain
-    }
-    this.renderedChars += deltaHtml.length + tailHtml.length
 
-    const root = this.commitRoot(completedEl)
-    // While frames are open the commit morphs inside the innermost frame, so
-    // stale top-level leftovers (block-level pending elements appended after
-    // the frame's anchor by the previous frame) must be trimmed explicitly —
-    // at the top level they sit AFTER the anchor, which is always the last
-    // committed top-level node.
-    if (this.frameAnchor) {
-      while (completedEl.lastChild && completedEl.lastChild !== this.frameAnchor) {
-        completedEl.lastChild.remove()
-      }
-    }
-
-    // Reconcile everything after the frozen prefix — newly-settled delta plus
-    // tail — as two range morphs (or around a re-root push). Seam rule:
-    // `renderBlocks` joins non-empty top-level RAW blocks with '\n' (gap B);
-    // the seam text survives the sanitizer even when a fragment's elements do
-    // not, so joins follow raw emptiness on the paths a sanitizer-unwrapped
-    // container can reach.
-    if (rerootChain) {
-      const sanitizedDelta = deltaHtml !== '' ? sanitizeRenderedMarkdown(deltaHtml) : ''
-      const sanitizedTail = tailHtml !== '' ? sanitizeRenderedMarkdown(tailHtml) : ''
-
-      // Which of the raw open chain survives sanitization on the rightmost
-      // path of the delta fragment. Unwrapped elements (both shipped backends
-      // keep a dropped element's children in place) leave the whole-string
-      // parse flattened the same way per-fragment rendering is — so with NO
-      // survivors the delta freezes through the ordinary path; survivors
-      // become frames.
-      const survivors =
-        sanitizedDelta !== '' ? this.survivingChain(root, sanitizedDelta, rerootChain) : []
-      if (survivors.length > 0) {
-        /* c8 ignore start -- defensive backstop: commitWithReroot's live walk
-           mirrors the survivingChain probe over the same sanitized fragment, so
-           it cannot report a mismatch; kept so a future divergence degrades to
-           the correct full morph instead of wrong output. */
-        if (!this.commitWithReroot(completedEl, root, survivors, sanitizedDelta, sanitizedTail, tailHtml !== '')) {
+      // An unbalanced raw tag in the delta used to be terminally unfreezable:
+      // whole-string sanitization keeps the element open across later blocks,
+      // per-fragment sanitization closes it early, and the fallback repeated on
+      // every commit (frozenEnd stuck) — the O(n²) cliff of docs/decisions/0004.
+      // The tag-count scan is only an over-approximation though, so ask the
+      // parser what actually stays open at the delta's EOF (Phase 2):
+      //   - nothing (`[]`) — the imbalance self-healed (an unclosed `<details>`
+      //     inside a `</li>`-closed list item): the delta is safe to freeze;
+      //   - a chain of safe container elements — re-root: commit the delta, then
+      //     append all later content INSIDE the open element(s), exactly where
+      //     the whole-string parse puts it;
+      //   - anything else (formatting tags, parser-magic elements, unknown) —
+      //     today's full-morph fallback.
+      let rerootChain: string[] | null = null
+      if (deltaHtml !== '' && hasUnfreezableRawHtml(deltaHtml)) {
+        const chain = getHtmlPolicy() === 'passthrough' ? openElementChainAtEof(deltaHtml) : null
+        if (chain === null || (chain.length > 0 && !chain.every((tag) => SAFE_REROOT_TAGS.has(tag)))) {
           this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
           return
         }
-        /* c8 ignore stop */
-      } else {
-        // Fully-flattened re-root chain: the sanitizedDelta may be '' while
-        // the RAW delta was not (its '\n' seam must still be emitted, hence
-        // the raw-emptiness gating inside commitRanges). The delta carried
-        // unbalanced raw tags, so the partial adoption (which splits it) is
-        // off — `deltaParts: null`.
-        this.commitRanges(root, deltaHtml, tailHtml, null, tailParts.length, sanitizedDelta, sanitizedTail)
+        if (chain.length > 0) rerootChain = chain
       }
-    } else {
-      this.commitRanges(root, deltaHtml, tailHtml, deltaParts, tailParts.length)
+      this.renderedChars += deltaHtml.length + tailHtml.length
+
+      const root = this.commitRoot(completedEl)
+      // While frames are open the commit morphs inside the innermost frame, so
+      // stale top-level leftovers (block-level pending elements appended after
+      // the frame's anchor by the previous frame) must be trimmed explicitly —
+      // at the top level they sit AFTER the anchor, which is always the last
+      // committed top-level node.
+      if (this.frameAnchor) {
+        while (completedEl.lastChild && completedEl.lastChild !== this.frameAnchor) {
+          completedEl.lastChild.remove()
+        }
+      }
+
+      // Reconcile everything after the frozen prefix — newly-settled delta plus
+      // tail — as two range morphs (or around a re-root push). Seam rule:
+      // `renderBlocks` joins non-empty top-level RAW blocks with '\n' (gap B);
+      // the seam text survives the sanitizer even when a fragment's elements do
+      // not, so joins follow raw emptiness on the paths a sanitizer-unwrapped
+      // container can reach.
+      if (rerootChain) {
+        const sanitizedDelta = deltaHtml !== '' ? sanitizeRenderedMarkdown(deltaHtml) : ''
+        const sanitizedTail = tailHtml !== '' ? sanitizeRenderedMarkdown(tailHtml) : ''
+
+        // Which of the raw open chain survives sanitization on the rightmost
+        // path of the delta fragment. Unwrapped elements (both shipped backends
+        // keep a dropped element's children in place) leave the whole-string
+        // parse flattened the same way per-fragment rendering is — so with NO
+        // survivors the delta freezes through the ordinary path; survivors
+        // become frames.
+        const survivors =
+          sanitizedDelta !== '' ? this.survivingChain(root, sanitizedDelta, rerootChain) : []
+        if (survivors.length > 0) {
+          /* c8 ignore start -- defensive backstop: commitWithReroot's live walk
+             mirrors the survivingChain probe over the same sanitized fragment, so
+             it cannot report a mismatch; kept so a future divergence degrades to
+             the correct full morph instead of wrong output. */
+          if (!this.commitWithReroot(completedEl, root, survivors, sanitizedDelta, sanitizedTail, tailHtml !== '')) {
+            this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
+            return
+          }
+          /* c8 ignore stop */
+        } else {
+          // Fully-flattened re-root chain: the sanitizedDelta may be '' while
+          // the RAW delta was not (its '\n' seam must still be emitted, hence
+          // the raw-emptiness gating inside commitRanges). The delta carried
+          // unbalanced raw tags, so the partial adoption (which splits it) is
+          // off — `deltaParts: null`.
+          this.commitRanges(root, deltaHtml, tailHtml, null, tailInfoOf(tailParts), sanitizedDelta, sanitizedTail)
+        }
+      } else {
+        this.commitRanges(root, deltaHtml, tailHtml, deltaParts, tailInfoOf(tailParts))
+      }
+      // #138: hold the pending tail in the DOM emitter while a `<details>` is
+      // open in the RAW whole render — matching the string emitter, which
+      // re-checks its raw render every frame. Frozen deltas are never
+      // re-rendered, so the frozen share is a running raw balance.
+      this.frozenDetailsBalance += detailsBalance(deltaHtml)
+      this.committedHasOpenDetails =
+        this.frozenDetailsBalance > 0 || hasOpenDetailsElement(tailHtml)
     }
-    // #138: hold the pending tail in the DOM emitter while a `<details>` is
-    // open in the RAW whole render — matching the string emitter, which
-    // re-checks its raw render every frame. Frozen deltas are never
-    // re-rendered, so the frozen share is a running raw balance.
-    this.frozenDetailsBalance += detailsBalance(deltaHtml)
-    this.committedHasOpenDetails =
-      this.frozenDetailsBalance > 0 || hasOpenDetailsElement(tailHtml)
 
     if (advanceTo > this.frozenEnd) {
       this.accumulateLabelCandidates(complete.slice(this.frozenEnd, advanceTo))
@@ -1203,7 +1395,7 @@ export class FrozenTailRenderer {
     deltaHtml: string,
     tailHtml: string,
     deltaParts: RenderedPart[] | null,
-    tailPartCount: number,
+    tailInfo: TailCommitInfo,
     presanitizedDelta: SanitizedHtml | '' | null = null,
     presanitizedTail: SanitizedHtml | '' | null = null,
   ): void {
@@ -1220,7 +1412,7 @@ export class FrozenTailRenderer {
         this.deltaCommitsSkipped++
       } else if (
         adoptable &&
-        memo.partCount === 1 &&
+        memo.parts.length === 1 &&
         memo.balanced &&
         deltaParts !== null &&
         deltaParts.length > 1 &&
@@ -1272,6 +1464,15 @@ export class FrozenTailRenderer {
       while (root.childNodes.length > this.frozenNodeCount + memo.nodeCount) {
         root.lastChild?.remove()
       }
+      // Same rendered bytes, but the SOURCE under them may have changed (an
+      // open paragraph gaining its trailing newline renders identically) —
+      // refresh the span bookkeeping so the next commit's span adoption
+      // compares against the current source, not a stale snapshot.
+      memo.srcStart = tailInfo.srcStart
+      memo.srcText = tailInfo.srcText
+      memo.renderTokens = tailInfo.renderTokens
+      memo.parts = tailInfo.parts
+      memo.linkRefKey = tailInfo.linkRefKey
       this.tailMorphsSkipped++
     } else if (tailHtml !== '') {
       const sanitized = presanitizedTail ?? sanitizeRenderedMarkdown(tailHtml)
@@ -1284,8 +1485,12 @@ export class FrozenTailRenderer {
         lead: tailLead,
         rawHtml: tailHtml,
         nodeCount,
-        partCount: tailPartCount,
-        balanced: tailPartCount === 1 && !hasUnfreezableRawHtml(tailHtml),
+        balanced: tailInfo.parts.length === 1 && !hasUnfreezableRawHtml(tailHtml),
+        srcStart: tailInfo.srcStart,
+        srcText: tailInfo.srcText,
+        renderTokens: tailInfo.renderTokens,
+        parts: tailInfo.parts,
+        linkRefKey: tailInfo.linkRefKey,
       }
     } else {
       morphInnerHtmlFrom(root, this.frozenNodeCount, '')
