@@ -428,6 +428,50 @@ DOM diff, as opposed to `renderedChars`) plus per-skip counters, asserted
 deterministically in `streaming-commit-memo.test.ts` — the measurement half
 of this phase; the CI gate over per-update op counts is still to come.
 
+**Status: landed.** Built after long-document doubling probes (fixed-size
+chunks, x8/x16/x32 of a mixed 12 kB unit, measured in BOTH engines — Chromium
+via playwright, no forced layout, so pure JS) found genuinely super-linear
+growth: ~2.8×/doubling at 200–400 kB while smd's JS is flat 2.0× (its
+push-shaped `parser_write(delta)` API never re-verifies a prefix it never
+receives). Chromium profiling attributed a third of JS time to
+`incremental-scan.ts`; the terms and their fixes:
+
+- The definition views (`linkRefs`/`footnoteDefs`) each re-ran the scanner's
+  O(prefix) rewrite-guard `startsWith` per commit — three full-prefix memcmps
+  per update instead of one. They now ride `advance()`'s verification through
+  a `source === lastSource` identity fast path (the hot path passes the same
+  string instance).
+- `advance()` rebuilt its token array per update (`slice(0, sealed).concat`,
+  O(total blocks) reference copying); it now truncates and extends the array
+  in place, and `ScanAdvance.tokens` is documented as valid only until the
+  next advance.
+- Two instructive dead ends, kept as in-code notes: maintaining `safePrefix`
+  by appending the delta measured ~2× WORSE (V8 `slice` is an O(1)
+  SlicedString view, while `startsWith` flattens a rope per update), and the
+  first counter implementation read `.length` off that sliced string per
+  update, which knocked `startsWith` off its fast path — a 55% Chromium
+  slowdown from a diagnostic counter (line-granularity bisected; the counter
+  now reads the always-equal `safeOffset` int).
+
+Measured (Chromium, no layout, interleaved same-window): x32 (389 kB, 974
+updates) 2286 → 1847 ms (−19%), the margin growing with size. The remaining
+super-linearity is the single inherent O(prefix) memcmp per update — the
+pull-shaped `update(fullString)` API's floor (native memcmp, irrelevant below
+multi-MB); removing it is the push-shaped-boundary future work. Forced layout
+per update is super-linear for EVERY library on a growing document (at 400 kB
+it is ~98% of even smd's probe time) — a property of the benchmark
+methodology's layout forcing, not of any renderer.
+
+The enforcement half: `StreamingMarkdownRenderer.diagnostics()` exposes the
+work-shape counters (`scannedChars`, `suffixTokensScanned`, `prefixChecks`,
+`prefixBytesCompared`, `renderedChars`, `parsedChars`,
+`pendingFastPathHits`); `src/streaming-longdoc-scaling.test.ts` asserts the
+doubling shape (linear counters < 2.6×/doubling, rewrite-guard comparisons ≤
+one per scanner call, batch-render parity at every size) in the unit suite,
+and the #154 guard (`npm run bench`) runs the same assertions over the real-
+document corpus doubling series — a shape regression now fails
+deterministically even when wall-clock noise would hide it.
+
 ### Expected end state
 
 Per-update cost collapses to: tokenize the new bytes once + inline-render the
