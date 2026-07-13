@@ -56,6 +56,29 @@ actually does:
     mutate the DOM directly. This is the tier that answers "what does the
     user's frame budget see", and per-update p95/max on the long-transcript
     fixture is the frame-time proxy.
+- **Output validation.** A speed number is meaningless if the library got
+  there by rendering less, so after each DOM-tier contestant streams a fixture
+  we read its rendered DOM back and measure *what* it produced — the same way
+  for every library: visible-text length, the fraction of the source's word
+  tokens that reached that visible text (**coverage**), and counts of the
+  structural elements the markdown implies (headings, code blocks, tables,
+  list items, links, emphasis). Word tokens are alphanumeric runs of ≥ 4
+  characters, tokenized identically over the source and over each library's
+  rendered text. Columns that track together are the evidence that the timing
+  table compares equivalent work — that a library posting a 30× win is doing
+  so architecturally, not by silently dropping content. (This is where smd's
+  numbers hold up: on the long transcript it renders the same headings, code
+  blocks, tables and list items as ours, at near-identical coverage — its lead
+  is the append-only architecture, not skipped output.) The read is taken after
+  the DOM **settles**: async renderers (Streamdown highlights and re-parses in
+  effects that commit after `flushSync` returns) are polled across macrotasks
+  until their output stops growing, so their coverage reflects the true final
+  document — not the near-empty synchronous snapshot. This settle applies to the
+  validation read only; the timing table still measures the synchronous window
+  (see the async-rendering caveat below). `raw-html-details` is exempt from the
+  coverage read: ours deliberately *holds* the pending tail inside the
+  still-open `<details>` (#138), so lower coverage there is correct behaviour,
+  not a defect — see the corpus note.
 - **Bundle size** — esbuild, browser platform, minified, es2022, code
   splitting; React and declared peer dependencies are external (all React
   competitors assume an existing React app). "Initial" counts the entry plus
@@ -104,6 +127,22 @@ repository plus the code-block-heavy case from #155:
   nodes with no sanitizer; React-based renderers rely on React's escaping;
   Streamdown additionally hardens URLs and repairs incomplete markdown;
   Incremark's core builds an AST and renders nothing at all.
+- **Streamdown renders asynchronously — its DOM-tier *time* is not
+  comparable.** The output-validation pass surfaced this: after a synchronous
+  `flushSync` chunk, Streamdown's DOM is near-empty (it highlights and
+  re-parses in effects that commit a few ticks later); its full output only
+  appears once the microtask/macrotask queue drains. The validation read waits
+  for that settle, so Streamdown's **coverage** is truthful — but the **timing
+  table does not**: it measures only the synchronous window, so Streamdown's
+  DOM-tier milliseconds *understate* its real per-update cost (the async render
+  lands off the timed critical path). Read Streamdown's DOM-tier time as a
+  lower bound, not an end-to-end figure; its coverage/structure columns are the
+  trustworthy part. One structure-column wrinkle, also surfaced by the
+  validation: Streamdown wraps inline emphasis and links in styled
+  `<span data-streamdown="…">` rather than semantic `<a>`/`<strong>`/`<em>`, so
+  its **links** and **emphasis** counts read near-zero even though that text is
+  present (its coverage is ~99%) — a semantics/accessibility difference, not
+  dropped content.
 - **Like-for-like vs smd:** the DOM tier includes two *unsafe* variants of
   ours with sanitization disabled (`ours DOM incremental (unsafe)` via a
   passthrough backend, and the `renderMarkdownUnsafe` string export swapped
@@ -202,6 +241,38 @@ _Last run: 2026-07-13 — node v22.22.2, Intel(R) Xeon(R) Processor @ 2.80GHz, c
 | [react-markdown + memo blocks](https://github.com/remarkjs/react-markdown) | 24.1 ms | 22.6 ms | 52.3 ms | 72.2 ms |
 | [streamdown](https://github.com/vercel/streamdown) | 177 ms | 155 ms | 375 ms | 410 ms |
 | [incremark react](https://github.com/kingshuaishuai/incremark) | 109 ms | 96.9 ms | 265 ms | 395 ms |
+
+### Output validation — did every library render the same corpus?
+
+After each contestant streams a fixture, its rendered DOM is read back and measured — so the timing table above can be trusted to compare equivalent work, not reward a library for silently dropping content. Same metric for every library. Word-token coverage of the visible text, per fixture (columns that track together mean everyone rendered the same document):
+
+| fixture | [ours DOM incremental](https://github.com/copse-dev/streaming-markdown) | [ours string→innerHTML](https://github.com/copse-dev/streaming-markdown) | [ours DOM incremental (unsafe)](https://github.com/copse-dev/streaming-markdown) | [ours unsafe→innerHTML](https://github.com/copse-dev/streaming-markdown) | [ours DOM incremental (smd parity)](https://github.com/copse-dev/streaming-markdown) | [smd (streaming-markdown)](https://github.com/thetarnav/streaming-markdown) | [ours react (StreamingMarkdown)](https://github.com/copse-dev/streaming-markdown) | [react-markdown](https://github.com/remarkjs/react-markdown) | [react-markdown + memo blocks](https://github.com/remarkjs/react-markdown) | [streamdown](https://github.com/vercel/streamdown) | [incremark react](https://github.com/kingshuaishuai/incremark) |
+| :-- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |
+| incremark/P1.5_COLOR_SYSTEM_REPORT.md | 98.9% | 98.9% | 98.9% | 98.9% | 98.9% | 97.9% | 98.9% | 98.9% | 98.9% | 96.8% | 98.9% |
+| incremark/test-md.md | 99.0% | 99.0% | 99.0% | 99.0% | 99.0% | 99.0% | 99.0% | 99.0% | 99.0% | 98.5% | 98.5% |
+| README.md | 99.0% | 99.0% | 99.0% | 99.0% | 99.0% | 92.1% | 99.0% | 99.0% | 98.5% | 99.0% | 98.0% |
+| CHANGELOG.md | 99.7% | 99.7% | 99.7% | 99.7% | 99.7% | 96.1% | 99.7% | 99.7% | 99.7% | 99.7% | 97.1% |
+| docs/ARCHITECTURE.md | 99.8% | 99.8% | 99.8% | 99.8% | 99.8% | 94.8% | 99.8% | 99.9% | 99.9% | 99.8% | 99.6% |
+| tests/fixtures/terms-of-service-streaming.md | 93.3% | 93.3% | 93.3% | 93.3% | 93.3% | 96.1% | 93.3% | 99.6% | 98.0% | 90.9% | 89.0% |
+| synthetic/code-heavy (#155) | 97.2% | 97.2% | 97.2% | 97.2% | 97.2% | 96.2% | 97.2% | 97.2% | 96.2% | 96.2% | 97.2% |
+| synthetic/long-transcript | 99.1% | 99.1% | 99.1% | 99.1% | 99.1% | 96.2% | 99.1% | 99.7% | 99.5% | 99.0% | 98.1% |
+| synthetic/raw-html-details (#0004) | 96.4% | 96.4% | 96.4% | 96.4% | 97.3% | 96.4% | 96.4% | 97.3% | 96.4% | 96.4% | 97.3% |
+
+Rendered structure on the long transcript — element counts should track across libraries (the `raw-html-details` fixture is exempt: ours deliberately holds the tail inside the open `<details>`, so its coverage there is expected to differ — see the corpus note):
+
+| library | visible text | coverage | headings | code | tables | list items | links | emphasis |
+| :-- | --: | --: | --: | --: | --: | --: | --: | --: |
+| [ours DOM incremental](https://github.com/copse-dev/streaming-markdown) | 103966 chars | 99.1% | 260 | 73 | 11 | 490 | 58 | 279 |
+| [ours string→innerHTML](https://github.com/copse-dev/streaming-markdown) | 103966 chars | 99.1% | 260 | 73 | 11 | 490 | 58 | 279 |
+| [ours DOM incremental (unsafe)](https://github.com/copse-dev/streaming-markdown) | 103966 chars | 99.1% | 260 | 73 | 11 | 490 | 58 | 279 |
+| [ours unsafe→innerHTML](https://github.com/copse-dev/streaming-markdown) | 103966 chars | 99.1% | 260 | 73 | 11 | 490 | 58 | 279 |
+| [ours DOM incremental (smd parity)](https://github.com/copse-dev/streaming-markdown) | 103977 chars | 99.1% | 260 | 73 | 11 | 490 | 58 | 279 |
+| [smd (streaming-markdown)](https://github.com/thetarnav/streaming-markdown) | 103202 chars | 96.2% | 259 | 74 | 11 | 489 | 70 | 280 |
+| [ours react (StreamingMarkdown)](https://github.com/copse-dev/streaming-markdown) | 103966 chars | 99.1% | 260 | 73 | 11 | 490 | 58 | 279 |
+| [react-markdown](https://github.com/remarkjs/react-markdown) | 106006 chars | 99.7% | 260 | 73 | 0 | 490 | 47 | 279 |
+| [react-markdown + memo blocks](https://github.com/remarkjs/react-markdown) | 105748 chars | 99.5% | 260 | 73 | 0 | 490 | 47 | 279 |
+| [streamdown](https://github.com/vercel/streamdown) | 104787 chars | 99.0% | 260 | 73 | 11 | 490 | 0 | 10 |
+| [incremark react](https://github.com/kingshuaishuai/incremark) | 104026 chars | 98.1% | 260 | 73 | 11 | 490 | 58 | 279 |
 
 ### Pipeline only: per-chunk parse/render work, no DOM (Incremark’s published methodology)
 

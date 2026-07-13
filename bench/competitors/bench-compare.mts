@@ -124,6 +124,14 @@ interface RunHandle {
   feed: (chunk: string, acc: string) => void
   /** Called once after the last chunk (finalize/flush). Timed. */
   finish?: (acc: string) => void
+  /**
+   * The rendered DOM this contestant produced, as an HTML string, read after
+   * the final chunk. Powers output validation (see `validate`) — how we prove
+   * the timing table compares equivalent work and a fast library isn't fast
+   * because it silently rendered less. DOM-tier only; omitted by pipeline
+   * contestants that emit no DOM.
+   */
+  snapshot?: () => string
   /** Untimed cleanup. */
   teardown?: () => void
 }
@@ -135,6 +143,14 @@ interface Contestant {
   /** GitHub project URL — rendered as the library's link in every published table. */
   repo: string
   note?: string
+  /**
+   * The library commits most of its DOM asynchronously, after the synchronous
+   * `flushSync` chunk returns (Streamdown highlights/re-parses in effects). The
+   * validation read waits for that commit to land (see `settle`) so coverage is
+   * truthful; without this the snapshot is taken while the DOM is still empty.
+   * Sync renderers leave it unset and are snapshotted immediately.
+   */
+  deferredRender?: boolean
   setup: () => RunHandle
 }
 
@@ -260,7 +276,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
     setup: () => {
       const { host, teardown } = domHost()
       const renderer = new ours.StreamingMarkdownRenderer(host)
-      return { feed: (_c, acc) => renderer.update(acc), teardown }
+      return { feed: (_c, acc) => renderer.update(acc), snapshot: () => host.innerHTML, teardown }
     },
   })
   contestants.push({
@@ -275,6 +291,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
         feed: (_c, acc) => {
           host.innerHTML = ours.renderStreamingMarkdown(acc)
         },
+        snapshot: () => host.innerHTML,
         teardown,
       }
     },
@@ -297,7 +314,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
       const renderer = new ours.StreamingMarkdownRenderer(host, {
         sanitizerBackend: passthroughSanitizerBackend,
       })
-      return { feed: (_c, acc) => renderer.update(acc), teardown }
+      return { feed: (_c, acc) => renderer.update(acc), snapshot: () => host.innerHTML, teardown }
     },
   })
   contestants.push({
@@ -312,6 +329,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
         feed: (_c, acc) => {
           host.innerHTML = ours.renderMarkdownUnsafe(acc)
         },
+        snapshot: () => host.innerHTML,
         teardown,
       }
     },
@@ -340,7 +358,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
         footnotes: false,
         linkReferences: false,
       })
-      return { feed: (_c, acc) => renderer.update(acc), teardown }
+      return { feed: (_c, acc) => renderer.update(acc), snapshot: () => host.innerHTML, teardown }
     },
   })
 
@@ -358,6 +376,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
         return {
           feed: (chunk) => smd.parser_write(parser, chunk),
           finish: () => smd.parser_end(parser),
+          snapshot: () => host.innerHTML,
           teardown,
         }
       },
@@ -396,6 +415,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
           root.render(render(acc) as never)
         })
       },
+      snapshot: () => host.innerHTML,
       teardown: () => {
         root.unmount()
         teardown()
@@ -440,6 +460,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
           root.render(render(acc) as never)
         })
       },
+      snapshot: () => host.innerHTML,
       teardown: () => {
         root.unmount()
         teardown()
@@ -517,6 +538,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
         tier: 'dom',
         version: pkgVersion('streamdown'),
         note: 'defaults (internal block memo, hardening, incomplete-markdown repair)',
+        deferredRender: true,
         setup: () => reactDriver((acc) => rt.createElement(Streamdown as never, null, acc)),
       })
     } catch (e) {
@@ -552,6 +574,7 @@ async function buildContestants(): Promise<{ contestants: Contestant[]; skipped:
             finish: () => {
               renderBlocks(parser.finalize().pending as unknown[])
             },
+            snapshot: () => host.innerHTML,
             teardown: () => {
               root.unmount()
               teardown()
@@ -582,6 +605,12 @@ interface RunStats {
   p95Ms: number
   maxMs: number
   charsPerSec: number
+  /**
+   * What this contestant actually rendered (DOM tier only; see `validate`).
+   * Attached in `measureFixture` after timing, so it rides the same child→
+   * parent JSON as the stats. Absent for pipeline contestants.
+   */
+  validation?: ValidationMetrics | null
 }
 
 function percentile(sorted: number[], p: number): number {
@@ -633,6 +662,143 @@ function measure(contestant: Contestant, chunks: string[], totalChars: number): 
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Output validation
+// ---------------------------------------------------------------------------
+//
+// Timing alone can't be trusted across libraries: a renderer that silently
+// drops content, or collapses everything into one undifferentiated text blob,
+// would post great numbers for the wrong reason. So after a contestant streams
+// a whole fixture we read its rendered DOM back and measure WHAT it produced,
+// not how fast. The metrics are computed identically for every library, so the
+// comparison is fair; near-identical rows are the proof that the timing table
+// above compares equivalent work (see docs/BENCHMARKS.md).
+
+interface ValidationMetrics {
+  /** Visible characters in the rendered DOM (whitespace-collapsed textContent). */
+  textLen: number
+  /** Fraction [0,1] of the source's word tokens that appear in the visible text. */
+  coverage: number
+  headings: number
+  /** `<pre>` blocks — fenced/indented code. */
+  codeBlocks: number
+  tables: number
+  listItems: number
+  links: number
+  blockquotes: number
+  /** `<em>`/`<strong>`/`<b>`/`<i>` — inline emphasis. */
+  emphasis: number
+}
+
+/**
+ * Word tokens (alphanumeric runs, length ≥ 4, lowercased) in a piece of text.
+ * The ≥ 4 floor drops markdown punctuation and one/two-letter noise while
+ * keeping real words and code identifiers; the same tokenizer runs over the
+ * source and over each library's rendered text so coverage is apples-to-apples.
+ */
+function wordTokens(text: string): Set<string> {
+  const tokens = new Set<string>()
+  for (const m of text.toLowerCase().matchAll(/[a-z0-9]{4,}/g)) tokens.add(m[0])
+  return tokens
+}
+
+/** Scratch element reused to parse each contestant's snapshot for measurement. */
+const validationScratch = document.createElement('div')
+
+/**
+ * Let an asynchronous renderer settle before we read its DOM. Streamdown commits
+ * most of its output *after* the synchronous `flushSync` chunk returns: the DOM
+ * is near-empty for ~1s, then the whole document lands in a single burst (its
+ * highlight/parse effects resolving), then stays stable. Snapshotting
+ * immediately would report near-zero coverage for a library that in fact renders
+ * everything — so we poll across macrotasks and wait for that deferred burst.
+ *
+ * "Stop on first no-change" is wrong here: two empty reads one tick apart look
+ * stable only because the async work hasn't *started*. So we wait until the DOM
+ * has grown past its post-stream size AND then held quiet for `quietMs` (the
+ * burst has fully committed), with a `fallbackMs` escape if a fixture genuinely
+ * rendered synchronously and never grows, and a hard `maxMs` cap. Only
+ * `deferredRender` contestants run this; sync renderers are already final and
+ * are snapshotted directly (see `validate`). NOTE this corrects the *validation*
+ * read only — the timing table still measures the synchronous window, so an
+ * async renderer's DOM-tier time understates its real per-update cost
+ * (documented in docs/BENCHMARKS.md).
+ */
+async function settle(
+  snapshot: () => string,
+  { quietMs = 400, stepMs = 50, fallbackMs = 1500, maxMs = 20000 } = {},
+): Promise<string> {
+  const start = performance.now()
+  const initialLen = snapshot().length
+  let prev = snapshot()
+  let lastChange = start
+  let grew = false
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, stepMs))
+    const next = snapshot()
+    const now = performance.now()
+    if (next !== prev) {
+      if (next.length > initialLen) grew = true
+      prev = next
+      lastChange = now
+    }
+    if (now - start >= maxMs) return next
+    if (now - lastChange >= quietMs && (grew || now - start >= fallbackMs)) return next
+  }
+}
+
+/**
+ * Stream the whole fixture through a contestant once (unmeasured) and measure
+ * its final rendered DOM. Returns null for pipeline contestants (no DOM to
+ * inspect) or if the library exposes no snapshot.
+ */
+async function validate(
+  contestant: Contestant,
+  chunks: string[],
+  expected: Set<string>,
+): Promise<ValidationMetrics | null> {
+  if (contestant.tier !== 'dom') return null
+  const handle = contestant.setup()
+  if (!handle.snapshot) {
+    handle.teardown?.()
+    return null
+  }
+  const snapshot = handle.snapshot
+  let html = ''
+  try {
+    let acc = ''
+    for (const chunk of chunks) {
+      acc += chunk
+      handle.feed(chunk, acc)
+    }
+    handle.finish?.(acc)
+    // Sync renderers are already final post-stream; only async ones need the
+    // wait-for-deferred-burst poll (see `settle` / `Contestant.deferredRender`).
+    html = contestant.deferredRender ? await settle(snapshot) : snapshot()
+  } finally {
+    handle.teardown?.()
+  }
+  validationScratch.innerHTML = html
+  const text = (validationScratch.textContent ?? '').replace(/\s+/g, ' ').trim()
+  const rendered = wordTokens(text)
+  let present = 0
+  for (const token of expected) if (rendered.has(token)) present++
+  const count = (selector: string): number => validationScratch.querySelectorAll(selector).length
+  const metrics: ValidationMetrics = {
+    textLen: text.length,
+    coverage: expected.size > 0 ? present / expected.size : 1,
+    headings: count('h1,h2,h3,h4,h5,h6'),
+    codeBlocks: count('pre'),
+    tables: count('table'),
+    listItems: count('li'),
+    links: count('a'),
+    blockquotes: count('blockquote'),
+    emphasis: count('em,strong,b,i'),
+  }
+  validationScratch.replaceChildren()
+  return metrics
 }
 
 // ---------------------------------------------------------------------------
@@ -833,6 +999,57 @@ function renderBundles(bundles: BundleResult[]): string[] {
   return lines
 }
 
+/** Per-fixture visible-text coverage for every DOM contestant — the at-a-glance
+ * "is anyone winning by rendering less?" view. Columns that track together mean
+ * the timing table on the same fixtures compares equivalent output. */
+function renderValidationCoverage(
+  contestants: Contestant[],
+  fixtures: Fixture[],
+  results: Map<string, Map<string, RunStats | { error: string }>>,
+): string[] {
+  const libs = contestants.filter((c) => c.tier === 'dom')
+  const lines: string[] = []
+  lines.push(`| fixture | ${libs.map((c) => linked(c.name, c.repo)).join(' | ')} |`)
+  lines.push(`| :-- | ${libs.map(() => '--:').join(' | ')} |`)
+  for (const fixture of fixtures) {
+    const perLib = results.get(fixture.name)
+    if (!perLib) continue
+    const cells = libs.map((c) => {
+      const r = perLib.get(c.name)
+      if (!r || 'error' in r || !r.validation) return '—'
+      return `${(r.validation.coverage * 100).toFixed(1)}%`
+    })
+    lines.push(`| ${fixture.name} | ${cells.join(' | ')} |`)
+  }
+  return lines
+}
+
+/** Rendered-structure breakdown for one fixture: what each DOM contestant
+ * actually produced (visible text, coverage, element counts). Rows that track
+ * across libraries are the proof a fast library rendered the same document. */
+function renderValidationStructure(
+  contestants: Contestant[],
+  fixtureName: string,
+  results: Map<string, Map<string, RunStats | { error: string }>>,
+): string[] {
+  const perLib = results.get(fixtureName)
+  if (!perLib) return []
+  const lines: string[] = []
+  lines.push('| library | visible text | coverage | headings | code | tables | list items | links | emphasis |')
+  lines.push('| :-- | --: | --: | --: | --: | --: | --: | --: | --: |')
+  for (const c of contestants.filter((c) => c.tier === 'dom')) {
+    const r = perLib.get(c.name)
+    if (!r || 'error' in r || !r.validation) continue
+    const v = r.validation
+    lines.push(
+      `| ${linked(c.name, c.repo)} | ${String(v.textLen)} chars | ${(v.coverage * 100).toFixed(1)}% | ` +
+        `${String(v.headings)} | ${String(v.codeBlocks)} | ${String(v.tables)} | ${String(v.listItems)} | ` +
+        `${String(v.links)} | ${String(v.emphasis)} |`,
+    )
+  }
+  return lines
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -840,11 +1057,12 @@ function renderBundles(bundles: BundleResult[]): string[] {
 const fixtures = loadFixtures(args.fixture)
 const { contestants, skipped } = await buildContestants()
 
-function measureFixture(
+async function measureFixture(
   fixture: Fixture,
   into: Map<string, Map<string, RunStats | { error: string }>>,
-): void {
+): Promise<void> {
   const chunks = chunksOf(fixture.text)
+  const expected = wordTokens(fixture.text)
   const perLib = new Map<string, RunStats | { error: string }>()
   into.set(fixture.name, perLib)
   console.log(`fixture ${fixture.name} — ${String(fixture.text.length)} chars, ${String(chunks.length)} updates`)
@@ -855,10 +1073,14 @@ function measureFixture(
       console.log(`  ${contestant.name.padEnd(34)} SKIPPED: ${stats.error}`)
       skipped.push(`${contestant.name} on ${fixture.name}: ${stats.error}`)
     } else {
+      // One extra unmeasured pass reads back the rendered DOM so we can prove
+      // this cell's speed reflects equivalent output, not dropped content.
+      stats.validation = await validate(contestant, chunks, expected)
+      const cover = stats.validation ? ` cover ${(stats.validation.coverage * 100).toFixed(1)}%` : ''
       console.log(
         `  ${contestant.name.padEnd(34)} [${contestant.tier.padEnd(8)}] total ${ms(stats.totalMs).padStart(8)} ms  ` +
           `p50 ${ms(stats.p50Ms).padStart(7)}  p95 ${ms(stats.p95Ms).padStart(7)}  max ${ms(stats.maxMs).padStart(7)}  ` +
-          `${(stats.charsPerSec / 1000).toFixed(0).padStart(6)}k chars/s`,
+          `${(stats.charsPerSec / 1000).toFixed(0).padStart(6)}k chars/s${cover}`,
       )
     }
   }
@@ -875,7 +1097,7 @@ function measureFixture(
 // crash loses one cell, not the run.
 if (args.childOut) {
   const childResults = new Map<string, Map<string, RunStats | { error: string }>>()
-  for (const fixture of fixtures) measureFixture(fixture, childResults)
+  for (const fixture of fixtures) await measureFixture(fixture, childResults)
   writeFileSync(
     args.childOut,
     JSON.stringify({
@@ -927,9 +1149,10 @@ if (args.isolate) {
           env: {
             ...process.env,
             // The jsdom sanitize retention (see child-mode note) accumulates
-            // ~5 GB over one sanitizing contestant's 4 passes on the largest
-            // fixture; children get a fixed 8 GB ceiling (appended, so it wins
-            // over any inherited limit) since only one child runs at a time.
+            // ~5 GB over one sanitizing contestant's passes on the largest
+            // fixture (1 warmup + 3 measured + 1 validation); children get a
+            // fixed 8 GB ceiling (appended, so it wins over any inherited
+            // limit) since only one child runs at a time.
             NODE_OPTIONS: `${process.env['NODE_OPTIONS'] ?? ''} --max-old-space-size=8192`.trim(),
           },
         },
@@ -952,7 +1175,7 @@ if (args.isolate) {
     console.log()
   }
 } else {
-  for (const fixture of fixtures) measureFixture(fixture, results)
+  for (const fixture of fixtures) await measureFixture(fixture, results)
 }
 
 const bundleReport = args.skipBundle ? { bundles: [], skipped: [] } : await measureBundles()
@@ -980,14 +1203,40 @@ reportLines.push('### End-to-end: streamed chunks → live DOM (jsdom)')
 reportLines.push('')
 reportLines.push(...renderMatrix('dom', contestants, fixtures, results))
 // A filtered run (e.g. the parity docs section) may exercise no long
-// transcript and no pipeline contestants — skip those sections rather than
-// emit orphan headings / header-only tables.
+// transcript, no validation-capable contestants, and no pipeline contestants —
+// skip those sections rather than emit orphan headings / header-only tables.
 const tailLatency = renderTailLatency(contestants, 'synthetic/long-transcript', results)
 if (tailLatency.length > 0) {
   reportLines.push('')
   reportLines.push('### Per-update latency on the long transcript (DOM tier)')
   reportLines.push('')
   reportLines.push(...tailLatency)
+}
+// A markdown table with only its two header lines carries no data rows.
+const validationCoverage = renderValidationCoverage(contestants, fixtures, results)
+if (validationCoverage.length > 2) {
+  reportLines.push('')
+  reportLines.push('### Output validation — did every library render the same corpus?')
+  reportLines.push('')
+  reportLines.push(
+    'After each contestant streams a fixture, its rendered DOM is read back and measured — so the timing table ' +
+      'above can be trusted to compare equivalent work, not reward a library for silently dropping content. Same ' +
+      'metric for every library. Word-token coverage of the visible text, per fixture (columns that track together ' +
+      'mean everyone rendered the same document):',
+  )
+  reportLines.push('')
+  reportLines.push(...validationCoverage)
+  const validationStructure = renderValidationStructure(contestants, 'synthetic/long-transcript', results)
+  if (validationStructure.length > 2) {
+    reportLines.push('')
+    reportLines.push(
+      'Rendered structure on the long transcript — element counts should track across libraries (the ' +
+        '`raw-html-details` fixture is exempt: ours deliberately holds the tail inside the open `<details>`, so its ' +
+        'coverage there is expected to differ — see the corpus note):',
+    )
+    reportLines.push('')
+    reportLines.push(...validationStructure)
+  }
 }
 if (contestants.some((c) => c.tier === 'pipeline')) {
   reportLines.push('')
