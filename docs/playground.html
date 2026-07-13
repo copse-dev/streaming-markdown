@@ -377,8 +377,10 @@
     }
 
     /* Hold the footnotes section while a stream is live; it appears once, at
-       settle (class toggled once per stream — see index.html). */
-    .stream-live section.footnotes {
+       settle (class toggled once per stream — see index.html). Unresolved
+       [^label] citations hide the same way until their definitions commit. */
+    .stream-live section.footnotes,
+    .stream-live .footnote-ref-unresolved {
       display: none;
     }
 

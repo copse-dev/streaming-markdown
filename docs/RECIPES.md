@@ -303,6 +303,10 @@ otherwise keep the section in view):
 
 ```css
 .is-streaming section.footnotes { display: none; }
+/* And the literal [^label] text of citations whose definitions haven't
+   arrived yet — each upgrades to a numbered link in place when its
+   definition commits; stragglers reappear as literal text at settle. */
+.is-streaming .footnote-ref-unresolved { display: none; }
 ```
 
 Two things to handle: don't derive the toggle from render state (e.g. "no

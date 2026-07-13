@@ -504,6 +504,14 @@
       display: none;
     }
 
+    /* A not-yet-resolved citation renders as its literal [^label] text wrapped
+       in this marker span (#230). Hide it while the stream is live — the ref
+       upgrades to a numbered link in place the moment its definition commits,
+       and anything still unresolved reappears as literal text at settle. */
+    .is-streaming .footnote-ref-unresolved {
+      display: none;
+    }
+
     /* ── Rendered content styles ─────────────────────────── */
     .compare-panel-body h1 { font-size: 1.4rem; margin: 0.5rem 0; color: var(--text-bright); }
     .compare-panel-body h2 { font-size: 1.15rem; margin: 0.75rem 0 0.4rem; color: var(--text-bright); }
