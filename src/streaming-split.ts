@@ -153,10 +153,9 @@ function splitOpenTable(block: BlockToken, content: string): StreamingSplit {
  * the `StreamingSplit` fields and ignore `blocks` (it is derived, O(document),
  * and fully determined by `content`).
  *
- * @experimental Low-level streaming-boundary helper used by the renderer internals;
+ * @internal Low-level streaming-boundary helper used by the renderer internals;
  * not part of the stable v1 surface (#147). Prefer `renderStreamingMarkdown` /
- * `StreamingMarkdownRenderer`. May move behind a subpath or be removed in a minor
- * release.
+ * `StreamingMarkdownRenderer`. Not exported from the package entry since 1.0.
  */
 export function splitForStreaming(content: string): StreamingSplitWithTokens {
   return splitForStreamingFrom(content, tokenizeBlocks(content))

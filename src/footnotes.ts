@@ -25,10 +25,9 @@ import { activeConfig } from './config.ts'
  * Whether the footnote grammar is active for the current render (default on).
  * Off, `[^label]: …` lines are ordinary paragraphs and `[^label]` stays literal.
  *
- * @experimental Introspection getter that reads the ambient render config; outside
+ * @internal Introspection getter that reads the ambient render config; outside
  * a render it returns the defaults. Not part of the stable v1 surface (#147) —
- * scope behaviour via `MarkdownConfig.footnotes` instead. May move behind a
- * subpath or be removed in a minor release.
+ * scope behaviour via `MarkdownConfig.footnotes` instead. Not exported from the package entry since 1.0.
  */
 export function isFootnotesEnabled(): boolean {
   return activeConfig().footnotes !== false
