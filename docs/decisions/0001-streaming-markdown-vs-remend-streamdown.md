@@ -68,12 +68,16 @@ The headline figures in the issue predate the current baseline. From
 `tests/fixtures/commonmark/conformance-baseline.json` (`summaryBySection`) at the
 time of writing:
 
-- **583 / 652** official spec examples pass at rest (~89%) — this is
-  `passing.length` / `total` in the baseline JSON, not a figure typed here.
-- Two sections fail **by design** because the renderer escapes untrusted HTML
+- **579 / 652** official spec examples pass at rest under the pinned
+  `htmlPolicy: 'escape'` harness (~89%) — this is `passing.length` / `total` in the
+  escape baseline JSON, not a figure typed here. (The shipping `passthrough`
+  default passes a few more — **583 / 652** — measured in
+  `conformance-baseline-passthrough.json`.)
+- Two sections fail **by design** because the escape harness escapes untrusted HTML
   rather than passing it through (sanitize-at-the-sink): **HTML blocks 2/44** and
   **Raw HTML 8/20**. Excluding those **64 HTML examples**, the in-scope ceiling is
-  **588 examples**, of which **573 pass (~97%)**.
+  **588 examples**, of which **569 pass (~97%)** under escape (**572** under
+  passthrough).
 
 So the honest phrasing is "structural CommonMark minus raw-HTML passthrough, by
 security choice." Treat these figures as approximate and read `summaryBySection`

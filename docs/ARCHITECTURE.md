@@ -479,7 +479,11 @@ So the realistic ceiling excludes those **64 HTML examples**: **588 in-scope
 examples**, of which the renderer currently satisfies **569 (~97%)**. Counting all
 652 examples the baseline is **579 (~89%)**. Both numbers move as non-HTML
 conformance grows — `summaryBySection` in the baseline JSON carries the live
-per-section counts; treat the two headline figures here as approximate.
+per-section counts; treat the two headline figures here as approximate. The full
+live table (both specs × both policies, headline + in-scope ceiling + per-section
+breakdown) is generated from the four baseline JSONs by
+`npm run report:conformance` (`scripts/conformance-report.mts`) — regenerate it
+rather than hand-editing these numbers.
 
 **Deliberate autolink-scheme divergence (#139).** Angle autolinks (`<scheme:…>`)
 route through the same scheme allowlist as markdown links (`safeLinkHref` /
@@ -501,10 +505,13 @@ without a sink. **The true passthrough spec ceiling is now measured** (#141):
 each harness pins a *second* baseline under the shipping `passthrough` default
 (`conformance-baseline-passthrough.json`, `gfm-conformance-baseline-passthrough.json`),
 regenerated with `UPDATE_COMMONMARK_PASSTHROUGH_BASELINE=1` /
-`UPDATE_GFM_PASSTHROUGH_BASELINE=1`. Passthrough passes a few more of the 652
-(CommonMark **587**, GFM **595** vs escape's 583 / 591) — raw HTML flows to the
-sink instead of being escaped, so several Raw-HTML / HTML-block examples match the
-spec verbatim while a handful of escape-mode-only shapes drop. The escape baseline
+`UPDATE_GFM_PASSTHROUGH_BASELINE=1`. Passthrough passes a few more of the spec
+examples (CommonMark **583**/652, GFM **591**/672 vs escape's 579 / 587) — raw HTML
+flows to the sink instead of being escaped, so several Raw-HTML / HTML-block examples
+now match the spec verbatim while **5** escape-mode-only shapes (inline raw-HTML
+examples #619–624 in CommonMark, #638–643 in GFM, whose escaped output happens to
+match the spec) drop, for a net **+4** in each spec. (`npm run report:conformance`
+prints the exact gained/dropped set delta.) The escape baseline
 stays the canonical passing-example corpus the streaming/bench suites reuse. HTML
 **block recognition** in `block-tokenizer.ts` is still not a distinct token —
 block HTML tokenizes as prose and follows the inline policy. An element that pairs
