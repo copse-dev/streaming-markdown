@@ -90,4 +90,12 @@
     max-width: 100%;
     height: auto;
   }
+
+  /* Reserve height while the diagram is pending so hydrating the escaped
+     source into an SVG doesn't shove the content (and scroll position) below
+     it — the same "pending carries its committed size" contract the pending
+     headings follow. Overridable: set `--sm-diagram-min-height: 0` to opt out. */
+  & .mermaid-diagram {
+    min-height: var(--sm-diagram-min-height, 160px);
+  }
 }

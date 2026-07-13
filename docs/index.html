@@ -224,6 +224,12 @@
       color: var(--text-muted);
     }
     .hero-demo-meta > * { white-space: nowrap; }
+    /* Reserve width for the numbers that change digit-count as the stream runs,
+       so growing counts fill their own box instead of shoving neighbours. */
+    .hero-demo-meta { font-variant-numeric: tabular-nums; }
+    #hero-cps { min-width: 13ch; }
+    .hero-vs { min-width: 20ch; }
+    #hero-updates { min-width: 12ch; }
 
     .hero-vs {
       color: var(--accent);
@@ -887,9 +893,14 @@
       padding: 0.75rem;
     }
 
+    /* Bound the rendered diagram inside the reserved height (width auto keeps
+       the aspect ratio) so the container stays the same height before and after
+       hydration — the pending→SVG swap then causes no layout shift. */
     .compare-panel-body .mermaid-diagram svg {
       display: block;
       max-width: 100%;
+      max-height: 150px;
+      width: auto;
       height: auto;
       margin: 0 auto;
     }
@@ -2102,8 +2113,9 @@ const HERO_DOC_FULL = (() => {
 })();
 
 // How long the settled transcript stays up before the stream replays, giving
-// the reader time to scroll back through it.
-const HERO_REPLAY_PAUSE_MS = 8000;
+// the reader time to scroll back through it. (Scrolling away and back, or
+// re-opening the tab, restarts it sooner via the IntersectionObserver below.)
+const HERO_REPLAY_PAUSE_MS = 20000;
 
 // ── State ──────────────────────────────────────────────────────────────────
 let heroRenderer = null;
