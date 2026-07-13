@@ -1,87 +1,69 @@
 # Using `@copse/streaming-markdown` with React
 
-The core is framework-agnostic on purpose, so there is no React dependency to
-install. Wrapping it for React is a ~10-line pattern: one component for at-rest
-markdown and one that drives the **incremental DOM** renderer (it patches the
-committed tree per token — it does *not* re-render the whole string on every
-chunk, which is the thing that makes naive `react-markdown`-in-a-loop janky).
+First-party React bindings ship as the `@copse/streaming-markdown/react` subpath.
+React is an **optional peer dependency** — this subpath is the only module that
+imports it, the agnostic core never pulls it in, so a host that never imports
+`/react` pays zero React bytes.
 
-> A first-party `@copse/streaming-markdown/react` subpath is planned
-> ([#156](https://github.com/copse-dev/streaming-markdown/issues/156)). Until it
-> lands, copy the components below — they are the exact wrappers it will provide.
+Two components mirror the core's two rendering paths:
+
+- **`<Markdown>`** — at-rest render of a complete document (`renderMarkdown`),
+  SSR-safe.
+- **`<StreamingMarkdown>`** — the incremental DOM path
+  (`StreamingMarkdownRenderer.update()`), which patches the committed tree per
+  token instead of re-rendering the whole string on every chunk (the thing that
+  makes naive `react-markdown`-in-a-loop janky).
+
+Neither asks you to hand-roll `useEffect`/`useRef` wiring or reach for
+`dangerouslySetInnerHTML`: each component owns its DOM node and routes every
+write through the sanitized sink internally.
+
+```bash
+npm install @copse/streaming-markdown react react-dom
+```
 
 ## At rest
 
-`renderMarkdown` returns sanitized, `innerHTML`-ready HTML, so the component is a
-memoized `dangerouslySetInnerHTML`:
+Pass the source as the `markdown` prop (or as a single string child):
 
 ```tsx
-import { useMemo } from 'react'
-import { renderMarkdown } from '@copse/streaming-markdown'
+import { Markdown } from '@copse/streaming-markdown/react'
 
-export function Markdown({ content }: { content: string }) {
-  // renderMarkdown output is already sanitized (fail-closed) — safe for dSIH.
-  const html = useMemo(() => renderMarkdown(content), [content])
-  return <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />
+export function Message({ content }: { content: string }) {
+  return <Markdown markdown={content} className="streaming-markdown" />
 }
 ```
 
 `renderMarkdown` builds a DOM to sanitize, so it needs a sanitizer backend — the
 browser's native Sanitizer API by default, or a registered one such as
-[`…/sanitizers/dompurify`](EXTENDING.md). Register it once at app startup.
+[`…/sanitizers/dompurify`](EXTENDING.md). Register it once at app startup (in the
+browser the native default needs nothing).
+
+The component owns its node: after the first paint a layout effect takes
+ownership and drives every subsequent update through `setSanitizedHtml`, so a
+changing `markdown` prop never triggers a raw `innerHTML` write.
 
 ## Streaming
 
-Hold the growing text in state and feed it to a single long-lived
-`StreamingMarkdownRenderer`; the renderer owns the `<div>`'s children, React owns
-the `<div>` itself (the standard "React manages the node, a library manages its
-contents" escape hatch — keep the element empty in JSX so React never fights it):
+Hold the growing text in state and pass it as `markdown`; the component keeps a
+single long-lived `StreamingMarkdownRenderer` bound to its node and calls
+`renderer.update()` on each change — the incremental emitter converges the
+existing subtree, so this is **not** a re-render per token.
 
 ```tsx
-import { useEffect, useRef } from 'react'
-import {
-  StreamingMarkdownRenderer,
-  type StreamingMarkdownOptions,
-} from '@copse/streaming-markdown'
+import { StreamingMarkdown } from '@copse/streaming-markdown/react'
 
-export function StreamingMarkdown({
-  content,
-  options,
-}: {
-  content: string
-  options?: StreamingMarkdownOptions
-}) {
-  const hostRef = useRef<HTMLDivElement>(null)
-  const rendererRef = useRef<StreamingMarkdownRenderer | null>(null)
-
-  // Create the renderer once. Per-render policy options (htmlPolicy, scheme
-  // allowlist, …) are captured at construction, matching the library's instance
-  // model — change `options` by remounting (e.g. a React `key`), not in place.
-  useEffect(() => {
-    if (!hostRef.current) return
-    rendererRef.current = new StreamingMarkdownRenderer(hostRef.current, options)
-    const host = hostRef.current
-    return () => {
-      rendererRef.current = null
-      host.replaceChildren()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- construct once
-  }, [])
-
-  // Re-feed the full accumulated text on every change; the renderer diffs it and
-  // patches only the settled tail — O(delta), not O(document).
-  useEffect(() => {
-    rendererRef.current?.update(content)
-  }, [content])
-
-  return <div className="markdown" ref={hostRef} />
+export function Chat({ text }: { text: string }) {
+  return <StreamingMarkdown markdown={text} className="streaming-markdown" />
 }
 ```
 
-Drive it from whatever produces tokens:
+Drive the `text` state from whatever produces tokens:
 
 ```tsx
-function Chat({ stream }: { stream: AsyncIterable<string> }) {
+import { useEffect, useState } from 'react'
+
+function StreamedMessage({ stream }: { stream: AsyncIterable<string> }) {
   const [text, setText] = useState('')
   useEffect(() => {
     let acc = ''
@@ -92,25 +74,56 @@ function Chat({ stream }: { stream: AsyncIterable<string> }) {
       }
     })()
   }, [stream])
-  return <StreamingMarkdown content={text} />
+  return <StreamingMarkdown markdown={text} />
 }
 ```
 
+To hydrate lazy math/diagram backends as the stream lands them, use the
+`onUpdate` prop — it fires after each `update()` with the live renderer:
+
+```tsx
+<StreamingMarkdown
+  markdown={text}
+  config={{ mathRenderer, diagramRenderer }}
+  onUpdate={(renderer) => void renderer.hydrate()}
+/>
+```
+
+## Props
+
+Both components accept, in addition to standard container attributes
+(`className`, `style`, `id`, …):
+
+| Prop      | Type                                          | Notes |
+| --------- | --------------------------------------------- | ----- |
+| `markdown`| `string`                                      | The source text. On `<StreamingMarkdown>` it grows as tokens arrive. `<Markdown>` also accepts a single string child instead. |
+| `config`  | `MarkdownConfig`                              | Per-instance settings — `htmlPolicy`, scheme allowlist, `linkDecorator`, `fenceHandlers`, `codeHighlighter`, `mathSyntax`, CJK, `trustedTypesPolicy`, `sanitizerBackend`, … Two components with different `config` coexist without interfering. |
+| `as`      | `ElementType`                                 | Container element/component. Defaults to `'div'`. |
+| `onUpdate`| `(renderer: StreamingMarkdownRenderer) => void`| `<StreamingMarkdown>` only. Called after each `update()`. |
+
+`config` is captured when the underlying renderer is constructed, so
+`<StreamingMarkdown>` **re-creates** its renderer when the `config` prop identity
+changes — pass a stable/memoized object to avoid needless re-creation.
+
+Under [Trusted Types](https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API),
+supply a policy via `config.trustedTypesPolicy` — see
+[Trusted Types in `docs/EXTENDING.md`](EXTENDING.md#trusted-types).
+
 ## Server rendering
 
-`StreamingMarkdownRenderer` needs a DOM, so it is **client-only** — render the
-at-rest markup on the server and let the streaming component take over on the
-client. Two options for the server pass:
+`<Markdown>` is SSR-safe: on the server (and the client's hydration pass) it
+emits the sanitized HTML via `dangerouslySetInnerHTML` **inside the component**,
+so there is real server markup and hydration matches; after mount a layout effect
+takes over the node and every later write goes through `setSanitizedHtml`. On the
+server, register a Node sanitizer backend once at startup
+(`…/sanitizers/dompurify` with a DOM shim such as `jsdom`), or pass one as
+`config.sanitizerBackend`.
 
-- Register a Node sanitizer backend (`…/sanitizers/dompurify` with a DOM shim such
-  as `jsdom`) at startup and use the `<Markdown>` component above unchanged.
-- Or use the DOM-free `renderMarkdownUnsafe` and sanitize it yourself before it
-  reaches `dangerouslySetInnerHTML` — `renderMarkdownUnsafe` returns **untrusted**
-  HTML, so never hand its output to a sink without `sanitizeRenderedMarkdown`.
-
-The streaming component renders an empty `<div>` on the server (it hydrates and
-starts patching on mount), so pair it with an at-rest server render of the same
-content if you want first-paint markup.
+`<StreamingMarkdown>` is **client-only** — streaming is inherently a client
+concern. It renders an empty container on the server and starts patching on
+mount (an empty `<div>` on both sides, so no hydration mismatch). Pair it with an
+at-rest `<Markdown>` server render of the same content if you want first-paint
+markup.
 
 ## Migrating from `react-markdown`
 
@@ -120,18 +133,16 @@ The shapes line up closely:
 // react-markdown
 <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
 
-// @copse/streaming-markdown — GFM (tables, task lists, strikethrough,
+// @copse/streaming-markdown/react — GFM (tables, task lists, strikethrough,
 // autolinks, footnotes) is built in, no plugin array
-<Markdown content={content} />
+<Markdown markdown={content} />
 ```
 
 For a chat UI that streams, swap the re-render-per-token `<ReactMarkdown>` for
-`<StreamingMarkdown content={accumulatedText} />` and delete the memoization
+`<StreamingMarkdown markdown={accumulatedText} />` and delete the memoization
 gymnastics — the incremental renderer is the memoization.
 
 Component-level overrides (react-markdown's `components` prop) map to the
 library's extension seams — the [`linkDecorator`, `fenceHandlers`,
 `codeHighlighter`, `inlinePasses`](EXTENDING.md) `MarkdownConfig` fields — passed
-per render (to the render call or captured on the `StreamingMarkdownRenderer`).
-The planned first-party wrapper ([#156](https://github.com/copse-dev/streaming-markdown/issues/156))
-will expose these as props.
+through the `config` prop.

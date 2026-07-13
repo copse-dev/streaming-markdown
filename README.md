@@ -126,41 +126,30 @@ off by default; Latin output is byte-identical.
 
 ## React
 
-The core is framework-agnostic, so there is no React dependency to install —
-wrapping it is a ~10-line pattern. **At rest** is a memoized
-`dangerouslySetInnerHTML` (`renderMarkdown` output is already sanitized).
-**Streaming** hands the growing string to one long-lived
-`StreamingMarkdownRenderer`: React owns the `<div>`, the renderer owns its
-children, so each token is an incremental DOM patch — not a re-render of the
-whole document (the thing that makes naive `react-markdown`-in-a-loop janky).
+First-party React bindings ship as the `@copse/streaming-markdown/react`
+subpath. React is an *optional* peer dependency, so it stays out of your bundle
+until you import that subpath. Two components mirror the core's two rendering
+paths — no `useEffect`/`useRef` boilerplate and no `dangerouslySetInnerHTML` in
+your code, because each component owns its node and routes every DOM write
+through the sanitizer internally:
 
 ```tsx
-import { useEffect, useRef } from 'react'
-import { StreamingMarkdownRenderer } from '@copse/streaming-markdown'
+import { Markdown, StreamingMarkdown } from '@copse/streaming-markdown/react'
 
-export function StreamingMarkdown({ content }: { content: string }) {
-  const host = useRef<HTMLDivElement>(null)
-  const renderer = useRef<StreamingMarkdownRenderer | null>(null)
+// At rest — a complete document. SSR-safe; every DOM write is sanitized.
+<Markdown markdown={content} />
 
-  // Construct once — keep the JSX element empty so React never fights it.
-  useEffect(() => {
-    renderer.current = new StreamingMarkdownRenderer(host.current!)
-    return () => host.current?.replaceChildren()
-  }, [])
-
-  // Re-feed the full text; it patches only the settled tail — O(delta).
-  useEffect(() => {
-    renderer.current?.update(content)
-  }, [content])
-
-  return <div className="streaming-markdown" ref={host} />
-}
+// Streaming — feed the growing text; the incremental DOM renderer patches only
+// the settled tail per token, not a re-render of the whole document (the thing
+// that makes naive react-markdown-in-a-loop janky).
+<StreamingMarkdown markdown={accumulatedText} />
 ```
 
-The full guide — the at-rest component, SSR notes, and a `react-markdown`
-migration — is in **[`docs/REACT.md`](docs/REACT.md)**. A first-party
-`@copse/streaming-markdown/react` subpath is
-[planned](https://github.com/copse-dev/streaming-markdown/issues/156).
+Both take a per-instance `config` prop (html/scheme policy, `linkDecorator`,
+`fenceHandlers`, math/CJK toggles, …), an `as` prop to pick the container
+element, and forward standard container attributes (`className`, etc.). The full
+guide — SSR and hydration, the `onUpdate` hook for math/diagram backends, and a
+`react-markdown` migration — is in **[`docs/REACT.md`](docs/REACT.md)**.
 
 ## Styling
 
