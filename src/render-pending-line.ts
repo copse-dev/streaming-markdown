@@ -94,7 +94,7 @@ function dedentLazyContinuation(text: string, itemFirstLine: string): string {
 }
 
 /** Strip up to three leading spaces per line (CommonMark paragraph normalization). */
-function stripParagraphIndent(text: string): string {
+export function stripParagraphIndent(text: string): string {
   return text
     .split('\n')
     .map((line) => line.replace(/^ {0,3}(?=\S)/, ''))
@@ -143,6 +143,31 @@ export function isListContinuationPending(
     openListItemFirstLine !== undefined &&
     openListItemFirstLine !== '' &&
     isLazyListContinuation(openListItemFirstLine, pending)
+  )
+}
+
+/**
+ * True when {@link renderPendingLine} takes its final plain-paragraph branch:
+ * no list / heading / blockquote / footnote / ambiguous handling touches the
+ * text, so the output is exactly
+ * `renderStreamingInline(stripParagraphIndent(pending.slice(0, hold)))`.
+ * Must mirror the branch order in {@link renderPendingLine} — the streaming
+ * pending fast path (streaming.ts) relies on this to prove a frame renders as
+ * plain prose before appending characters to the DOM without a re-render.
+ */
+export function isPlainParagraphPendingLine(
+  pending: string,
+  openListItemFirstLine?: string,
+): boolean {
+  return (
+    pending !== '' &&
+    !isListContinuationPending(pending, openListItemFirstLine) &&
+    matchPendingListMarker(pending) === null &&
+    !isIncompleteListMarkerPrefix(pending) &&
+    !isPendingFootnoteDefLine(pending) &&
+    pendingAtxHeadingLevel(pending) === null &&
+    !isPendingBlockquoteLine(pending) &&
+    !isAmbiguousBlockLine(pending)
   )
 }
 

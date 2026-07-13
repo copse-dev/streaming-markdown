@@ -1,7 +1,7 @@
 {
   "specVersion": "0.29",
   "source": "github/cmark-gfm spec.txt @ 0.29.0.gfm.13 (fetched to tests/fixtures/gfm/spec.txt)",
-  "note": "Examples from the official GitHub Flavored Markdown spec that renderMarkdownUnsafe() satisfies at rest, after the spec normalizer. GFM is a superset of CommonMark, so the base sections mirror the CommonMark baseline; the GFM-only sections are broken out in extensionSummary. This is a regression baseline, not a conformance goal — the renderer escapes untrusted HTML (sanitize-at-the-sink) and implements a subset of the autolink/strikethrough grammar, so HTML blocks, Raw HTML, and parts of the extension sections fail by design.",
+  "note": "Examples from the official GitHub Flavored Markdown spec that renderMarkdownUnsafe({ htmlPolicy: \"escape\" }) satisfies at rest, after the spec normalizer. GFM is a superset of CommonMark, so the base sections mirror the CommonMark baseline; the GFM-only sections are broken out in extensionSummary. This is a regression baseline, not a conformance goal — the renderer, in escape mode, escapes untrusted HTML (sanitize-at-the-sink) and implements a subset of the autolink/strikethrough grammar, so HTML blocks, Raw HTML, and parts of the extension sections fail by design. The shipping default is passthrough — see gfm-conformance-baseline-passthrough.json (#141).",
   "total": 672,
   "passing": [
     1,
@@ -240,6 +240,8 @@
     276,
     277,
     278,
+    279,
+    280,
     281,
     282,
     283,
@@ -650,7 +652,7 @@
       "total": 48
     },
     "Task list items (extension)": {
-      "pass": 0,
+      "pass": 2,
       "total": 2
     },
     "Lists": {
@@ -724,7 +726,7 @@
       "total": 8
     },
     "Task list items (extension)": {
-      "pass": 0,
+      "pass": 2,
       "total": 2
     },
     "Strikethrough (extension)": {

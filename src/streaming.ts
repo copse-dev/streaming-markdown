@@ -12,12 +12,17 @@ import {
 import {
   isListContinuationPending,
   isPendingBlockquoteLine,
+  isPlainParagraphPendingLine,
   listPendingIndent,
   pendingAtxHeadingLevel,
   pendingListMarkerLength,
   pendingListOrderedMarker,
   renderPendingLine,
+  revealFormingLink,
+  stripParagraphIndent,
 } from './render-pending-line.ts'
+import { pendingHoldIndex } from './inline-emphasis.ts'
+import { getInlinePasses } from './inline-passes.ts'
 import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from './streaming-split.ts'
 import { IncrementalSourceScanner } from './incremental-scan.ts'
 import { findDescendantByClass, firstDirectChild, lastDirectChild } from './dom-scan.ts'
@@ -572,18 +577,222 @@ function syncInlinePendingDom(
 
 function renderPendingTail(
   split: StreamingSplit,
-  complete: string,
   formingActive: boolean,
-  completeTokens?: BlockToken[],
+  pendingInTable: boolean,
 ): { pendingInner: SanitizedHtml | ''; pendingVisible: boolean } {
   const { pending, openListItemFirstLine } = split
-  const pendingInTable = pendingLineBelongsInTable(complete, pending, completeTokens)
   const pendingInner =
     pending && !pendingInTable && !formingActive
       ? sanitizeRenderedMarkdown(renderPendingInlineMarkdown(pending, openListItemFirstLine))
       : ''
   const pendingVisible = pending !== '' && !pendingInTable && !formingActive && pendingInner !== ''
   return { pendingInner, pendingVisible }
+}
+
+// ---------------------------------------------------------------------------
+// Pending-line plain-text fast path.
+//
+// For real LLM streams (~5-char deltas) the dominant per-update cost is
+// re-rendering the pending line's inline markdown and swapping it into the DOM
+// via an innerHTML parse — even though most deltas merely extend a plain prose
+// sentence. When an update provably cannot change any prior rendering
+// decision, the new characters are appended to the pending element's trailing
+// text node directly and the whole render → sanitize → innerHTML pipeline is
+// skipped. On ANY doubt the frame falls back to the full re-render, so output
+// stays byte-identical to the slow path.
+//
+// The proof obligations, and where each is discharged:
+// - The appended characters must be inert to the inline grammar: they cannot
+//   begin, close, extend, or re-flank any construct, and they are identity
+//   under HTML escaping at the DOM level. `PENDING_FAST_PATH_INERT_RE` is the
+//   conservative allowlist; everything the grammar cares about (`` ` `` `*`
+//   `_` `~` `[` `]` `(` `)` `<` `>` `&` `\` `$` `@` `:` `/` `=` `^` `|` `#`
+//   `{` `}` `+` `%`, tabs, newlines, all non-ASCII) is excluded.
+// - The pending line must be on `renderPendingLine`'s plain-paragraph branch
+//   both frames (`isPlainParagraphPendingLine`, recomputed per frame — inert
+//   appends CAN flip a branch predicate, e.g. ` ` → ` -` becomes a list
+//   marker, so recomputation rather than stability is the guarantee).
+// - Nothing may be held either frame (`pendingHoldIndex === length`), so the
+//   visible text is the whole pending line and half-open constructs
+//   (emphasis, entities, math, footnote refs, raw tags, inline-pass holds)
+//   never sit at the boundary.
+// - The paragraph-normalization and forming-link transforms must both be pure
+//   extensions: `stripParagraphIndent` / `revealFormingLink` of the new line
+//   must equal the old transform plus the appended characters. This is what
+//   rejects appends that would vanish into a dropped `](url…` tail.
+// - Extended autolinks are the one construct made of inert characters
+//   (letters + `.`): a word that contains `@`, `www.` or `://` could absorb
+//   previously-plain text retroactively (`a@b.` + `c` → mailto anchor), so
+//   the region an append may have touched — from the last whitespace of the
+//   OLD revealed text — must be free of all three.
+// - The previous render must have ended in top-level plain text: the target
+//   element's last child is a text node whose data ends with the trailing
+//   inert run of the old revealed text. This rejects frames where the tail
+//   was consumed by an element (autolink, emphasis, raw passthrough tag) or
+//   rewritten (stripped `&nbsp` prefix), where an append could not land where
+//   a fresh render would put it.
+// - Any `<` in the revealed text disables arming: rawtext/RCDATA elements
+//   (`<plaintext>`, `<xmp>`, `<textarea>`, …) flip the HTML parser state for
+//   all text after them, so the sanitizer can strip appended characters
+//   together with the element even though the pending DOM ends in a text node
+//   (found by differential fuzzing under the passthrough policy).
+// - Registered inline passes have arbitrary grammars, so their presence
+//   disables the fast path entirely.
+// ---------------------------------------------------------------------------
+
+/**
+ * Characters that cannot affect any inline rendering decision. ASCII-only on
+ * purpose: non-ASCII (CJK punctuation classes, emoji, combining marks,
+ * surrogate halves split across deltas) always takes the full render.
+ */
+const PENDING_FAST_PATH_INERT_RE = /^[0-9A-Za-z !?.,;'"-]+$/
+
+/** Trailing run of fast-path-inert characters (possibly the whole string). */
+function trailingInertRun(s: string): string {
+  let i = s.length
+  while (i > 0 && PENDING_FAST_PATH_INERT_RE.test(s[i - 1] ?? '')) i--
+  return s.slice(i)
+}
+
+/** Index of the last space/tab in a single-line string, or -1. */
+function lastWhitespaceIndex(s: string): number {
+  return Math.max(s.lastIndexOf(' '), s.lastIndexOf('\t'))
+}
+
+/**
+ * The extended-autolink absorption guard: a word containing `@`, `www.` or
+ * `://` can retroactively swallow neighboring plain text into an `<a>` once
+ * one more inert character arrives, so no fast-path append may touch one.
+ */
+function hasAutolinkAbsorptionRisk(region: string): boolean {
+  const lower = region.toLowerCase()
+  return lower.includes('@') || lower.includes('://') || lower.includes('www.')
+}
+
+interface PendingFastPathState {
+  /** The pending source text the DOM currently reflects. */
+  pending: string
+  /** `stripParagraphIndent(pending)` at the last sync. */
+  stripped: string
+  /** `revealFormingLink(stripped)` — the text the inline renderer actually saw. */
+  revealed: string
+  /** Element hosting the rendered pending inline HTML (`<p>` or continuation span). */
+  el: Element
+  /** The trailing text node appended characters land in. */
+  text: Text
+  /** Expected `text.data` — a mismatch means something else touched the DOM. */
+  textData: string
+  /** Whether the pending renders as a paragraph-continuation span. */
+  paragraphContinuation: boolean
+  openListItemFirstLine: string | undefined
+}
+
+/**
+ * Capture fast-path state after a full pending sync, or null when the frame
+ * does not qualify. Cheap rejections run first: the extra `pendingHoldIndex`
+ * scan only happens for single-line plain-prose tails ending in inert text.
+ */
+function armPendingFastPath(
+  completedEl: HTMLElement,
+  split: StreamingSplit,
+  paragraphContinuation: boolean,
+): PendingFastPathState | null {
+  const { pending, openListItemFirstLine } = split
+  if (!PENDING_FAST_PATH_INERT_RE.test(pending[pending.length - 1] ?? '')) return null
+  if (pending.includes('\n')) return null
+  if (getInlinePasses().length > 0) return null
+  if (!isPlainParagraphPendingLine(pending, openListItemFirstLine)) return null
+  if (pendingHoldIndex(pending) !== pending.length) return null
+  const stripped = stripParagraphIndent(pending)
+  const revealed = revealFormingLink(stripped)
+  // Any `<` disables the fast path outright: HTML rawtext/RCDATA elements
+  // (`<plaintext>`, `<xmp>`, `<textarea>`, …) flip the parser state for
+  // everything AFTER them, so the sanitizer can strip appended trailing text
+  // together with the element — the source tail no longer corresponds to the
+  // DOM's trailing text node. Appends can never introduce `<`/`>` (non-inert),
+  // so this one arm-time check covers every later fast frame.
+  if (revealed.includes('<')) return null
+  const inertTail = trailingInertRun(revealed)
+  if (inertTail === '') return null
+  if (hasAutolinkAbsorptionRisk(revealed.slice(lastWhitespaceIndex(revealed) + 1))) return null
+
+  let el: Element | null = null
+  if (paragraphContinuation) {
+    const host = findTrailingParagraphHost(completedEl)
+    if (host) el = firstDirectChild(host, null, PARAGRAPH_CONTINUATION_CLASS)
+  }
+  if (!el) {
+    // Standalone pending paragraph block — always the last direct child.
+    const last = completedEl.lastElementChild
+    if (
+      last &&
+      last.tagName === 'P' &&
+      last.classList.contains(BLOCK_PENDING_CLASS) &&
+      last.classList.contains('stream-pending-paragraph')
+    ) {
+      el = last
+    }
+  }
+  if (!el) return null
+
+  const text = el.lastChild
+  if (!text || text.nodeType !== 3 /* TEXT_NODE */) return null
+  const textData = (text as Text).data
+  if (!textData.endsWith(inertTail)) return null
+  return {
+    pending,
+    stripped,
+    revealed,
+    el,
+    text: text as Text,
+    textData,
+    paragraphContinuation,
+    openListItemFirstLine,
+  }
+}
+
+/**
+ * Handle a pending-only frame by extending the previous frame's DOM in place.
+ * Returns true when the frame was handled (state updated); false demands the
+ * full re-render. Caller guarantees: no commit this frame, no forming
+ * construct, pending not in a table.
+ */
+function tryPendingFastPath(
+  st: PendingFastPathState,
+  split: StreamingSplit,
+  completedEl: HTMLElement,
+  paragraphContinuation: boolean,
+): boolean {
+  const { pending, openListItemFirstLine } = split
+  if (openListItemFirstLine !== st.openListItemFirstLine) return false
+  if (paragraphContinuation !== st.paragraphContinuation) return false
+  if (!pending.startsWith(st.pending)) return false
+  // DOM integrity: the node this state points at must still be exactly what
+  // the last frame left behind, or the append would land in the wrong place
+  // (host scripts may mutate the pending element between updates).
+  if (!completedEl.contains(st.el)) return false
+  if (st.el.lastChild !== st.text || st.text.data !== st.textData) return false
+  const appended = pending.slice(st.pending.length)
+  // Byte-identical frame: the DOM already reflects this exact pending text.
+  if (appended === '') return true
+  if (!PENDING_FAST_PATH_INERT_RE.test(appended)) return false
+  if (getInlinePasses().length > 0) return false
+  if (!isPlainParagraphPendingLine(pending, openListItemFirstLine)) return false
+  if (pendingHoldIndex(pending) !== pending.length) return false
+  const stripped = stripParagraphIndent(pending)
+  if (stripped !== st.stripped + appended) return false
+  const revealed = revealFormingLink(stripped)
+  if (revealed !== st.revealed + appended) return false
+  if (hasAutolinkAbsorptionRisk(revealed.slice(lastWhitespaceIndex(st.revealed) + 1))) {
+    return false
+  }
+
+  st.text.data = st.textData + appended
+  st.pending = pending
+  st.stripped = stripped
+  st.revealed = revealed
+  st.textData = st.textData + appended
+  return true
 }
 
 /**
@@ -697,7 +906,51 @@ export class StreamingMarkdownRenderer {
    * table walk). Null whenever no pending row is attached.
    */
   private pendingRowTable: HTMLTableElement | null = null
+  /**
+   * State for the pending-line plain-text fast path (see the block comment
+   * above {@link armPendingFastPath}); null whenever the last frame was not a
+   * qualifying plain-prose pending sync.
+   */
+  private pendingFast: PendingFastPathState | null = null
+  /**
+   * Diagnostic: pending-only frames handled by the fast path (a direct text
+   * append, or a byte-identical no-op) instead of a full inline re-render.
+   * Mirrors `FrozenTailRenderer.renderedChars` as an observable for tests.
+   */
+  pendingFastPathHits = 0
   private readonly frozenTail = new FrozenTailRenderer()
+
+  /**
+   * Timing-free work-shape counters, summed across this renderer's scanners
+   * and commit path (ADR 0004 Phase 3). These are what the long-document
+   * doubling guards assert on: totals that must stay ~O(new bytes) over an
+   * append-only stream (`scannedChars`, `suffixTokensScanned`, `renderedChars`,
+   * `parsedChars`), and the rewrite-guard comparison count (`prefixChecks`),
+   * which must stay ~one per scanner call — a second O(prefix) memcmp per
+   * update was a measured super-linear term on multi-hundred-kB streams.
+   * @experimental Diagnostics for tests/benchmarks, not a stable API (#147).
+   */
+  diagnostics(): {
+    scannedChars: number
+    suffixTokensScanned: number
+    prefixChecks: number
+    prefixBytesCompared: number
+    renderedChars: number
+    parsedChars: number
+    pendingFastPathHits: number
+  } {
+    return {
+      scannedChars: this.contentScanner.scannedChars + this.completeScanner.scannedChars,
+      suffixTokensScanned:
+        this.contentScanner.suffixTokensScanned + this.completeScanner.suffixTokensScanned,
+      prefixChecks: this.contentScanner.prefixChecks + this.completeScanner.prefixChecks,
+      prefixBytesCompared:
+        this.contentScanner.prefixBytesCompared + this.completeScanner.prefixBytesCompared,
+      renderedChars: this.frozenTail.renderedChars,
+      parsedChars: this.frozenTail.parsedChars,
+      pendingFastPathHits: this.pendingFastPathHits,
+    }
+  }
   // Incremental scanners (#30): re-tokenize / re-scan only past the last safe
   // boundary instead of the whole string every update. One per source stream —
   // the raw content and the committed prefix advance differently.
@@ -762,6 +1015,9 @@ export class StreamingMarkdownRenderer {
       if (options.transformSvg) diagramOptions.transformSvg = options.transformSvg
       diagrams = await hydratePendingDiagrams(this.host, diagramOptions)
     }
+    // Hydration rewrites scaffold elements in place — an out-of-band mutation
+    // the frozen-tail DOM memo must not trust across (ADR 0004 Phase 2).
+    if (math > 0 || diagrams > 0) this.frozenTail.invalidateDomMemo()
     return { math, diagrams }
   }
 
@@ -771,12 +1027,34 @@ export class StreamingMarkdownRenderer {
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
 
     if (complete !== this.lastComplete) {
-      // Tokenize `complete` once per COMMIT — incrementally (#30) — and cache
-      // on the instance so pending-only frames (the vast majority) never
-      // re-scan at all (#21). When the split committed everything, `blocks`
-      // already is `tokenizeBlocks(complete)`; still feed the scanner so its
-      // link-ref cache and safe boundary advance with it.
-      this.committedTokens = this.completeScanner.tokenize(complete)
+      // Sweep the pending-tail artifacts attached since the last commit — a
+      // pending block element, a pending `<li>` (and its wrapper) inside the
+      // trailing list, a continuation span inside the trailing `<p>`/open
+      // `<li>`, the pending table row — BEFORE the commit morphs run. The
+      // morphs used to absorb them as ordinary diff noise; the frozen-tail
+      // DOM memos (ADR 0004 Phase 2) instead require the committed subtree to
+      // be exactly what the last commit left, so remove them up front (they
+      // are rebuilt from `pending` after the commit either way — at most one
+      // kind exists at a time, each sync clears the others). O(tail), and
+      // byte-equivalent to the old morph-side removal.
+      clearBlockPendingDom(completedEl, [
+        'continuation',
+        'paragraph-continuation',
+        'list-items',
+        'direct-blocks',
+      ])
+      if (this.pendingRowTable) {
+        removePendingTableRow(this.pendingRowTable)
+        this.pendingRowTable = null
+      }
+      // Tokenize `complete` once per COMMIT — incrementally (#30), consuming
+      // the full ScanAdvance (ADR 0004 Phase 2): the sealed-event stream's
+      // append-only verification (`reset`/`verifiedUpTo`) replaces the commit
+      // path's own O(prefix) byte re-check, and the sealed definition deltas
+      // already feed the cached maps below. Cache the tokens on the instance
+      // so pending-only frames (the vast majority) never re-scan at all (#21).
+      const advance = this.completeScanner.advance(complete)
+      this.committedTokens = advance.tokens
       this.committedHasPipe = complete.includes('|')
       // Freeze the settled prefix and re-render only the tail group (#21). Blocks
       // that can never change again keep their node identity permanently; the
@@ -788,8 +1066,12 @@ export class StreamingMarkdownRenderer {
         this.committedTokens,
         this.completeScanner.linkRefs(complete),
         this.completeScanner.footnoteDefs(complete),
+        advance,
       )
       this.lastComplete = complete
+      // A commit restructures the committed subtree, so the fast-path node
+      // bookkeeping (and its "no prior decision can change" premise) is void.
+      this.pendingFast = null
     }
 
     // Inside a still-forming `<details>`: its committed children already render
@@ -801,6 +1083,7 @@ export class StreamingMarkdownRenderer {
       formingEl.hidden = true
       clearBlockPendingDom(completedEl, ['continuation', 'paragraph-continuation', 'direct-blocks'])
       syncInlinePendingDom(pendingEl, '', false)
+      this.pendingFast = null
       return
     }
 
@@ -832,16 +1115,38 @@ export class StreamingMarkdownRenderer {
     }
 
     const formingActive = fenceSource !== null || mathSource !== null || tableSource !== null
-    const { pendingInner, pendingVisible } = renderPendingTail(
-      split,
-      complete,
-      formingActive,
-      completeTokensForPending,
-    )
+    const pendingInTable = pendingLineBelongsInTable(complete, pending, completeTokensForPending)
+
+    // Plain-text fast path: extend the previous frame's pending text node in
+    // place when the delta provably changes nothing else (see the invariant
+    // block above armPendingFastPath). Everything up to here — forming DOM
+    // sync/cleanup, committed table-row sync — already ran for this frame.
+    if (
+      !formingActive &&
+      !pendingInTable &&
+      this.pendingFast &&
+      tryPendingFastPath(
+        this.pendingFast,
+        split,
+        completedEl,
+        isParagraphContinuationPending(split),
+      )
+    ) {
+      this.pendingFastPathHits++
+      return
+    }
+    this.pendingFast = null
+
+    const { pendingInner, pendingVisible } = renderPendingTail(split, formingActive, pendingInTable)
 
     if (pendingVisible && isBlockLevelPending(pending, openListItemFirstLine)) {
       syncBlockPendingDom(completedEl, split, pendingInner, true)
       syncInlinePendingDom(pendingEl, '', false)
+      this.pendingFast = armPendingFastPath(
+        completedEl,
+        split,
+        isParagraphContinuationPending(split),
+      )
     } else {
       // Include `list-items`: when a pending list tail becomes fully held on a
       // later frame (`- ~~` → `- ~~[`, the tildes now held), the pending `<li>`
@@ -934,6 +1239,7 @@ export class StreamingMarkdownRenderer {
     this.lastComplete = ''
     this.committedTokens = []
     this.committedHasPipe = false
+    this.pendingFast = null
     // The committed subtree was just rebuilt, so any frozen bookkeeping now
     // dangles against a fresh element (gap D) — start it over.
     this.frozenTail.reset()
