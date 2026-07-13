@@ -518,7 +518,7 @@ each harness pins a *second* baseline under the shipping `passthrough` default
 (`conformance-baseline-passthrough.json`, `gfm-conformance-baseline-passthrough.json`),
 regenerated with `UPDATE_COMMONMARK_PASSTHROUGH_BASELINE=1` /
 `UPDATE_GFM_PASSTHROUGH_BASELINE=1`. Passthrough passes a few more of the spec
-examples (CommonMark **583**/652, GFM **591**/672 vs escape's 579 / 587) — raw HTML
+examples (CommonMark **583**/652, GFM **593**/672 vs escape's 579 / 589) — raw HTML
 flows to the sink instead of being escaped, so several Raw-HTML / HTML-block examples
 now match the spec verbatim while **5** escape-mode-only shapes (inline raw-HTML
 examples #619–624 in CommonMark, #638–643 in GFM, whose escaped output happens to
