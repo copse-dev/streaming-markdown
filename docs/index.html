@@ -881,13 +881,25 @@
        swaps in SVG; the light card keeps mermaid's default theme readable on
        this dark page. */
     /* Reserve height up front so hydrating the pending source into an SVG
-       doesn't shove the content below it (and the scroll position) around. */
+       doesn't shove the content below it (and the scroll position) around.
+       `justify-content: center` places the *rendered* SVG in that reserved box;
+       the pending source overrides it to flex-start below. */
     .compare-panel-body .mermaid-diagram {
       margin: 0.5rem 0;
       min-height: 180px;
       display: flex;
       flex-direction: column;
       justify-content: center;
+    }
+
+    /* Anchor the still-streaming source to the TOP of the reserved box. Centered
+       (the base rule), a growing `<pre>` expands from the middle outward, so its
+       top edge — and every line already shown — drifts up a notch on each token
+       as the empty gap above is consumed. Top-aligned, new lines extend downward
+       into the reserved space like every other streaming block, so committed
+       lines never move. Centering returns for the SVG once `--pending` drops. */
+    .compare-panel-body .mermaid-diagram--pending {
+      justify-content: flex-start;
     }
 
     /* While pending, the escaped source wears the same pending chrome as every
