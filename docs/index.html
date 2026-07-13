@@ -194,16 +194,23 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      flex-wrap: wrap;
       padding: 0.6rem 1rem;
       background: var(--surface2);
       border-bottom: 1px solid var(--border);
-      gap: 1rem;
+      gap: 0.5rem 1rem;
     }
 
     .hero-demo-title {
       font-size: 0.8rem;
       color: var(--text-muted);
       font-family: 'SF Mono', 'Fira Code', monospace;
+      min-width: 0;
+    }
+
+    /* On narrow screens drop the noisiest chip so the bar never overflows. */
+    @media (max-width: 620px) {
+      #hero-updates { display: none; }
     }
 
     .hero-demo-meta {
@@ -863,7 +870,15 @@
        inert scaffolding shows the escaped source in a normal <pre>. Hydration
        swaps in SVG; the light card keeps mermaid's default theme readable on
        this dark page. */
-    .compare-panel-body .mermaid-diagram { margin: 0.5rem 0; }
+    /* Reserve height up front so hydrating the pending source into an SVG
+       doesn't shove the content below it (and the scroll position) around. */
+    .compare-panel-body .mermaid-diagram {
+      margin: 0.5rem 0;
+      min-height: 180px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
 
     .compare-panel-body .mermaid-diagram--rendered {
       background: #f6f8fa;
@@ -2049,21 +2064,46 @@ const HERO_START_CHUNK = 512;
 const HERO_MIN_CHUNK = 128;
 const HERO_MAX_CHUNK = 4096;
 
+// Collect every footnote *definition* to the very end of the transcript,
+// leaving the inline references in place. Concatenated presets would otherwise
+// each drop their definitions mid-document, so the footnotes section would
+// render above the still-streaming pending line. Pulled to the bottom, it
+// renders once — only when the stream finally reaches it, exactly like a real
+// single model reply.
+function footnotesAtEnd(md) {
+  const defs = [];
+  const body = md
+    .replace(/^\[\^[^\]]+\]:.*$/gm, (line) => { defs.push(line.trim()); return ''; })
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
+  // Trailing newline so the final footnote definition (the last line) actually
+  // seals — an unterminated last line stays a pending block and never commits.
+  return defs.length ? `${body}\n\n${defs.join('\n')}\n` : md;
+}
+
 // Default mode streams a compact, feature-rich transcript (footnotes, one
 // mermaid diagram, KaTeX) — short enough to finish in a few seconds at LLM
 // pace, then settle and hydrate.
-const HERO_DOC_NORMAL = [PRESETS.mixed, PRESETS.diagrams, PRESETS.math, PRESETS.notes].join('\n\n');
+const HERO_DOC_NORMAL = footnotesAtEnd(
+  [PRESETS.mixed, PRESETS.diagrams, PRESETS.math, PRESETS.notes].join('\n\n'),
+);
 
 // Full-speed mode streams a deliberately long transcript so the flat-out
-// reveal stays on screen for a couple of seconds instead of finishing in a
-// single frame. The feature-rich blocks appear once up top, then footnote-free
-// blocks repeat to add length without colliding on duplicate footnote ids.
+// reveal stays on screen for a couple of seconds instead of finishing in one
+// frame. The feature-rich blocks (incl. every footnote reference) appear once
+// up top; footnote-free blocks then repeat to add length without colliding on
+// duplicate footnote ids. Definitions still collect at the very bottom.
 const HERO_DOC_FULL = (() => {
-  const body = [PRESETS.basic, PRESETS.table, PRESETS.code, PRESETS.lists, PRESETS.failures].join('\n\n');
-  let doc = HERO_DOC_NORMAL;
+  const showcase = [PRESETS.mixed, PRESETS.diagrams, PRESETS.math, PRESETS.notes, PRESETS.failures].join('\n\n');
+  const body = [PRESETS.basic, PRESETS.table, PRESETS.code, PRESETS.lists].join('\n\n');
+  let doc = showcase;
   for (let i = 1; i <= 16; i++) doc += `\n\n---\n\n## Streamed section ${i}\n\n` + body;
-  return doc;
+  return footnotesAtEnd(doc);
 })();
+
+// How long the settled transcript stays up before the stream replays, giving
+// the reader time to scroll back through it.
+const HERO_REPLAY_PAUSE_MS = 8000;
 
 // ── State ──────────────────────────────────────────────────────────────────
 let heroRenderer = null;
@@ -2076,6 +2116,7 @@ let heroText = '';
 let heroStreaming = false;
 let heroChunk = 0;         // chars committed per frame (full-speed); adapts to the machine
 let heroFullSpeed = false; // stream flat-out vs at a typical LLM pace
+let heroSmoother = null;   // input smoother driving the default (LLM-pace) reveal
 
 let compareTimer = null;
 let comparePos = 0;
@@ -2102,9 +2143,19 @@ function heroStats(cps) {
   heroUpdatesEl.textContent = `${heroUpdates} updates`;
 }
 
+// Tear down whatever is currently driving the stream (frame loop, smoother,
+// pending replay) without touching the rendered content.
+function heroStop() {
+  if (heroTimer) { clearTimeout(heroTimer); heroTimer = null; }
+  if (heroRaf) { cancelAnimationFrame(heroRaf); heroRaf = null; }
+  if (heroSmoother) { heroSmoother.dispose(); heroSmoother = null; }
+  heroStreaming = false;
+  heroOutput.classList.remove('is-streaming');
+  heroDot.classList.remove('active');
+}
+
 function heroReset() {
-  if (heroTimer) clearTimeout(heroTimer);
-  if (heroRaf) cancelAnimationFrame(heroRaf);
+  heroStop();
   heroOutput.innerHTML = '';
   heroOutput.classList.remove('no-settle');
   heroOutput.classList.add('is-streaming');
@@ -2119,7 +2170,9 @@ function heroReset() {
 }
 
 function heroFinish() {
+  if (!heroStreaming) return; // the smoother may fire one more update after the last
   heroStreaming = false;
+  if (heroSmoother) { heroSmoother.dispose(); heroSmoother = null; }
   heroOutput.classList.remove('is-streaming');
   heroDot.classList.remove('active');
   // Headline the sustained average over the whole run — the honest end-to-end
@@ -2130,49 +2183,38 @@ function heroFinish() {
   // pending math for rendered KaTeX.
   hydrateDiagrams(heroOutput);
   hydrateMath(heroOutput);
-  // restart after pause
-  heroTimer = setTimeout(() => startHero(), 3500);
+  // Hold the settled transcript up so the reader can scroll back, then replay.
+  heroTimer = setTimeout(() => startHero(), HERO_REPLAY_PAUSE_MS);
 }
 
-// One frame of the stream. In full-speed mode each commit is as large as ~9ms
-// of render allows; otherwise the position is clocked to a fixed LLM pace.
-// `now` is the frame timestamp from requestAnimationFrame.
-function heroStep(now) {
-  if (!heroStreaming) return;
-
-  const renderStart = performance.now();
-  if (heroFullSpeed) {
-    heroPos = Math.min(heroPos + heroChunk, heroText.length);
-  } else {
-    // Time-based reveal: position tracks elapsed × the typical LLM rate, so the
-    // pace is steady and machine-independent — it reads like a real chat.
-    const elapsedSec = (now - heroStart) / 1000;
-    heroPos = Math.min(heroText.length, Math.ceil(elapsedSec * LLM_BASELINE_CPS));
-  }
-  heroRenderer.update(heroText.slice(0, heroPos));
-  // Keep the newest content in view as the stream grows. The pane is its own
-  // scroll container (overflow-y:auto), so this never moves the page.
+// Records one revealed frame and reports the measured (real) throughput.
+function heroFrame() {
   followBottom(heroOutput);
-  const renderMs = performance.now() - renderStart;
   heroUpdates++;
+  // Cumulative average (chars ÷ elapsed) — the true end-to-end rate, smooth by
+  // construction so the readout stays legible. Skip the first ~150ms where a
+  // tiny denominator would swing wildly.
+  const elapsed = (performance.now() - heroStart) / 1000;
+  if (elapsed > 0.15) heroStats(Math.round(heroPos / elapsed));
+}
 
-  // Full speed only: ride the frame budget — grow the next commit when we
-  // rendered well under budget, back off when a frame ran long. This converges
-  // on the biggest slice the machine can paint per frame.
-  if (heroFullSpeed && renderMs > 0.05) {
+// Full speed: one commit per animation frame, each as large as ~9ms of render
+// allows, so the hero paints as fast as this machine can absorb.
+function heroStep() {
+  if (!heroStreaming) return;
+  const renderStart = performance.now();
+  heroPos = Math.min(heroPos + heroChunk, heroText.length);
+  heroRenderer.update(heroText.slice(0, heroPos));
+  const renderMs = performance.now() - renderStart;
+  heroFrame();
+  // Ride the frame budget: grow the next commit when we rendered well under
+  // budget, back off when a frame ran long.
+  if (renderMs > 0.05) {
     heroChunk = Math.max(
       HERO_MIN_CHUNK,
       Math.min(HERO_MAX_CHUNK, Math.round(heroChunk * (HERO_FRAME_BUDGET_MS / renderMs))),
     );
   }
-
-  // Live readout is the cumulative average (chars ÷ elapsed) — the true
-  // end-to-end throughput, and smooth by construction so the number stays
-  // legible instead of twitching with each frame. Skip the first ~150ms where
-  // a tiny denominator would swing wildly.
-  const elapsed = (performance.now() - heroStart) / 1000;
-  if (elapsed > 0.15) heroStats(Math.round(heroPos / elapsed));
-
   if (heroPos >= heroText.length) { heroFinish(); return; }
   heroRaf = requestAnimationFrame(heroStep);
 }
@@ -2184,16 +2226,46 @@ function startHero() {
   // Kick the lazy library loads once up front rather than re-scanning the
   // growing partial every frame.
   detectExtras(heroText);
-  heroRaf = requestAnimationFrame(heroStep);
+  if (heroFullSpeed) {
+    heroRaf = requestAnimationFrame(heroStep);
+    return;
+  }
+  // Default pace runs the transcript through the library's own input smoother
+  // at a typical LLM rate — a genuine rAF-driven reveal (not a synthetic
+  // position clock) capped at ~100 tok/s, with smoothing on so the cadence
+  // stays even.
+  heroSmoother = createInputSmoother({
+    update: (t) => {
+      heroPos = t.length;
+      heroRenderer.update(t);
+      heroFrame();
+      if (heroPos >= heroText.length) heroFinish();
+    },
+    charsPerSecond: LLM_BASELINE_CPS,
+  });
+  heroSmoother.push(heroText);
 }
 
 // Flipping the toggle restarts the stream in the chosen mode straight away.
 heroFullSpeedCheck.addEventListener('change', () => {
-  if (heroTimer) clearTimeout(heroTimer);
-  startHero();
+  if (heroInView) startHero();
 });
 
-startHero();
+// Run the hero only while it's on screen: (re)start it when it enters view —
+// first load, scrolling back up to it, or returning to the tab — and stop it
+// when it scrolls away so nothing streams to an unwatched pane.
+let heroInView = false;
+new IntersectionObserver((entries) => {
+  const inView = entries[entries.length - 1].isIntersecting;
+  if (inView && !heroInView) startHero();
+  else if (!inView && heroInView) heroStop();
+  heroInView = inView;
+}, { threshold: 0.35 }).observe(document.querySelector('.hero-demo'));
+
+// Returning to the tab restarts from the top when the hero is on screen.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && heroInView) startHero();
+});
 
 // ── Comparison ─────────────────────────────────────────────────────────────
 const compareInput = document.getElementById('compare-input');
