@@ -2,6 +2,7 @@
  * Streaming split driven by block + inline tokenizer state (#475).
  */
 import {
+  lastLinkRefDefStart,
   streamingHoldStart,
   TABLE_SEP_RE,
   tokenizeBlocks,
@@ -99,6 +100,25 @@ function splitOpenListItem(block: BlockToken, content: string): StreamingSplit {
   })
 }
 
+/**
+ * Split an OPEN blank-free run of link reference definitions (ADR 0004
+ * Phase 2): commit the leading, already-settled definitions and hold only the
+ * run's final definition — the one part later input can still change (a
+ * next-line title/destination continuation, or its still-streaming last line).
+ * Holding the whole run instead made `complete` retreat past every committed
+ * definition each time a new definition line started streaming and return when
+ * it terminated — flipping the committed link-reference map back and forth and
+ * degrading definition-heavy documents (keepachangelog shape) to a bounded
+ * full-morph fallback per flip.
+ */
+function splitOpenLinkRefRun(block: BlockToken, content: string): StreamingSplit {
+  const cut = block.start + lastLinkRefDefStart(content.slice(block.start, block.end))
+  return {
+    complete: content.slice(0, cut),
+    pending: content.slice(cut),
+  }
+}
+
 function splitOpenTable(block: BlockToken, content: string): StreamingSplit {
   const openText = content.slice(block.start)
   const lines = openText.split('\n')
@@ -173,6 +193,10 @@ function splitForStreamingCore(content: string, blocks: BlockToken[]): Streaming
 
   if (firstOpen.kind === 'table') {
     return splitOpenTable(firstOpen, content)
+  }
+
+  if (firstOpen.kind === 'link_ref_def') {
+    return splitOpenLinkRefRun(firstOpen, content)
   }
 
   if (firstOpen.kind === 'blockquote') {

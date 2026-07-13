@@ -525,3 +525,69 @@ if (meanRealGrowth >= 3.0) {
       `An O(prefix)-per-commit committed-re-render regression is the likely cause.`,
   )
 }
+
+// Work-shape guard (ADR 0004 Phase 3): the wall-clock doubling guards above are
+// generous (< 3×) because jsdom timing is noisy; these op-count assertions are
+// EXACT, so a shape regression fails deterministically even when noise hides it.
+// Stream the corpus doubling series again reading the renderer's timing-free
+// diagnostics: per-update scan/render/parse work must stay O(new bytes)
+// (~2×/doubling), and the O(prefix) rewrite-guard memcmp must run at most once
+// per scanner call — its count is the tripwire for the measured super-linear
+// long-document terms (a second memcmp per update, or per-update token-array
+// copying, both found by Chromium doubling probes at 200-400 kB).
+console.log('\nwork-shape scaling — timing-free diagnostics over the corpus doubling series (ADR 0004 Phase 3)\n')
+const shapeCols = [pad('×corpus', 8), padLeft('updates', 9), padLeft('scanned', 10), padLeft('sufTokens', 10), padLeft('rendered', 10), padLeft('parsed', 10), padLeft('pfxChecks', 10)]
+console.log(shapeCols.join('  '))
+console.log('-'.repeat(shapeCols.join('  ').length))
+interface ShapePoint {
+  updates: number
+  diag: ReturnType<StreamingMarkdownRenderer['diagnostics']>
+}
+const shapePoints: ShapePoint[] = []
+for (const reps of [1, 2, 4]) {
+  const text = Array.from({ length: reps }, () => corpusUnit).join('\n\n')
+  const host = document.createElement('div')
+  const renderer = new StreamingMarkdownRenderer(host)
+  const cuts = chunkBoundaries(text.length, 64)
+  for (const cut of cuts) renderer.update(text.slice(0, cut))
+  const diag = renderer.diagnostics()
+  shapePoints.push({ updates: cuts.length, diag })
+  console.log(
+    [
+      pad(`${String(reps)}×`, 8),
+      padLeft(String(cuts.length), 9),
+      padLeft(String(diag.scannedChars), 10),
+      padLeft(String(diag.suffixTokensScanned), 10),
+      padLeft(String(diag.renderedChars), 10),
+      padLeft(String(diag.parsedChars), 10),
+      padLeft(String(diag.prefixChecks), 10),
+    ].join('  '),
+  )
+}
+const LINEAR_KEYS = ['scannedChars', 'suffixTokensScanned', 'renderedChars', 'parsedChars'] as const
+for (let i = 1; i < shapePoints.length; i++) {
+  const prev = shapePoints[i - 1]
+  const cur = shapePoints[i]
+  if (!prev || !cur) continue
+  for (const key of LINEAR_KEYS) {
+    const factor: number = cur.diag[key] / Math.max(1, prev.diag[key])
+    if (factor >= 2.6) {
+      throw new Error(
+        `work-shape: ${key} grew ${factor.toFixed(2)}× on a 2× larger corpus ` +
+          `(${String(prev.diag[key])} → ${String(cur.diag[key])}) — per-update work is no longer O(new bytes) (ADR 0004 Phase 3).`,
+      )
+    }
+  }
+}
+for (const point of shapePoints) {
+  // One advance on the content scanner per update + one on the complete
+  // scanner per commit (commits ≤ updates), and NOTHING else — the definition
+  // views must ride the advance's verification via their identity fast path.
+  if (point.diag.prefixChecks > 2 * point.updates + 4) {
+    throw new Error(
+      `work-shape: ${String(point.diag.prefixChecks)} rewrite-guard comparisons for ` +
+        `${String(point.updates)} updates — a per-update caller is re-running the O(prefix) memcmp (ADR 0004 Phase 3).`,
+    )
+  }
+}
+console.log('\nwork-shape growth per doubling within bounds (linear counters < 2.6×; prefix checks ≤ 2/update)')

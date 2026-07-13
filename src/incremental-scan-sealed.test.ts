@@ -36,6 +36,15 @@ function replayAsserting(doc: string, ctx: string): void {
     sealedAcc.push(...step.sealed)
     assert.deepEqual(sealedAcc, step.tokens.slice(0, step.formingFrom), `sealed prefix ${where}`)
 
+    // The verified prefix is exactly the sealed region's source extent — the
+    // append-only promise consumers (the commit path's prefix trust, ADR 0004
+    // Phase 2) ride on.
+    assert.equal(
+      step.verifiedUpTo,
+      step.tokens[step.formingFrom - 1]?.end ?? 0,
+      `verifiedUpTo ${where}`,
+    )
+
     // Definition views equal the full collectors at every prefix.
     assert.deepEqual(
       new Map(scanner.footnoteDefs(source)),

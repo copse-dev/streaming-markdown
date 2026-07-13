@@ -31,6 +31,8 @@
  * Flags: --iters N (3) --warmup N (1) --chunk N (5) --max-updates N (200)
  *        --parity (exact Incremark methodology: 5-char chunks, no update cap)
  *        --fixture REGEX --only REGEX --skip-bundle --update-docs --no-isolate
+ *        (--update-docs with --parity fills the bench-results-parity marker
+ *        section in docs/BENCHMARKS.md; without it, the main bench-results one)
  *
  * Numbers are machine-dependent; compare libraries within one run only.
  */
@@ -1185,7 +1187,10 @@ const reportLines: string[] = []
 reportLines.push(
   `_Last run: ${new Date().toISOString().slice(0, 10)} — node ${process.version}, ${cpus()[0]?.model ?? 'unknown cpu'}, ` +
     `chunk=${String(args.chunk)}${args.parity ? ' (parity mode, uncapped)' : `, capped at ${String(args.maxUpdates)} updates/fixture`}, ` +
-    `median of ${String(args.iters)} runs. Versions: ours ${ourVersion}, ` +
+    `median of ${String(args.iters)} runs. ` +
+    (args.fixture ? `Fixture filter: \`${args.fixture.source}\`. ` : '') +
+    (args.only ? `Contestant filter: \`${args.only.source}\`. ` : '') +
+    `Versions: ours ${ourVersion}, ` +
     contestants
       .filter((c, i, all) => all.findIndex((x) => x.version === c.version && x.name.split(' ')[0] === c.name.split(' ')[0]) === i)
       .filter((c) => !c.name.startsWith('ours'))
@@ -1197,33 +1202,48 @@ reportLines.push('')
 reportLines.push('### End-to-end: streamed chunks → live DOM (jsdom)')
 reportLines.push('')
 reportLines.push(...renderMatrix('dom', contestants, fixtures, results))
-reportLines.push('')
-reportLines.push('### Per-update latency on the long transcript (DOM tier)')
-reportLines.push('')
-reportLines.push(...renderTailLatency(contestants, 'synthetic/long-transcript', results))
-reportLines.push('')
-reportLines.push('### Output validation — did every library render the same corpus?')
-reportLines.push('')
-reportLines.push(
-  'After each contestant streams a fixture, its rendered DOM is read back and measured — so the timing table ' +
-    'above can be trusted to compare equivalent work, not reward a library for silently dropping content. Same ' +
-    'metric for every library. Word-token coverage of the visible text, per fixture (columns that track together ' +
-    'mean everyone rendered the same document):',
-)
-reportLines.push('')
-reportLines.push(...renderValidationCoverage(contestants, fixtures, results))
-reportLines.push('')
-reportLines.push(
-  'Rendered structure on the long transcript — element counts should track across libraries (the ' +
-    '`raw-html-details` fixture is exempt: ours deliberately holds the tail inside the open `<details>`, so its ' +
-    'coverage there is expected to differ — see the corpus note):',
-)
-reportLines.push('')
-reportLines.push(...renderValidationStructure(contestants, 'synthetic/long-transcript', results))
-reportLines.push('')
-reportLines.push('### Pipeline only: per-chunk parse/render work, no DOM (Incremark’s published methodology)')
-reportLines.push('')
-reportLines.push(...renderMatrix('pipeline', contestants, fixtures, results))
+// A filtered run (e.g. the parity docs section) may exercise no long
+// transcript, no validation-capable contestants, and no pipeline contestants —
+// skip those sections rather than emit orphan headings / header-only tables.
+const tailLatency = renderTailLatency(contestants, 'synthetic/long-transcript', results)
+if (tailLatency.length > 0) {
+  reportLines.push('')
+  reportLines.push('### Per-update latency on the long transcript (DOM tier)')
+  reportLines.push('')
+  reportLines.push(...tailLatency)
+}
+// A markdown table with only its two header lines carries no data rows.
+const validationCoverage = renderValidationCoverage(contestants, fixtures, results)
+if (validationCoverage.length > 2) {
+  reportLines.push('')
+  reportLines.push('### Output validation — did every library render the same corpus?')
+  reportLines.push('')
+  reportLines.push(
+    'After each contestant streams a fixture, its rendered DOM is read back and measured — so the timing table ' +
+      'above can be trusted to compare equivalent work, not reward a library for silently dropping content. Same ' +
+      'metric for every library. Word-token coverage of the visible text, per fixture (columns that track together ' +
+      'mean everyone rendered the same document):',
+  )
+  reportLines.push('')
+  reportLines.push(...validationCoverage)
+  const validationStructure = renderValidationStructure(contestants, 'synthetic/long-transcript', results)
+  if (validationStructure.length > 2) {
+    reportLines.push('')
+    reportLines.push(
+      'Rendered structure on the long transcript — element counts should track across libraries (the ' +
+        '`raw-html-details` fixture is exempt: ours deliberately holds the tail inside the open `<details>`, so its ' +
+        'coverage there is expected to differ — see the corpus note):',
+    )
+    reportLines.push('')
+    reportLines.push(...validationStructure)
+  }
+}
+if (contestants.some((c) => c.tier === 'pipeline')) {
+  reportLines.push('')
+  reportLines.push('### Pipeline only: per-chunk parse/render work, no DOM (Incremark’s published methodology)')
+  reportLines.push('')
+  reportLines.push(...renderMatrix('pipeline', contestants, fixtures, results))
+}
 if (bundleReport.bundles.length > 0) {
   reportLines.push('')
   reportLines.push('### Bundle size (esbuild, minified, browser, es2022)')
@@ -1260,8 +1280,11 @@ console.log('\nwrote results/latest.json and results/latest.md')
 
 if (args.updateDocs) {
   const docsPath = resolve(repoRoot, 'docs/BENCHMARKS.md')
-  const begin = '<!-- bench-results:begin (generated by bench/competitors — do not edit by hand) -->'
-  const end = '<!-- bench-results:end -->'
+  // A parity run measures a different methodology (uncapped 5-char chunks), so
+  // it fills its own marker section instead of clobbering the main tables.
+  const marker = args.parity ? 'bench-results-parity' : 'bench-results'
+  const begin = `<!-- ${marker}:begin (generated by bench/competitors — do not edit by hand) -->`
+  const end = `<!-- ${marker}:end -->`
   const doc = readFileSync(docsPath, 'utf8')
   const beginIdx = doc.indexOf(begin)
   const endIdx = doc.indexOf(end)
