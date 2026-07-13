@@ -59,6 +59,7 @@ import {
   renderFootnoteSectionItems,
   renderListItemsSlice,
   scanListGroup,
+  wrapFootnoteSection,
   type ListGroupSignature,
   type RenderedPart,
 } from './render-blocks.ts'
@@ -1871,8 +1872,7 @@ export class FrozenTailRenderer {
   ): void {
     const { parts, items, ctx } = this.renderFootnoteFrame(complete, tokens, linkRefs, footnoteDefs)
     const body = parts.map((p) => p.html).join('\n')
-    const section =
-      items.length > 0 ? `<section class="footnotes"><ol>${items.join('')}</ol></section>` : ''
+    const section = wrapFootnoteSection(items, ctx.idPrefix)
     const rawHtml = section === '' ? body : body === '' ? section : `${body}\n${section}`
     this.committedHasOpenDetails = hasOpenDetailsElement(rawHtml)
     const html = sanitizeRenderedMarkdown(rawHtml)

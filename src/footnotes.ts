@@ -95,6 +95,13 @@ export function parseFootnoteDefSlice(slice: string): FootnoteDefinition | null 
  */
 export interface FootnoteContext {
   readonly defs: FootnoteDefinitionMap
+  /**
+   * Per-render namespace ({@link MarkdownConfig.footnoteIdPrefix}, default `''`)
+   * spliced into every emitted footnote id/anchor so concurrent renders on one
+   * page don't collide. Captured once at context creation and carried across
+   * streaming reseats so ids stay stable as content arrives.
+   */
+  readonly idPrefix: string
   /** Normalized labels in first-reference order (drives the section). */
   readonly order: string[]
   readonly numbers: Map<string, number>
@@ -110,6 +117,7 @@ export interface FootnoteContext {
 export function createFootnoteContext(defs: FootnoteDefinitionMap): FootnoteContext {
   return {
     defs,
+    idPrefix: activeConfig().footnoteIdPrefix ?? '',
     order: [],
     numbers: new Map(),
     slugs: new Map(),
@@ -132,6 +140,7 @@ export function reseatFootnoteContext(
 ): FootnoteContext {
   return {
     defs,
+    idPrefix: from.idPrefix,
     order: [...from.order],
     numbers: new Map(from.numbers),
     slugs: new Map(from.slugs),
@@ -194,20 +203,30 @@ export function footnoteRefHtml(ctx: FootnoteContext, label: string): string | n
     ctx.order.push(key)
     slug = assignSlug(ctx, key, def.label, n)
   }
+  // The per-render namespace ({@link FootnoteContext.idPrefix}) sits right after
+  // the `fn-`/`fnref-` marker, so ids stay `fn-…`/`fnref-…` shaped (the sink id
+  // gate keys off that) while distinguishing concurrent renders on one page.
+  const nsSlug = `${ctx.idPrefix}${slug}`
   // Repeated references share the number but carry distinct ids (GitHub's
   // `fnref-label-2` shape). Ids are deduplicated against every emitted ref id:
   // a slug that was itself disambiguated to `…-2` could otherwise collide with
   // another label's repeat-reference id.
   let count = (ctx.refCounts.get(key) ?? 0) + 1
-  let refId = count === 1 ? `fnref-${slug}` : `fnref-${slug}-${String(count)}`
+  let refId = count === 1 ? `fnref-${nsSlug}` : `fnref-${nsSlug}-${String(count)}`
   while (ctx.usedRefIds.has(refId)) {
     count++
-    refId = `fnref-${slug}-${String(count)}`
+    refId = `fnref-${nsSlug}-${String(count)}`
   }
   ctx.refCounts.set(key, count)
   ctx.usedRefIds.add(refId)
   if (!ctx.firstRefIds.has(key)) ctx.firstRefIds.set(key, refId)
-  return `<sup class="footnote-ref"><a href="#fn-${slug}" id="${refId}">${String(n)}</a></sup>`
+  // `data-footnote-ref` + `aria-describedby` mirror GitHub's a11y hooks; the
+  // describedby target is this render's sr-only `<h2 id="…footnote-label">`
+  // heading, prefixed like every other id so concurrent renders don't collide.
+  return (
+    `<sup class="footnote-ref"><a href="#fn-${nsSlug}" id="${refId}"` +
+    ` data-footnote-ref aria-describedby="${ctx.idPrefix}footnote-label">${String(n)}</a></sup>`
+  )
 }
 
 /**

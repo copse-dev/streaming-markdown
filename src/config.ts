@@ -92,6 +92,23 @@ export interface MarkdownConfig {
    */
   footnotes?: boolean
   /**
+   * Per-render namespace inserted into every footnote DOM id and its matching
+   * anchor, so multiple rendered documents can coexist on one page without id
+   * collisions — smd's primary chat use case, where many messages stack on a
+   * single page. Defaults to `''`, which is **byte-identical** to prior output
+   * (`id="fn-1"` / `id="fnref-1"`); single-render consumers need not set it.
+   *
+   * With a prefix the ids become `fn-<prefix><label>` / `fnref-<prefix><label>`
+   * (and the `href` jump targets track them), so two messages that both use
+   * `[^1]` no longer both emit `id="fn-1"` and cross-link. Pass a **distinct,
+   * attribute-safe** token per rendered message (e.g. `` `${messageId}-` ``,
+   * characters in `[A-Za-z0-9_-]`). The value must be deterministic and stable
+   * across incremental updates of the same render — do NOT derive it from
+   * `Math.random()`/`Date.now()`; the id must not change as content streams in.
+   * See footnotes.ts.
+   */
+  footnoteIdPrefix?: string
+  /**
    * CommonMark link reference definitions — `[label]: /url "title"` blocks
    * resolved by `[text][label]` / `[label]` references — on by default. `false`
    * disables them: definition lines tokenize as ordinary paragraphs and

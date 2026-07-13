@@ -114,7 +114,14 @@ function parseTaskListMarker(inner: string): TaskListMarker | null {
 }
 
 function taskCheckboxHtml(checked: boolean): string {
-  return `<input type="checkbox" disabled${checked ? ' checked' : ''}>`
+  // `task-list-item-checkbox` class + `aria-label` give the checkbox an
+  // accessible name (#217), matching GitHub. Additive: read-only, no visual
+  // change, and the sink still forces `disabled` and drops non-checkbox inputs.
+  const label = checked ? 'Completed task' : 'Incomplete task'
+  return (
+    `<input type="checkbox" class="task-list-item-checkbox" disabled` +
+    `${checked ? ' checked' : ''} aria-label="${label}">`
+  )
 }
 
 interface RenderedListItem {
@@ -237,7 +244,12 @@ export function stripTaskListDecorations(html: string): string {
       return `<${tag}${cleaned}>`
     })
     .replace(/<input\b[^>]*\btype="checkbox"[^>]*>/gi, (tag) =>
-      tag.replace(/\s(disabled|checked)(?=[\s>])/gi, ' $1=""'),
+      tag
+        // Accessibility decorations the cmark-gfm spec examples don't carry
+        // (#217): the checkbox class and its `aria-label`.
+        .replace(/\sclass="task-list-item-checkbox"/gi, '')
+        .replace(/\saria-label="[^"]*"/gi, '')
+        .replace(/\s(disabled|checked)(?=[\s>])/gi, ' $1=""'),
     )
 }
 
@@ -795,9 +807,25 @@ function appendFootnoteBackref(bodyHtml: string, backref: string): string {
  * used there).
  */
 export function renderFootnoteSection(ctx: FootnoteContext, linkRefs: LinkReferenceMap): string {
-  const items = renderFootnoteSectionItems(ctx, linkRefs)
+  return wrapFootnoteSection(renderFootnoteSectionItems(ctx, linkRefs), ctx.idPrefix)
+}
+
+/**
+ * Wrap rendered footnote `<li>` items in the trailing section, or `''` when
+ * there are none. Shared by the at-rest render and the streaming footnote
+ * rebuild so both emitters produce byte-identical section markup (#110). The
+ * `data-footnotes` hook and the visually-hidden `<h2 id="…footnote-label">`
+ * (targeted by each ref's `aria-describedby`) mirror GitHub's a11y shape (#216);
+ * `idPrefix` namespaces the heading id like every other footnote id so
+ * concurrent renders on one page don't collide (default `''` — byte-identical).
+ */
+export function wrapFootnoteSection(items: string[], idPrefix = ''): string {
   if (items.length === 0) return ''
-  return `<section class="footnotes"><ol>${items.join('')}</ol></section>`
+  return (
+    '<section class="footnotes" data-footnotes>' +
+    `<h2 id="${idPrefix}footnote-label" class="sr-only">Footnotes</h2>` +
+    `<ol>${items.join('')}</ol></section>`
+  )
 }
 
 /**
@@ -821,12 +849,19 @@ export function renderFootnoteSectionItems(
     const def = key === undefined ? undefined : ctx.defs.get(key)
     const slug = key === undefined ? undefined : ctx.slugs.get(key)
     const refId = key === undefined ? undefined : ctx.firstRefIds.get(key)
+    const n = key === undefined ? undefined : ctx.numbers.get(key)
     /* c8 ignore next -- unreachable: order entries are only pushed with a
-       matching def, slug, and first ref id (footnoteRefHtml). Defensive guard. */
-    if (def === undefined || slug === undefined || refId === undefined) continue
+       matching def, slug, first ref id, and number (footnoteRefHtml). Defensive. */
+    if (def === undefined || slug === undefined || refId === undefined || n === undefined) continue
     const body = renderBlocksFromSource(def.content, linkRefs)
-    const backref = `<a href="#${refId}" class="footnote-backref">↩</a>`
-    items.push(`<li id="fn-${slug}">${appendFootnoteBackref(body, backref)}</li>`)
+    // `data-footnote-backref` + `aria-label="Back to reference N"` mirror
+    // GitHub's a11y hooks (#216); the `href`/`id` carry the render's id prefix.
+    const backref =
+      `<a href="#${refId}" class="footnote-backref" data-footnote-backref` +
+      ` aria-label="Back to reference ${String(n)}">↩</a>`
+    items.push(
+      `<li id="fn-${ctx.idPrefix}${slug}">${appendFootnoteBackref(body, backref)}</li>`,
+    )
   }
   return items
 }

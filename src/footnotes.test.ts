@@ -11,28 +11,31 @@ describe('GFM footnotes at rest (#72)', () => {
   it('renders a reference and its trailing section with a backref', () => {
     assert.equal(
       renderMarkdownUnsafe('A note[^1].\n\n[^1]: The content.'),
-      '<p>A note<sup class="footnote-ref"><a href="#fn-1" id="fnref-1">1</a></sup>.</p>\n' +
-        '<section class="footnotes"><ol>' +
-        '<li id="fn-1"><p>The content. <a href="#fnref-1" class="footnote-backref">↩</a></p></li>' +
+      '<p>A note<sup class="footnote-ref"><a href="#fn-1" id="fnref-1"' +
+        ' data-footnote-ref aria-describedby="footnote-label">1</a></sup>.</p>\n' +
+        '<section class="footnotes" data-footnotes>' +
+        '<h2 id="footnote-label" class="sr-only">Footnotes</h2><ol>' +
+        '<li id="fn-1"><p>The content. <a href="#fnref-1" class="footnote-backref"' +
+        ' data-footnote-backref aria-label="Back to reference 1">↩</a></p></li>' +
         '</ol></section>',
     )
   })
 
   it('numbers footnotes in first-reference order, not definition order', () => {
     const html = renderMarkdownUnsafe('First[^b] then[^a].\n\n[^a]: second note\n[^b]: first note')
-    assert.match(html, /<a href="#fn-b" id="fnref-b">1<\/a>/)
-    assert.match(html, /<a href="#fn-a" id="fnref-a">2<\/a>/)
+    assert.match(html, /<a href="#fn-b" id="fnref-b"[^>]*>1<\/a>/)
+    assert.match(html, /<a href="#fn-a" id="fnref-a"[^>]*>2<\/a>/)
     // Section items follow reference order: b before a.
     assert.match(html, /<li id="fn-b">[\s\S]*<li id="fn-a">/)
   })
 
   it('shares the number across repeated references with distinct ids', () => {
     const html = renderMarkdownUnsafe('One[^x] and two[^x].\n\n[^x]: shared')
-    assert.match(html, /<a href="#fn-x" id="fnref-x">1<\/a>/)
-    assert.match(html, /<a href="#fn-x" id="fnref-x-2">1<\/a>/)
+    assert.match(html, /<a href="#fn-x" id="fnref-x"[^>]*>1<\/a>/)
+    assert.match(html, /<a href="#fn-x" id="fnref-x-2"[^>]*>1<\/a>/)
     // A single item with a single backref to the first reference.
     assert.equal(html.match(/<li id="fn-x">/g)?.length, 1)
-    assert.match(html, /<a href="#fnref-x" class="footnote-backref">↩<\/a>/)
+    assert.match(html, /<a href="#fnref-x" class="footnote-backref"[^>]*>↩<\/a>/)
   })
 
   it('leaves unresolved references literal (like unresolved link refs)', () => {
@@ -48,7 +51,7 @@ describe('GFM footnotes at rest (#72)', () => {
 
   it('matches labels case-insensitively', () => {
     const html = renderMarkdownUnsafe('X[^Note].\n\n[^NOTE]: y')
-    assert.match(html, /<a href="#fn-note" id="fnref-note">1<\/a>/)
+    assert.match(html, /<a href="#fn-note" id="fnref-note"[^>]*>1<\/a>/)
     assert.match(html, /<li id="fn-note">/)
   })
 
@@ -68,7 +71,7 @@ describe('GFM footnotes at rest (#72)', () => {
   it('supports indented continuation lines and multi-paragraph content', () => {
     const html = renderMarkdownUnsafe('Ref[^m].\n\n[^m]: para one\n    still para one\n\n    para two')
     assert.match(html, /<p>para one\nstill para one<\/p>/)
-    assert.match(html, /<p>para two <a href="#fnref-m" class="footnote-backref">↩<\/a><\/p>/)
+    assert.match(html, /<p>para two <a href="#fnref-m" class="footnote-backref"[^>]*>↩<\/a><\/p>/)
   })
 
   it('supports lazy continuation of the first paragraph', () => {
@@ -78,7 +81,7 @@ describe('GFM footnotes at rest (#72)', () => {
 
   it('renders an empty definition as a bare backref item', () => {
     const html = renderMarkdownUnsafe('Ref[^e].\n\n[^e]:')
-    assert.match(html, /<li id="fn-e"><p><a href="#fnref-e" class="footnote-backref">↩<\/a><\/p><\/li>/)
+    assert.match(html, /<li id="fn-e"><p><a href="#fnref-e" class="footnote-backref"[^>]*>↩<\/a><\/p><\/li>/)
   })
 
   it('appends the backref after non-paragraph content', () => {
@@ -121,7 +124,7 @@ describe('GFM footnotes at rest (#72)', () => {
   it('resolves references inside footnote content (section grows in order)', () => {
     const html = renderMarkdownUnsafe('A[^one]\n\n[^one]: refers[^two]\n[^two]: deep')
     assert.match(html, /<li id="fn-one">[\s\S]*<li id="fn-two">/)
-    assert.match(html, /<a href="#fn-two" id="fnref-two">2<\/a>/)
+    assert.match(html, /<a href="#fn-two" id="fnref-two"[^>]*>2<\/a>/)
   })
 
   it('slugifies labels deterministically and disambiguates collisions', () => {
@@ -166,9 +169,9 @@ describe('GFM footnotes at rest (#72)', () => {
     const html = renderMarkdownUnsafe('Euler[^e] says $e^{i\\pi}=-1$ here.\n\n[^e]: the identity', {
       mathSyntax: true,
     })
-    assert.match(html, /<sup class="footnote-ref"><a href="#fn-e" id="fnref-e">1<\/a><\/sup>/)
+    assert.match(html, /<sup class="footnote-ref"><a href="#fn-e" id="fnref-e"[^>]*>1<\/a><\/sup>/)
     assert.match(html, /<span class="math-inline[^"]*">e\^\{i\\pi\}=-1<\/span>/)
-    assert.match(html, /<section class="footnotes">/)
+    assert.match(html, /<section class="footnotes"/)
   })
 
   it('math content is opaque source: [^1] inside math never becomes a footnote', () => {
@@ -200,9 +203,23 @@ describe('collectFootnoteDefinitions (#72)', () => {
 describe('footnote sanitizer surface (#72)', () => {
   it('footnote output survives sanitizeRenderedMarkdown', () => {
     const sanitized = sanitizeRenderedMarkdown(renderMarkdownUnsafe('A[^n].\n\n[^n]: body'))
-    assert.match(sanitized, /<sup class="footnote-ref"><a href="#fn-n" id="fnref-n">1<\/a><\/sup>/)
-    assert.match(sanitized, /<section class="footnotes"><ol><li id="fn-n">/)
-    assert.match(sanitized, /<a href="#fnref-n" class="footnote-backref">↩<\/a>/)
+    assert.match(sanitized, /<sup class="footnote-ref"><a href="#fn-n" id="fnref-n"[^>]*>1<\/a><\/sup>/)
+    assert.match(sanitized, /<section class="footnotes"[^>]*>/)
+    assert.match(sanitized, /<li id="fn-n">/)
+    assert.match(sanitized, /<a href="#fnref-n" class="footnote-backref"[^>]*>↩<\/a>/)
+  })
+
+  it('retains the a11y hooks (aria/data/sr-only heading) through the sanitizer (#216)', () => {
+    const sanitized = sanitizeRenderedMarkdown(renderMarkdownUnsafe('A[^n].\n\n[^n]: body'))
+    // The visually-hidden heading and its id (aria-describedby target) survive.
+    assert.match(sanitized, /<h2 id="footnote-label" class="sr-only">Footnotes<\/h2>/)
+    assert.match(sanitized, /data-footnotes/)
+    // Ref link keeps its describedby + data hook.
+    assert.match(sanitized, /aria-describedby="footnote-label"/)
+    assert.match(sanitized, /data-footnote-ref/)
+    // Backref keeps its label + data hook.
+    assert.match(sanitized, /aria-label="Back to reference 1"/)
+    assert.match(sanitized, /data-footnote-backref/)
   })
 
   it('strips ids outside the renderer-emitted footnote shape', () => {
@@ -240,7 +257,7 @@ describe('footnotes while streaming (#72)', () => {
     const before = renderStreamingMarkdown('X[^1].\n\n[^1]: note')
     assert.doesNotMatch(before, /<section/)
     const after = renderStreamingMarkdown('X[^1].\n\n[^1]: note\n')
-    assert.match(after, /<section class="footnotes">/)
+    assert.match(after, /<section class="footnotes"/)
     assert.match(after, /<sup class="footnote-ref">/)
   })
 
@@ -275,7 +292,7 @@ describe('footnotes while streaming (#72)', () => {
     // The committed HTML ends with the footnotes <section><ol>…</ol></section>;
     // a pending `1. item` must open a fresh list, not splice into that <ol>.
     const html = renderStreamingMarkdown('X[^1].\n\n[^1]: note\n1. item')
-    const section = /<section class="footnotes">.*?<\/section>/.exec(html)?.[0] ?? ''
+    const section = /<section class="footnotes"[^>]*>.*?<\/section>/.exec(html)?.[0] ?? ''
     assert.doesNotMatch(section, /stream-pending/)
     assert.match(html, /stream-pending-list-item/)
   })

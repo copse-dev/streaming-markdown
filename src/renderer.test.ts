@@ -782,8 +782,10 @@ describe('renderMarkdownUnsafe comment-only list items', () => {
     assert.equal(
       renderMarkdownUnsafe('- [ ] <!-- filled in later -->\n- [x] done'),
       '<ul class="contains-task-list">' +
-        '<li class="task-list-item"><input type="checkbox" disabled></li>' +
-        '<li class="task-list-item"><input type="checkbox" disabled checked> done</li></ul>',
+        '<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled' +
+        ' aria-label="Incomplete task"></li>' +
+        '<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled checked' +
+        ' aria-label="Completed task"> done</li></ul>',
     )
   })
 

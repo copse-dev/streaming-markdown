@@ -38,13 +38,13 @@ describe('extension-API reentrancy: footnotes (#151)', () => {
     )
     // Outer refs before AND after the nested render resolve, with uninterrupted
     // numbering (the inner render neither consumes a number nor resets it).
-    assert.match(html, /Before<sup class="footnote-ref"><a href="#fn-a" id="fnref-a">1</)
-    assert.match(html, /After<sup class="footnote-ref"><a href="#fn-b" id="fnref-b">2</)
+    assert.match(html, /Before<sup class="footnote-ref"><a href="#fn-a" id="fnref-a"[^>]*>1</)
+    assert.match(html, /After<sup class="footnote-ref"><a href="#fn-b" id="fnref-b"[^>]*>2</)
     assert.doesNotMatch(html, /After\[\^b\]/)
     assert.match(html, /<li id="fn-a">/)
     assert.match(html, /<li id="fn-b">/)
     // The inner render keeps its own independent numbering.
-    assert.match(html, /href="#fn-z" id="fnref-z">1</)
+    assert.match(html, /href="#fn-z" id="fnref-z"[^>]*>1</)
   })
 
   it('an inline pass recursively rendering footnotes leaves the outer document intact', () => {
@@ -52,7 +52,7 @@ describe('extension-API reentrancy: footnotes (#151)', () => {
     const html = renderMarkdownUnsafe('RECURSE\n\nAfter[^a].\n\n[^a]: note a.', {
       inlinePasses: [recursiveFootnotePass],
     })
-    assert.match(html, /After<sup class="footnote-ref"><a href="#fn-a" id="fnref-a">1</)
+    assert.match(html, /After<sup class="footnote-ref"><a href="#fn-a" id="fnref-a"[^>]*>1</)
     assert.doesNotMatch(html, /After\[\^a\]/)
     assert.match(html, /<li id="fn-a">/)
     assert.match(html, /href="#fn-z"/) // inner ref rendered independently

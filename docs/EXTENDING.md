@@ -613,8 +613,17 @@ fence handler's scaffolding, a decorator's attribute, an artifact `<img>`), wide
 the sink with the `sanitizeExtension` config field — and keep the additions as
 narrow as the injected output. `onElement` runs for every kept element so a host can lock down
 its own tags. Note the core gate strips any `id` outside the renderer's own
-footnote shape (`fn-…`/`fnref-…`); a host that injects other ids must re-set
-them from its `onElement` hook (which runs after the strip).
+footnote shape (`fn-…`/`fnref-…`, plus the section's `…footnote-label`
+heading); a host that injects other ids must re-set them from its `onElement`
+hook (which runs after the strip).
+
+On a page that stacks many rendered messages (smd's primary chat use case), two
+messages that both use `[^1]` would otherwise both emit `id="fn-1"` and
+cross-link. Pass a distinct, attribute-safe `footnoteIdPrefix` per message
+(`MarkdownConfig`, e.g. `` `${messageId}-` ``, chars in `[A-Za-z0-9_-]`) to
+namespace every footnote id and anchor; it must be deterministic and stable
+across incremental updates of a stream (do not derive it from `Math.random()` /
+`Date.now()`). The default `''` is byte-identical to prior output.
 
 ## Styling
 
