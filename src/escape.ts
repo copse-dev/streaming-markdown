@@ -126,10 +126,9 @@ export function rawHtmlTagHoldStart(s: string, mask: boolean[]): number {
 /**
  * Escape literal text while preserving Copse-generated inline HTML tags.
  *
- * @experimental Low-level renderer internal, exported from the main entry but not
- * part of the stable v1 surface (#147). Prefer `renderMarkdown` /
- * `renderMarkdownUnsafe`; this may move behind a subpath or be removed in a minor
- * release. Depending on it directly is at your own risk.
+ * @internal Low-level renderer internal, not part of the stable v1 surface
+ * (#147) and not exported from the package entry since 1.0. Prefer
+ * `renderMarkdown` / `renderMarkdownUnsafe`.
  */
 export function escapeHtmlTextNodes(html: string): string {
   return html
@@ -200,10 +199,9 @@ export function stripIncompleteSafeEntities(text: string): string {
 /**
  * Decode a small allowlist of HTML entities models emit in prose (e.g. &nbsp;).
  *
- * @experimental Low-level renderer internal, exported from the main entry but not
- * part of the stable v1 surface (#147). It is called by the streaming pending
- * paths; hosts should not need it. May move behind a subpath or be removed in a
- * minor release.
+ * @internal Low-level renderer internal, not part of the stable v1 surface
+ * (#147) and not exported from the package entry since 1.0. It is called by
+ * the streaming pending paths; hosts should not need it.
  */
 export function decodeSafeMarkdownEntities(text: string): string {
   const stripped = stripIncompleteSafeEntities(text)

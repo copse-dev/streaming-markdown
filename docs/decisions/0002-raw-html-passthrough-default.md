@@ -11,6 +11,11 @@ Status: accepted · Relates to [#600](https://github.com/copse-dev/agent-pane/is
 > below as `renderMarkdownUnsafe`; the passthrough policy and frozen/tail reasoning
 > are unchanged.
 
+> **Update (#196).** A third policy value, `htmlPolicy: 'escape-all'`, now
+> literalizes *every* raw tag (including the benign inline allowlist this
+> document keeps under `'escape'`) and retired the tag-balance guards. The
+> default remains `'passthrough'`; `'escape'` behaves as designed below.
+
 Design note for making raw-HTML **passthrough** the default rendering behavior —
 in both the at-rest raw-render path (`renderMarkdownUnsafe`) and the streaming
 emitters — while retaining the historical literal-escape behavior behind an

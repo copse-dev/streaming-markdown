@@ -1,6 +1,9 @@
 # 0005 — Leaning into industry benchmarks & evals
 
-Status: proposed
+Status: accepted as a post-1.0 backlog — nothing here blocks 1.0. Item 6
+(task-list / autolink triage) already landed via #209/#223, with the by-design
+divergence list now in [GITHUB-PARITY.md](../GITHUB-PARITY.md) (#219); the
+remaining items are sequenced below and are picked up after the 1.0 release.
 
 How this repo can adopt external, industry-standard benchmarks and eval corpora
 to strengthen its own plumbing — and where it should instead *publish* a

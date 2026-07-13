@@ -77,10 +77,9 @@ const NO_PASSES: readonly InlinePass[] = []
  * order within each stage), optionally filtered to one pipeline stage. Set them
  * per render via `MarkdownConfig.inlinePasses`.
  *
- * @experimental Introspection getter that reads the ambient render config; outside
+ * @internal Introspection getter that reads the ambient render config; outside
  * a render it returns the defaults. Not part of the stable v1 surface (#147) —
- * scope behaviour via `MarkdownConfig.inlinePasses` instead. May move behind a
- * subpath or be removed in a minor release.
+ * scope behaviour via `MarkdownConfig.inlinePasses` instead. Not exported from the package entry since 1.0.
  */
 export function getInlinePasses(stage?: InlinePassStage): readonly InlinePass[] {
   const passes = activeConfig().inlinePasses ?? NO_PASSES

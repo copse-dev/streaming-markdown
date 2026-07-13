@@ -39,9 +39,10 @@ export type EntityDecoder = (text: string) => string
  * This is the default decoder's named set — a spec-defined boundary that covers
  * Latin-1, Greek, and the common typographic/math/currency symbols.
  *
- * @experimental Internal data table, exported from the main entry but not part of
- * the stable v1 surface (#147). Its shape/contents may change; extend the decoder
- * with `MarkdownConfig.namedEntities` rather than reading this directly.
+ * @internal Internal data table, not part of the stable v1 surface (#147) and
+ * not exported from the package entry since 1.0. Its shape/contents may change;
+ * extend the decoder with `MarkdownConfig.namedEntities` rather than reading
+ * this directly.
  */
 export const BUILTIN_NAMED_ENTITIES: Readonly<Record<string, string>> = Object.freeze({
   aacute: "á",
@@ -398,10 +399,9 @@ export function decodeHtmlEntities(text: string): string {
 /**
  * The render's `entityDecoder` config, or `null` when using the built-in.
  *
- * @experimental Introspection getter that reads the ambient render config; outside
+ * @internal Introspection getter that reads the ambient render config; outside
  * a render it returns the defaults. Not part of the stable v1 surface (#147) —
- * scope behaviour via `MarkdownConfig.entityDecoder` instead. May move behind a
- * subpath or be removed in a minor release.
+ * scope behaviour via `MarkdownConfig.entityDecoder` instead. Not exported from the package entry since 1.0.
  */
 export function getEntityDecoder(): EntityDecoder | null {
   return activeConfig().entityDecoder ?? null
@@ -411,10 +411,9 @@ export function getEntityDecoder(): EntityDecoder | null {
  * The effective named set the built-in decoder uses for the current render
  * (built-in HTML4 ⊕ the render's `namedEntities` config).
  *
- * @experimental Introspection getter that reads the ambient render config; outside
+ * @internal Introspection getter that reads the ambient render config; outside
  * a render it returns the defaults. Not part of the stable v1 surface (#147) —
- * scope behaviour via `MarkdownConfig.namedEntities` instead. May move behind a
- * subpath or be removed in a minor release.
+ * scope behaviour via `MarkdownConfig.namedEntities` instead. Not exported from the package entry since 1.0.
  */
 export function getNamedEntities(): Readonly<Record<string, string>> {
   return { ...effectiveNamed() }

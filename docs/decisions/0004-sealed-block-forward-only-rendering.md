@@ -1,6 +1,6 @@
 # 0004 — Bridging the performance gap to smd: sealed-block, forward-only rendering
 
-Status: accepted — Phases 0–1 landed, Phase 2 landed in slices (see phase notes), Phase 3 partially landed · Relates to [#157](https://github.com/copse-dev/streaming-markdown/issues/157) (cross-library benchmark), #21 (O(tail) commits), #30 (incremental scanning), #154 (relative regression guard)
+Status: accepted — Phases 0–3 landed (Phase 2 in slices — see phase notes; the Phase 3 op-count doubling gate landed in #215); remaining follow-ups are post-1.0 (see the decision's "still open" list) · Relates to [#157](https://github.com/copse-dev/streaming-markdown/issues/157) (cross-library benchmark), #21 (O(tail) commits), #30 (incremental scanning), #154 (relative regression guard)
 
 ## Context
 
@@ -507,10 +507,9 @@ the safe default.
   no second production emitter exists.
 
 Decision: adopt the contract ("O(1) targeted patches, everything else
-append") — landed through the Phase 2 slices above. Still open, in order:
-the Phase 3 op-count CI gate (assert per-update DOM mutations / bytes
-re-tokenized in the #154 guard); render-once for multi-block settles (the
-partial adoption still pays one delta render and byte-compares); and, if the
-forming-tail re-render share ever dominates a real profile again, moving the
-settle rules into the scanner as a push-shaped boundary (a relocation, not a
-removal — re-measure first).
+append") — landed through the Phase 2 slices above, with the Phase 3
+op-count doubling gate landed in #215. Still open (post-1.0 follow-ups, in
+order): render-once for multi-block settles (the partial adoption still pays
+one delta render and byte-compares); and, if the forming-tail re-render share
+ever dominates a real profile again, moving the settle rules into the scanner
+as a push-shaped boundary (a relocation, not a removal — re-measure first).

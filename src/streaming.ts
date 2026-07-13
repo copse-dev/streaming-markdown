@@ -928,7 +928,7 @@ export class StreamingMarkdownRenderer {
    * `parsedChars`), and the rewrite-guard comparison count (`prefixChecks`),
    * which must stay ~one per scanner call — a second O(prefix) memcmp per
    * update was a measured super-linear term on multi-hundred-kB streams.
-   * @experimental Diagnostics for tests/benchmarks, not a stable API (#147).
+   * @internal Diagnostics for tests/benchmarks, not a stable API (#147).
    */
   diagnostics(): {
     scannedChars: number

@@ -12,34 +12,22 @@ const EXPECTED_FUNCTIONS = [
   'renderMarkdown',
   'renderMarkdownUnsafe',
   'renderStreamingMarkdown',
-  'splitForStreaming',
   'setDefaultConfig',
   'sanitizeRenderedMarkdown',
   'setSanitizedHtml',
   'isBrowserSanitizerSupported',
   'normalizeHostImagePath',
   'escapeHtml',
-  'escapeHtmlTextNodes',
-  'decodeSafeMarkdownEntities',
   'decodeHtmlEntities',
-  'getEntityDecoder',
-  'getNamedEntities',
   'browserEntityDecoder',
   'fenceCodeClass',
-  'getCodeHighlighter',
   'highlightFenceCode',
   'getFenceHandler',
   'mermaidSourceCandidates',
   'prepareMermaidSource',
   'hydratePendingDiagrams',
   'hydratePendingMath',
-  'getMathSyntax',
-  'getSafeHrefSchemes',
   'renderAnchor',
-  'isEmailAutolinksEnabled',
-  'getLinkImagePolicy',
-  'getInlinePasses',
-  'getHtmlPolicy',
 ] as const
 
 describe('public API barrel (index.ts)', () => {
@@ -60,8 +48,6 @@ describe('public API barrel (index.ts)', () => {
     assert.ok(Array.isArray(api.DEFAULT_SAFE_HREF_SCHEMES))
     assert.ok(api.DEFAULT_SAFE_HREF_SCHEMES.includes('https'))
     assert.ok(api.KNOWN_LANGUAGES instanceof Set || Array.isArray(api.KNOWN_LANGUAGES))
-    assert.equal(typeof api.BUILTIN_NAMED_ENTITIES, 'object')
-    assert.equal(api.BUILTIN_NAMED_ENTITIES['copy'], '©')
   })
 
   it('the barrel adds no unexpected runtime exports', () => {
@@ -78,9 +64,36 @@ describe('public API barrel (index.ts)', () => {
       'DEFAULT_SAFE_HREF_SCHEMES',
       'KNOWN_LANGUAGES',
       'browserSanitizerBackend',
-      'BUILTIN_NAMED_ENTITIES',
     ].sort()
     assert.deepEqual(runtimeExports, expected)
+  })
+
+  // The `@experimental` tier was removed from the main entry at 1.0 (#147):
+  // ambient-config introspection getters, low-level renderer internals, and
+  // the built-in entity table stay in their source modules for in-repo use
+  // but must NOT leak back into the published barrel.
+  it('keeps the removed experimental tier off the main barrel', () => {
+    for (const name of [
+      'getHtmlPolicy',
+      'getSafeHrefSchemes',
+      'getMathSyntax',
+      'getLinkImagePolicy',
+      'getEntityDecoder',
+      'getNamedEntities',
+      'getInlinePasses',
+      'getCodeHighlighter',
+      'isEmailAutolinksEnabled',
+      'splitForStreaming',
+      'escapeHtmlTextNodes',
+      'decodeSafeMarkdownEntities',
+      'BUILTIN_NAMED_ENTITIES',
+    ]) {
+      assert.equal(
+        (api as Record<string, unknown>)[name],
+        undefined,
+        `expected experimental symbol "${name}" to be off the main entry`,
+      )
+    }
   })
 
   // Host-specific helpers moved off the main entry (#112): they must NOT leak

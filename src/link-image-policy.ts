@@ -108,10 +108,9 @@ function resolvedPolicy(): ResolvedPolicy | null {
 /**
  * The current render's {@link LinkImagePolicy} in resolved form, or `null` when disabled.
  *
- * @experimental Introspection getter that reads the ambient render config; outside
+ * @internal Introspection getter that reads the ambient render config; outside
  * a render it returns the defaults. Not part of the stable v1 surface (#147) —
- * scope behaviour via `MarkdownConfig.linkImagePolicy` instead. May move behind a
- * subpath or be removed in a minor release.
+ * scope behaviour via `MarkdownConfig.linkImagePolicy` instead. Not exported from the package entry since 1.0.
  */
 export function getLinkImagePolicy(): LinkImagePolicy | null {
   const policy = resolvedPolicy()
