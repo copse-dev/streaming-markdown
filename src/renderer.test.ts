@@ -153,6 +153,13 @@ describe('renderMarkdownUnsafe', () => {
     assert.doesNotMatch(html, /\[ref\]:/)
   })
 
+  it('keeps a leading full reference link instead of eating it as a definition (Babelmark "disappearing reference links")', () => {
+    assert.equal(
+      renderMarkdownUnsafe('[Like this][d]: [here][h].\n\n[d]: foo\n[h]: ba'),
+      '<p><a href="foo">Like this</a>: <a href="ba">here</a>.</p>',
+    )
+  })
+
   it('renders markdown links in prose and ordered lists', () => {
     const html = renderMarkdownUnsafe(
       'See [PR #204](https://github.com/org/repo/pull/204) for details.\n\n' +
@@ -226,6 +233,13 @@ describe('renderMarkdownUnsafe', () => {
   it('renders consecutive ordered items in one block', () => {
     const html = renderMarkdownUnsafe('1. alpha\n2. beta')
     assert.match(html, /<ol><li>alpha<\/li><li>beta<\/li><\/ol>/)
+  })
+
+  it('keeps right-aligned ordered markers in one list as digits widen (Babelmark "right-aligned list numbers")', () => {
+    assert.equal(
+      renderMarkdownUnsafe(' 8. item 1\n 9. item 2\n10. item 2a'),
+      '<ol start="8"><li>item 1</li><li>item 2</li><li>item 2a</li></ol>',
+    )
   })
 
   it('keeps lists and headings outside paragraph wrappers', () => {
@@ -803,6 +817,13 @@ describe('renderMarkdownUnsafe tab handling', () => {
 
   it('continues an indented code block across a tab-indented line (spec 8)', () => {
     assert.equal(renderMarkdownUnsafe('    foo\n\tbar\n'), '<pre><code>foo\nbar\n</code></pre>')
+  })
+
+  it('preserves a tab literally inside a code span (Babelmark "unicode and tab conversion")', () => {
+    assert.equal(
+      renderMarkdownUnsafe('`То\tлпой` is a Russian word with a tab inside.\n'),
+      '<p><code>То\tлпой</code> is a Russian word with a tab inside.</p>',
+    )
   })
 
   it('accepts a tab as the ATX heading separator (spec 10)', () => {
