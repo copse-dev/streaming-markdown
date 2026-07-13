@@ -983,6 +983,9 @@ export class StreamingMarkdownRenderer {
       if (options.transformSvg) diagramOptions.transformSvg = options.transformSvg
       diagrams = await hydratePendingDiagrams(this.host, diagramOptions)
     }
+    // Hydration rewrites scaffold elements in place — an out-of-band mutation
+    // the frozen-tail DOM memo must not trust across (ADR 0004 Phase 2).
+    if (math > 0 || diagrams > 0) this.frozenTail.invalidateDomMemo()
     return { math, diagrams }
   }
 
@@ -992,6 +995,26 @@ export class StreamingMarkdownRenderer {
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
 
     if (complete !== this.lastComplete) {
+      // Sweep the pending-tail artifacts attached since the last commit — a
+      // pending block element, a pending `<li>` (and its wrapper) inside the
+      // trailing list, a continuation span inside the trailing `<p>`/open
+      // `<li>`, the pending table row — BEFORE the commit morphs run. The
+      // morphs used to absorb them as ordinary diff noise; the frozen-tail
+      // DOM memos (ADR 0004 Phase 2) instead require the committed subtree to
+      // be exactly what the last commit left, so remove them up front (they
+      // are rebuilt from `pending` after the commit either way — at most one
+      // kind exists at a time, each sync clears the others). O(tail), and
+      // byte-equivalent to the old morph-side removal.
+      clearBlockPendingDom(completedEl, [
+        'continuation',
+        'paragraph-continuation',
+        'list-items',
+        'direct-blocks',
+      ])
+      if (this.pendingRowTable) {
+        removePendingTableRow(this.pendingRowTable)
+        this.pendingRowTable = null
+      }
       // Tokenize `complete` once per COMMIT — incrementally (#30) — and cache
       // on the instance so pending-only frames (the vast majority) never
       // re-scan at all (#21). When the split committed everything, `blocks`

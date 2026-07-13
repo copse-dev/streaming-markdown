@@ -54,7 +54,6 @@ import {
   listGroupOpenTag,
   listItemSliceIsMultiParagraph,
   listSliceContinuesGroup,
-  renderBlocks,
   renderBlocksToParts,
   renderFootnoteSectionItems,
   renderListItemsSlice,
@@ -94,6 +93,14 @@ const RENDER_OPTS = TOP_LEVEL_RENDER_OPTS
 // bookkeeping; above it, re-rendering the whole group per commit is the O(n²)
 // this mode removes.
 const INTRA_LIST_MIN_ITEMS = 4
+
+// Maximum frozen parts a targeted link-ref patch may re-render before the
+// commit falls back to one full morph instead (ADR 0004 Phase 2). Each
+// patched part pays its own sanitize + parse; a handful is far cheaper than
+// re-rendering the document, but past this the single whole-document
+// sanitize wins on per-call overhead. Purely a cost trade — both paths are
+// byte-identical.
+const MAX_LINK_REF_PATCH_PARTS = 8
 
 /**
  * How a block kind behaves at the settled/tail boundary:
@@ -379,6 +386,27 @@ function openElementChainAtEof(rawHtml: string): string[] | null {
   return chain.length > 0 ? chain : null
 }
 
+/**
+ * Whether any bracketed span in `source` normalizes to one of `labels` —
+ * escape-aware and normalized exactly like
+ * {@link FrozenTailRenderer.accumulateLabelCandidates}, so a span the
+ * candidate set could have matched is matched here too (over-approximation:
+ * a code-span bracket also matches, costing only a no-op re-render).
+ */
+function sourceMentionsLabel(source: string, labels: Set<string>): boolean {
+  if (!source.includes('[')) return false
+  const spanRe = /\[((?:\\[\s\S]|[^\[\]\\])*)\]/g
+  for (let m = spanRe.exec(source); m; m = spanRe.exec(source)) {
+    const span = m[1] ?? ''
+    if (span.trim() === '') continue
+    if (labels.has(normalizeReferenceLabel(span))) return true
+    if (span.includes('\\') && labels.has(normalizeReferenceLabel(span.replace(/\\([\s\S])/g, '$1')))) {
+      return true
+    }
+  }
+  return false
+}
+
 const DETAILS_OPEN_RE = /<details(?=[\s>])/gi
 const DETAILS_CLOSE_RE = /<\/details>/gi
 
@@ -447,6 +475,98 @@ export class FrozenTailRenderer {
    * consumed by production code.
    */
   renderedChars = 0
+  /**
+   * Diagnostic: cumulative count of sanitized-HTML characters the generic
+   * commit path actually fed to a parse + DOM diff (the delta and tail range
+   * morphs, and full-morph fallbacks). Rendering a string is cheap; sanitizing,
+   * parsing, and diffing it is the per-commit DOM cost the tail memo removes —
+   * so this staying well below {@link renderedChars} on a steady stream proves
+   * the memo engages (ADR 0004 Phase 2). Never consumed by production code.
+   */
+  parsedChars = 0
+  /**
+   * Diagnostic: commits whose newly-settled delta was adopted in place whole —
+   * its blocks were committed to the DOM last frame as the tail, from the same
+   * rendered string at the same position, so the live nodes are already
+   * byte-correct and the frozen boundary advanced over them without a
+   * sanitize + parse + diff. Never consumed by production code.
+   */
+  deltaCommitsSkipped = 0
+  /**
+   * Diagnostic: commits whose delta EXTENDED the memoized tail — its first
+   * top-level part rendered byte-identically to last frame's tail, so those
+   * live nodes were adopted and only the remaining (genuinely new) parts were
+   * sanitized + parsed + morphed. Never consumed by production code.
+   */
+  deltaPrefixesAdopted = 0
+  /**
+   * Diagnostic: commits whose tail rendered byte-identically to the previous
+   * commit's (same root, boundary, and seam), so the live tail nodes were kept
+   * verbatim without a sanitize + parse + diff. Never consumed by production
+   * code.
+   */
+  tailMorphsSkipped = 0
+  /**
+   * Diagnostic: commits where a newly-arrived link-reference definition whose
+   * label IS referenced by frozen content (limitation J) was absorbed as a
+   * targeted per-part patch — re-rendering and morphing only the frozen
+   * top-level parts whose source contains a matching bracketed span — instead
+   * of a full-document morph. Never consumed by production code.
+   */
+  linkRefPatchCommits = 0
+
+  /**
+   * Ordered records of the frozen top-level parts — each part's source span
+   * and raw rendered HTML (null for a part sealed out of intra-list mode,
+   * whose exact whole-group render was never produced) — so a late link-ref
+   * definition can re-render and morph ONLY the parts whose source contains a
+   * matching bracketed span (limitation J, ADR 0004 Phase 2). The part→node
+   * mapping is not stored: it is re-derived (and verified) at patch time from
+   * the frozen region's layout, which the generic commit path guarantees is
+   * strictly alternating — one element per part, one '\n' seam text node
+   * between parts (and one before part 0 iff earlier frozen output existed).
+   * Any commit that can break that layout (re-root frames, a delta whose
+   * parts were unavailable) sets {@link frozenPartsReliable} false, and the
+   * patch falls back to today's full morph.
+   */
+  private frozenParts: { start: number; end: number; rawHtml: string | null }[] = []
+  /** False when the frozen region's node layout can't be trusted for patching. */
+  private frozenPartsReliable = true
+
+  /**
+   * Memo of the last generic-path tail commit (ADR 0004 Phase 2). Records the
+   * RAW rendered tail string, the exact position it was morphed at, and the
+   * parse's top-level node count, establishing the invariant the skips rely
+   * on: the live children `[atNodeCount, atNodeCount + nodeCount)` of `root`
+   * serialize exactly as `parse(sanitize(lead + rawHtml))` until the next
+   * commit. `partCount`/`balanced` gate the partial (extension) adoption: it
+   * needs the memo to be a single top-level group whose raw tags are balanced,
+   * so per-fragment sanitization composes across the adoption boundary —
+   * exactly the existing frozen-boundary assumption, at the same granularity.
+   * Anything that mutates the committed subtree outside the generic path
+   * (full morph, re-root frames, intra-list mode, footnote mode, out-of-band
+   * hydration via {@link invalidateDomMemo}) nulls it — a stale memo must
+   * never be trusted, a missing one only costs a re-parse.
+   */
+  private tailMemo: {
+    root: HTMLElement
+    atNodeCount: number
+    lead: '' | '\n'
+    rawHtml: string
+    nodeCount: number
+    partCount: number
+    balanced: boolean
+  } | null = null
+
+  /**
+   * Drop the DOM-trust memo after out-of-band mutation of committed nodes —
+   * math/diagram hydration rewrites scaffold elements in place, which the
+   * morphs used to absorb as ordinary diff noise. Idempotent and cheap; when
+   * unsure whether committed DOM was touched, call it.
+   */
+  invalidateDomMemo(): void {
+    this.tailMemo = null
+  }
 
   // ---- Re-rooted append frames (ADR 0004 Phase 2) ------------------------
   // While committed raw HTML leaves a safe container element open (an unclosed
@@ -536,6 +656,132 @@ export class FrozenTailRenderer {
     return true
   }
 
+  /**
+   * Targeted limitation-J patch (ADR 0004 Phase 2): the committed link-ref
+   * map changed in a way that may rewrite frozen content — a definition
+   * arrived for a referenced label, or a still-streaming definition run
+   * retreated out of `complete` (removals) or re-parsed with a new value.
+   * A block's render depends on the map only through the labels of its own
+   * bracketed spans, so re-render and morph in place ONLY the frozen
+   * top-level parts whose source contains a span matching a CHANGED label,
+   * leaving every other frozen node untouched — a definition-bearing document
+   * (CHANGELOG-style: definitions at the bottom, referenced above) stops
+   * paying a full-document morph per definition line.
+   *
+   * Returns false — the caller full-morphs, today's exact behaviour — on ANY
+   * doubt: intra-list / re-root / unreliable-part state, a frozen region
+   * whose live layout does not verify as strictly alternating (one element
+   * per part, one '\n' seam between parts), a patched part that does not
+   * re-render to exactly one element, or a citing set too large for per-part
+   * work to beat one whole-document morph. On success the caller continues
+   * the ordinary commit under the new map (the delta and tail render with it
+   * anyway).
+   */
+  private patchFrozenLinkRefs(
+    completedEl: HTMLElement,
+    complete: string,
+    tokens: BlockToken[],
+    linkRefs: LinkReferenceMap,
+  ): boolean {
+    // States whose frozen DOM is not described by `frozenParts`: items frozen
+    // inside a shared list, content committed inside re-root frames, or parts
+    // recorded without a per-part split.
+    if (!this.frozenPartsReliable || this.listSig !== null || this.openFrames.length > 0) {
+      return false
+    }
+    // Labels whose entry differs between the committed maps, in either
+    // direction (added, removed, or value changed).
+    const changedLabels = new Set<string>()
+    for (const [label, ref] of linkRefs) {
+      const prev = this.lastLinkRefs.get(label)
+      if (!prev || prev.href !== ref.href || (prev.title ?? '') !== (ref.title ?? '')) {
+        changedLabels.add(label)
+      }
+    }
+    for (const label of this.lastLinkRefs.keys()) {
+      if (!linkRefs.has(label)) changedLabels.add(label)
+    }
+
+    const parts = this.frozenParts
+    if (parts.length === 0) return this.frozenNodeCount === 0
+    // Verify the live frozen layout is exactly the alternating shape the part
+    // records assume: [optional lead '\n'] el ('\n' el)*. Any other shape
+    // (multi-node raw part, sanitizer-dropped part) makes the part→node
+    // mapping ambiguous — fall back.
+    const leadOffset = this.frozenNodeCount - (2 * parts.length - 1)
+    if (leadOffset !== 0 && leadOffset !== 1) return false
+    const children = completedEl.childNodes
+    for (let i = 0; i < this.frozenNodeCount; i++) {
+      const node = children[i]
+      if (!node) return false
+      const isSeamSlot = (i - leadOffset) % 2 !== 0 || (leadOffset === 1 && i === 0)
+      if (isSeamSlot) {
+        if (node.nodeType !== 3 || node.textContent !== '\n') return false
+      } else if (!(node instanceof HTMLElement)) {
+        return false
+      }
+    }
+
+    // Collect the citing parts first and patch only a SMALL set: each patched
+    // part pays its own sanitize + parse, so beyond a handful the one big
+    // full-morph sanitize is cheaper (and byte-identical). A whole-map flip
+    // that touches most parts (a long definition run retreating out of
+    // `complete` in a document where every section cites its version label)
+    // therefore falls back, while the targeted case — one definition
+    // upgrading its few citing blocks — stays O(citing parts).
+    const affected: number[] = []
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      if (part && sourceMentionsLabel(complete.slice(part.start, part.end), changedLabels)) {
+        affected.push(i)
+      }
+    }
+    if (affected.length > MAX_LINK_REF_PATCH_PARTS) return false
+
+    for (const i of affected) {
+      const part = parts[i]
+      /* c8 ignore next -- `affected` indices come from the loop above */
+      if (!part) return false
+      const from = lowerBound(tokens, part.start)
+      const to = lowerBound(tokens, part.end)
+      const rendered = renderBlocksToParts(complete, tokens.slice(from, to), {
+        linkRefs,
+        ...RENDER_OPTS,
+      })
+      // The span covers exactly one top-level group by construction; anything
+      // else means the record is stale — fall back.
+      if (rendered.length !== 1) return false
+      const newHtml = rendered[0]?.html ?? ''
+      if (newHtml === part.rawHtml) continue // bracketed span, but not a reference (e.g. code)
+      if (newHtml === '' || hasUnfreezableRawHtml(newHtml)) return false
+      const host = completedEl.cloneNode(false) as HTMLElement
+      const sanitized = sanitizeRenderedMarkdown(newHtml)
+      this.renderedChars += newHtml.length
+      this.parsedChars += sanitized.length
+      setPresanitizedHtml(host, sanitized)
+      const template = host.firstElementChild
+      if (host.childNodes.length !== 1 || !(template instanceof HTMLElement)) return false
+      const live = children[leadOffset + 2 * i]
+      /* c8 ignore next -- the layout pass above proved every part slot is an element */
+      if (!(live instanceof HTMLElement)) return false
+      if (live.tagName === template.tagName) {
+        // In-place upgrade keeps the block's node identity (a reference
+        // resolving is an inline change within the block).
+        syncAttributes(live, template)
+        morphElementChildrenFrom(live, template, 0)
+      } else {
+        /* c8 ignore next 4 -- defensive: a reference upgrade is inline-only
+           (block tokens don't depend on the ref map), so the part's element
+           tag cannot change; kept so a future divergence degrades to a
+           correct positional replace instead of wrong output. */
+        completedEl.replaceChild(template, live)
+      }
+      part.rawHtml = newHtml
+    }
+    if (affected.length > 0) this.linkRefPatchCommits++
+    return true
+  }
+
   // ---- Intra-list freezing (#29) ----------------------------------------
   // When the trailing group is a long, still-open, signature-uniform list, the
   // whole group would otherwise stay in the tail and be re-rendered per commit
@@ -549,6 +795,8 @@ export class FrozenTailRenderer {
   private listFrozenLis = 0
   /** Child index of the shared list element within `completedEl`. */
   private listElIndex = 0
+  /** Source offset where the shared trailing list group begins (its part record on seal). */
+  private listStart = 0
   /** Looseness baked into the frozen items (a flip forces a full morph). */
   private listLoose = false
   /** Task-list evidence seen so far (drives the `<ul>` class; monotonic). */
@@ -558,6 +806,7 @@ export class FrozenTailRenderer {
     this.listSig = null
     this.listFrozenLis = 0
     this.listElIndex = 0
+    this.listStart = 0
     this.listLoose = false
     this.listHasTask = false
   }
@@ -631,6 +880,9 @@ export class FrozenTailRenderer {
     this.lastLinkRefs = new Map()
     this.frozenLabelCandidates.clear()
     this.committedHasOpenDetails = false
+    this.tailMemo = null
+    this.frozenParts = []
+    this.frozenPartsReliable = true
     this.resetListState()
     this.resetFootnoteState()
     this.resetFrames()
@@ -708,16 +960,22 @@ export class FrozenTailRenderer {
     }
     // A committed link-ref map change can rewrite earlier blocks (limitation
     // J) — but only blocks that actually reference one of the labels the
-    // change touched. When the change is purely additive (append-only streams
-    // only ever ADD labels; first definition wins) and none of the new labels
-    // appears among the bracketed spans of the frozen source, the frozen DOM
-    // provably cannot change: adopt the new map and stay on the fast path.
-    // Anything else — removals, value changes, or a possibly-referenced new
-    // label — keeps today's full-morph fallback. This was the largest
-    // remaining full-morph trigger on definition-bearing documents.
+    // change touched. When the change is purely additive (streams mostly only
+    // ADD labels; first definition wins) and none of the new labels appears
+    // among the bracketed spans of the frozen source, the frozen DOM provably
+    // cannot change: adopt the new map and stay on the fast path. Any other
+    // change — a possibly-referenced new label, a removal or value change
+    // (the still-growing definition run the splitter holds retreats out of
+    // `complete` and returns, flipping the whole map) — re-renders and morphs
+    // only the frozen parts whose source contains a span matching a CHANGED
+    // label (the targeted patch of ADR 0004 Phase 2), then continues the
+    // ordinary commit under the new map. Any patch guard tripping keeps
+    // today's full-morph fallback.
     if (linkRefKey !== this.lastLinkRefKey && !this.linkRefDeltaIsInert(linkRefs)) {
-      this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
-      return
+      if (!this.patchFrozenLinkRefs(completedEl, complete, tokens, linkRefs)) {
+        this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
+        return
+      }
     }
 
     // Intra-list freezing (#29): while a long trailing list is still open,
@@ -735,8 +993,26 @@ export class FrozenTailRenderer {
       if (outcome === 'handled') return
       // 'sealed' → continue below with the advanced frozen boundary.
     }
-    // Never move the frozen boundary backward (see above).
-    const advanceTo = Math.max(settledOffset, this.frozenEnd)
+    // Never advance the frozen boundary past trailing SEPARATOR tokens
+    // (blanks and link-ref definition lines). They render nothing, so
+    // freezing them buys no per-commit work — and a still-growing definition
+    // run RETREATS out of `complete` whenever its next line starts streaming
+    // (the splitter holds the whole blank-free run as one open block), which
+    // would invalidate a frozen prefix that had swallowed it: a full morph
+    // per definition line, in both directions — the oscillation half of
+    // limitation J. Kept in the tail, the prefix stays valid across the
+    // retreat and the map flip lands on the targeted patch path above.
+    // Never move the frozen boundary backward either (see above).
+    let renderEnd = 0
+    for (let i = lowerBound(tokens, Math.max(settledOffset, this.frozenEnd)) - 1; i >= 0; i--) {
+      const token = tokens[i]
+      if (!token) break
+      if (settleClassOf(token.kind) !== 'separator') {
+        renderEnd = token.end
+        break
+      }
+    }
+    const advanceTo = Math.max(Math.min(settledOffset, renderEnd), this.frozenEnd)
 
     // Newly-settled delta `[frozenEnd, advanceTo)` and tail `[advanceTo, end)`.
     // Tokens are sorted, so both are contiguous slices around two binary-searched
@@ -746,12 +1022,18 @@ export class FrozenTailRenderer {
     const deltaTokens = tokens.slice(deltaFrom, deltaTo)
     const tailTokens = tokens.slice(deltaTo)
 
-    const deltaHtml = deltaTokens.length
-      ? renderBlocks(complete, deltaTokens, { linkRefs, ...RENDER_OPTS })
-      : ''
-    const tailHtml = tailTokens.length
-      ? renderBlocks(complete, tailTokens, { linkRefs, ...RENDER_OPTS })
-      : ''
+    // Rendered as per-part units purely for the memo comparisons; the joined
+    // strings are byte-identical to `renderBlocks` over the same tokens (the
+    // renderBlocksToParts contract), so every guard below sees exactly what it
+    // always saw.
+    const deltaParts = deltaTokens.length
+      ? renderBlocksToParts(complete, deltaTokens, { linkRefs, ...RENDER_OPTS })
+      : []
+    const tailParts = tailTokens.length
+      ? renderBlocksToParts(complete, tailTokens, { linkRefs, ...RENDER_OPTS })
+      : []
+    const deltaHtml = deltaParts.map((p) => p.html).join('\n')
+    const tailHtml = tailParts.map((p) => p.html).join('\n')
 
     // A close tag for an open frame means later content pops OUT of the frame
     // in the whole-string parse; per-fragment parsing drops the stray close, so
@@ -799,67 +1081,43 @@ export class FrozenTailRenderer {
     }
 
     // Reconcile everything after the frozen prefix — newly-settled delta plus
-    // tail — in ONE morph (or two around a re-root push). Morphing (not
-    // re-parsing) means the blocks that are settling right now keep the DOM
-    // node identity they already had as last frame's tail (CSS transitions,
-    // text selection, and media in a block survive its freeze frame), and the
-    // trailing-child trim removes last frame's leftover tail nodes and any
-    // block-level pending elements. Seam rule: `renderBlocks` joins non-empty
-    // top-level RAW blocks with '\n' (gap B); the seam text survives the
-    // sanitizer even when a fragment's elements do not, so joins follow raw
-    // emptiness on the paths a sanitizer-unwrapped container can reach.
-    const sanitizedDelta = deltaHtml !== '' ? sanitizeRenderedMarkdown(deltaHtml) : ''
-    const sanitizedTail = tailHtml !== '' ? sanitizeRenderedMarkdown(tailHtml) : ''
+    // tail — as two range morphs (or around a re-root push). Seam rule:
+    // `renderBlocks` joins non-empty top-level RAW blocks with '\n' (gap B);
+    // the seam text survives the sanitizer even when a fragment's elements do
+    // not, so joins follow raw emptiness on the paths a sanitizer-unwrapped
+    // container can reach.
+    if (rerootChain) {
+      const sanitizedDelta = deltaHtml !== '' ? sanitizeRenderedMarkdown(deltaHtml) : ''
+      const sanitizedTail = tailHtml !== '' ? sanitizeRenderedMarkdown(tailHtml) : ''
 
-    // Which of the raw open chain survives sanitization on the rightmost path
-    // of the delta fragment. Unwrapped elements (both shipped backends keep a
-    // dropped element's children in place) leave the whole-string parse
-    // flattened the same way per-fragment rendering is — so with NO survivors
-    // the delta freezes through the ordinary path; survivors become frames.
-    const survivors =
-      rerootChain && sanitizedDelta !== ''
-        ? this.survivingChain(root, sanitizedDelta, rerootChain)
-        : []
-
-    if (rerootChain && survivors.length > 0) {
-      /* c8 ignore start -- defensive backstop: commitWithReroot's live walk
-         mirrors the survivingChain probe over the same sanitized fragment, so
-         it cannot report a mismatch; kept so a future divergence degrades to
-         the correct full morph instead of wrong output. */
-      if (!this.commitWithReroot(completedEl, root, survivors, sanitizedDelta, sanitizedTail, tailHtml !== '')) {
-        this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
-        return
+      // Which of the raw open chain survives sanitization on the rightmost
+      // path of the delta fragment. Unwrapped elements (both shipped backends
+      // keep a dropped element's children in place) leave the whole-string
+      // parse flattened the same way per-fragment rendering is — so with NO
+      // survivors the delta freezes through the ordinary path; survivors
+      // become frames.
+      const survivors =
+        sanitizedDelta !== '' ? this.survivingChain(root, sanitizedDelta, rerootChain) : []
+      if (survivors.length > 0) {
+        /* c8 ignore start -- defensive backstop: commitWithReroot's live walk
+           mirrors the survivingChain probe over the same sanitized fragment, so
+           it cannot report a mismatch; kept so a future divergence degrades to
+           the correct full morph instead of wrong output. */
+        if (!this.commitWithReroot(completedEl, root, survivors, sanitizedDelta, sanitizedTail, tailHtml !== '')) {
+          this.fullMorph(completedEl, complete, tokens, linkRefKey, linkRefs)
+          return
+        }
+        /* c8 ignore stop */
+      } else {
+        // Fully-flattened re-root chain: the sanitizedDelta may be '' while
+        // the RAW delta was not (its '\n' seam must still be emitted, hence
+        // the raw-emptiness gating inside commitRanges). The delta carried
+        // unbalanced raw tags, so the partial adoption (which splits it) is
+        // off — `deltaParts: null`.
+        this.commitRanges(root, deltaHtml, tailHtml, null, tailParts.length, sanitizedDelta, sanitizedTail)
       }
-      /* c8 ignore stop */
     } else {
-      // Ordinary commit — including a fully-flattened re-root chain, where the
-      // sanitizedDelta may be '' while the RAW delta was not (its '\n' seam
-      // must still be emitted, hence the raw-emptiness gating). Two range
-      // morphs — delta, then tail — so the delta parses exactly once: its
-      // morph template doubles as the frozen node count (gap C), where the
-      // old joint morph needed a second, count-only parse of the sanitized
-      // delta on every commit (~26% of the commit path). The split parse
-      // yields the joint morph's exact node sequence: top-level parts end in
-      // elements, so text cannot merge across the boundary, and each '\n'
-      // seam stays its own text node. Blocks settling this commit keep their
-      // node identity — the delta range morph reuses them in place and never
-      // trims — and the tail morph's trailing trim preserves the sweep
-      // semantics (gaps B/E).
-      if (deltaHtml !== '') {
-        const lead = this.frozenHasHtml ? '\n' : ''
-        this.frozenNodeCount += morphInnerHtmlRangeFrom(
-          root,
-          this.frozenNodeCount,
-          asSanitizedHtml(lead + sanitizedDelta),
-        )
-        this.frozenHasHtml = true
-      }
-      const tailLead = this.frozenHasHtml && tailHtml !== '' ? '\n' : ''
-      morphInnerHtmlFrom(
-        root,
-        this.frozenNodeCount,
-        tailHtml !== '' ? asSanitizedHtml(tailLead + sanitizedTail) : '',
-      )
+      this.commitRanges(root, deltaHtml, tailHtml, deltaParts, tailParts.length)
     }
     // #138: hold the pending tail in the DOM emitter while a `<details>` is
     // open in the RAW whole render — matching the string emitter, which
@@ -881,6 +1139,156 @@ export class FrozenTailRenderer {
     // inside a frame the shared-list optimization simply stays off.
     if (this.openFrames.length === 0) {
       this.maybeActivateIntraList(completedEl, complete, tokens, tailStart)
+    }
+  }
+
+  /**
+   * The generic two-range commit: reconcile the newly-settled delta at
+   * `[frozenNodeCount, …)` of `root`, advance the boundary over it, then
+   * reconcile the tail after it. Two range morphs — delta, then tail — so the
+   * delta parses exactly once: its morph template doubles as the frozen node
+   * count (gap C), where the old joint morph needed a second, count-only parse
+   * of the sanitized delta on every commit (~26% of the commit path). The
+   * split parse yields the joint morph's exact node sequence: top-level parts
+   * end in elements, so text cannot merge across the boundary, and each '\n'
+   * seam stays its own text node. Blocks settling this commit keep their node
+   * identity — the delta range morph reuses them in place and never trims —
+   * and the tail morph's trailing trim preserves the sweep semantics (gaps
+   * B/E).
+   *
+   * On top of that, the tail memo (ADR 0004 Phase 2) removes the remaining
+   * redundant parses of a steady stream:
+   *
+   *  - **Delta adopt-in-place**: the blocks settling this commit usually ARE
+   *    last frame's tail — rendered from the same string, morphed at the same
+   *    position of the same root, with the same '\n' seam. When the memo
+   *    proves that byte-exactly, the live nodes are already what the delta
+   *    morph would produce, so the frozen boundary just advances over the
+   *    memoized node count: no sanitize, no parse, no diff.
+   *  - **Delta extension adoption**: more often the settling group grew
+   *    before it settled, and the delta's FIRST top-level part alone equals
+   *    the memoized tail (the group as last committed) while later parts are
+   *    new. The memoized nodes are adopted the same way and only the
+   *    remaining parts are sanitized + parsed + morphed — reproducing, byte
+   *    for byte, the two commits today's path would have produced had the
+   *    stream settled the tail first and the rest one commit later. That
+   *    partition is only taken when both halves are independently freezable
+   *    (the memo part is a single group with balanced raw tags — so the rest
+   *    is balanced too, by additivity — under a delta that already passed the
+   *    raw-HTML guard), the exact per-fragment-sanitize assumption the frozen
+   *    boundary itself rests on, at the same top-level group granularity.
+   *  - **Tail reuse**: a commit that re-renders the tail byte-identically
+   *    (e.g. only blanks or inert definitions committed) keeps the live tail
+   *    nodes verbatim; only the trailing trim (stale block-level pending
+   *    elements from the previous frame) still runs.
+   *
+   * Every skip demands EXACT equality of the raw strings, root identity, node
+   * position, and seam — any mismatch, and any commit path other than this
+   * one, falls back to the full sanitize + parse + morph, so a missed skip is
+   * only ever slower, never different. The memo's DOM-trust invariant (the
+   * recorded region is untouched between commits) is upheld by the callers:
+   * the streaming renderer sweeps its pending-tail artifacts before every
+   * commit and invalidates on hydration ({@link invalidateDomMemo}).
+   *
+   * `deltaParts` must be the delta's per-part split (joining to `deltaHtml`)
+   * from a delta that passed the raw-HTML guard, or null to disable the
+   * partial adoption (the re-rooted flattened path, whose delta is known
+   * unbalanced). `presanitizedDelta`/`presanitizedTail` forward sanitizations
+   * the re-root probe already paid for; when null they are computed only on a
+   * memo miss.
+   */
+  private commitRanges(
+    root: HTMLElement,
+    deltaHtml: string,
+    tailHtml: string,
+    deltaParts: RenderedPart[] | null,
+    tailPartCount: number,
+    presanitizedDelta: SanitizedHtml | '' | null = null,
+    presanitizedTail: SanitizedHtml | '' | null = null,
+  ): void {
+    if (deltaHtml !== '') {
+      const lead: '' | '\n' = this.frozenHasHtml ? '\n' : ''
+      const memo = this.tailMemo
+      const adoptable =
+        memo !== null &&
+        memo.root === root &&
+        memo.atNodeCount === this.frozenNodeCount &&
+        memo.lead === lead
+      if (adoptable && memo.rawHtml === deltaHtml) {
+        this.frozenNodeCount += memo.nodeCount
+        this.deltaCommitsSkipped++
+      } else if (
+        adoptable &&
+        memo.partCount === 1 &&
+        memo.balanced &&
+        deltaParts !== null &&
+        deltaParts.length > 1 &&
+        deltaParts[0]?.html === memo.rawHtml
+      ) {
+        this.frozenNodeCount += memo.nodeCount
+        const rest = deltaParts
+          .slice(1)
+          .map((p) => p.html)
+          .join('\n')
+        const html = asSanitizedHtml('\n' + sanitizeRenderedMarkdown(rest))
+        this.parsedChars += html.length
+        this.frozenNodeCount += morphInnerHtmlRangeFrom(root, this.frozenNodeCount, html)
+        this.deltaPrefixesAdopted++
+      } else {
+        const sanitized = presanitizedDelta ?? sanitizeRenderedMarkdown(deltaHtml)
+        const html = asSanitizedHtml(lead + sanitized)
+        this.parsedChars += html.length
+        this.frozenNodeCount += morphInnerHtmlRangeFrom(root, this.frozenNodeCount, html)
+      }
+      this.frozenHasHtml = true
+      // A non-empty delta either consumed the memoized nodes (adoption) or
+      // overwrote the region they described; the memo never survives it.
+      this.tailMemo = null
+      // Track the newly frozen parts for targeted link-ref patches. Without
+      // the per-part split (the flattened re-root path) the region's layout
+      // is unknowable, so patching is off until the next full morph rebuilds.
+      if (deltaParts !== null) {
+        for (const part of deltaParts) {
+          this.frozenParts.push({ start: part.start, end: part.end, rawHtml: part.html })
+        }
+      } else {
+        this.frozenPartsReliable = false
+      }
+    }
+    const tailLead: '' | '\n' = this.frozenHasHtml && tailHtml !== '' ? '\n' : ''
+    const memo = this.tailMemo
+    if (
+      memo &&
+      tailHtml !== '' &&
+      memo.root === root &&
+      memo.atNodeCount === this.frozenNodeCount &&
+      memo.lead === tailLead &&
+      memo.rawHtml === tailHtml
+    ) {
+      // Unchanged tail: keep the live nodes; only sweep stale trailing
+      // children (block-level pending elements appended after the tail by the
+      // previous frame) — exactly what the tail morph's trim would remove.
+      while (root.childNodes.length > this.frozenNodeCount + memo.nodeCount) {
+        root.lastChild?.remove()
+      }
+      this.tailMorphsSkipped++
+    } else if (tailHtml !== '') {
+      const sanitized = presanitizedTail ?? sanitizeRenderedMarkdown(tailHtml)
+      const html = asSanitizedHtml(tailLead + sanitized)
+      this.parsedChars += html.length
+      const nodeCount = morphInnerHtmlFrom(root, this.frozenNodeCount, html)
+      this.tailMemo = {
+        root,
+        atNodeCount: this.frozenNodeCount,
+        lead: tailLead,
+        rawHtml: tailHtml,
+        nodeCount,
+        partCount: tailPartCount,
+        balanced: tailPartCount === 1 && !hasUnfreezableRawHtml(tailHtml),
+      }
+    } else {
+      morphInnerHtmlFrom(root, this.frozenNodeCount, '')
+      this.tailMemo = null
     }
   }
 
@@ -925,7 +1333,13 @@ export class FrozenTailRenderer {
     sanitizedTail: SanitizedHtml | '',
     rawTailNonEmpty: boolean,
   ): boolean {
+    // The tail commits inside a freshly-pushed frame the memo does not model;
+    // subsequent framed commits rebuild it against the frame's root. Framed
+    // content also breaks the flat part↔node layout the link-ref patch needs.
+    this.tailMemo = null
+    this.frozenPartsReliable = false
     const lead = this.frozenHasHtml ? '\n' : ''
+    this.parsedChars += lead.length + sanitizedDelta.length
     morphInnerHtmlFrom(root, this.frozenNodeCount, asSanitizedHtml(lead + sanitizedDelta))
 
     // The open elements sit on the rightmost path of the delta's DOM (they
@@ -953,6 +1367,7 @@ export class FrozenTailRenderer {
     // leads with one.
     this.frozenNodeCount = container.childNodes.length
     this.frozenHasHtml = true
+    if (rawTailNonEmpty) this.parsedChars += 1 + sanitizedTail.length
     morphInnerHtmlFrom(
       container,
       this.frozenNodeCount,
@@ -993,8 +1408,13 @@ export class FrozenTailRenderer {
     this.listSig = scan.sig
     this.listFrozenLis = 0
     this.listElIndex = lastIdx
+    this.listStart = first.start
     this.listLoose = scan.loose
     this.listHasTask = false
+    // Shared-list commits mutate the list element's interior outside the
+    // generic path's bookkeeping; the memo must not survive into (or past)
+    // intra-list mode.
+    this.tailMemo = null
   }
 
   /**
@@ -1024,23 +1444,28 @@ export class FrozenTailRenderer {
 
     // Walk the unfrozen region: interleaved blanks plus items that continue the
     // signature. Loose evidence is exactly scanListGroup's rule, applied
-    // incrementally — a blank run counts only when a continuing item follows;
-    // evidence inside the frozen region was accumulated when those items froze.
+    // incrementally — a blank run counts only when a continuing item follows,
+    // and only BETWEEN items: with the frozen boundary capped before trailing
+    // separators, the walk can start at a blank that precedes the group
+    // (frozen boundary still outside the list), which is not loose evidence.
+    // Evidence inside the frozen region was accumulated when those items froze.
     const unfrozenItems: BlockToken[] = []
     let looseEvidence = false
     let blankPending = false
+    let seenItem = this.listFrozenLis > 0
     let ended = false
     for (let i = lowerBound(tokens, this.frozenEnd); i < tokens.length; i++) {
       const token = tokens[i]
       if (!token) break
       if (token.kind === 'blank') {
-        blankPending = true
+        if (seenItem) blankPending = true
         continue
       }
       if (
         token.kind === 'list_item' &&
         listSliceContinuesGroup(sig, complete.slice(token.start, token.end))
       ) {
+        seenItem = true
         if (blankPending) looseEvidence = true
         blankPending = false
         if (listItemSliceIsMultiParagraph(complete.slice(token.start, token.end))) {
@@ -1086,6 +1511,7 @@ export class FrozenTailRenderer {
     // own attributes are synced separately (the task class can appear later)
     // while its frozen <li> children are never touched.
     const templateHost = completedEl.cloneNode(false) as HTMLElement
+    this.parsedChars += open.length + delta.itemsHtml.length + tail.itemsHtml.length + close.length
     setSanitizedHtml(templateHost, `${open}${delta.itemsHtml}${tail.itemsHtml}${close}`)
     const templateList = templateHost.firstElementChild
     /* c8 ignore start -- unreachable defensive guard: the sanitized
@@ -1117,6 +1543,10 @@ export class FrozenTailRenderer {
       // Promote the shared list to a fully frozen top-level node (the '\n'
       // seam before it, if any, is absorbed into the frozen count) and let the
       // generic path handle the content after the group in this same commit.
+      // Record the whole group as one frozen part (span only — its exact
+      // whole-group render was never produced, so a link-ref patch that hits
+      // it re-renders unconditionally).
+      this.frozenParts.push({ start: this.listStart, end: this.frozenEnd, rawHtml: null })
       this.frozenNodeCount = this.listElIndex + 1
       this.frozenHasHtml = true
       this.resetListState()
@@ -1147,6 +1577,9 @@ export class FrozenTailRenderer {
     linkRefKey: string,
     footnoteDefs: FootnoteDefinitionMap,
   ): void {
+    // Every footnote path reconciles the whole subtree under its own per-part
+    // bookkeeping; the generic tail memo cannot stay coherent with it.
+    this.tailMemo = null
     // Footnotes + a live re-root frame is an exotic combination the per-part
     // bookkeeping does not model; full-morph keeps it correct (and clears the
     // frames, matching the whole-document morph).
@@ -1238,6 +1671,7 @@ export class FrozenTailRenderer {
     this.committedHasOpenDetails = hasOpenDetailsElement(rawHtml)
     const html = sanitizeRenderedMarkdown(rawHtml)
     this.renderedChars += html.length
+    this.parsedChars += html.length
     morphInnerHtml(completedEl, html)
 
     // Generic frozen bookkeeping is now stale (fn mode owns the subtree); clear
@@ -1246,6 +1680,8 @@ export class FrozenTailRenderer {
     this.frozenSource = ''
     this.frozenHasHtml = false
     this.frozenNodeCount = 0
+    this.frozenParts = []
+    this.frozenPartsReliable = true
     this.resetListState()
     this.lastLinkRefKey = linkRefKey
     this.lastLinkRefs = linkRefs
@@ -1412,6 +1848,7 @@ export class FrozenTailRenderer {
    */
   private morphPartElement(completedEl: HTMLElement, el: HTMLElement, partHtml: string): boolean {
     const host = completedEl.cloneNode(false) as HTMLElement
+    this.parsedChars += partHtml.length
     setPresanitizedHtml(host, sanitizeRenderedMarkdown(partHtml))
     const template = host.firstElementChild
     if (
@@ -1449,6 +1886,7 @@ export class FrozenTailRenderer {
     if (firstChanged === prev.length && prev.length === items.length) return true
 
     const host = completedEl.cloneNode(false) as HTMLElement
+    this.parsedChars += items.slice(firstChanged).join('').length
     setSanitizedHtml(host, `<ol>${items.slice(firstChanged).join('')}</ol>`)
     const templateOl = host.firstElementChild
     if (!(templateOl instanceof HTMLElement) || templateOl.tagName !== 'OL') return false
@@ -1472,6 +1910,10 @@ export class FrozenTailRenderer {
     this.committedHasOpenDetails = hasOpenDetailsElement(rawHtml)
     const html = sanitizeRenderedMarkdown(rawHtml)
     this.renderedChars += html.length
+    this.parsedChars += html.length
+    this.tailMemo = null
+    this.frozenParts = []
+    this.frozenPartsReliable = true
     morphInnerHtml(completedEl, html)
     this.frozenEnd = 0
     this.frozenSource = ''
