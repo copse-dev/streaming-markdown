@@ -62,7 +62,12 @@
   /* Fenced/indented code keeps its own whitespace and never inherits inline
      `code` chrome; scroll instead of widening the container. */
   & pre {
+    /* overflow-y explicit so overflow-x: auto doesn't get it promoted to auto
+       (a spurious vertical scrollbar from sub-pixel content extent). The block
+       auto-sizes to its lines by default. If you cap code-block height, set
+       `overflow-y: auto` yourself to restore vertical scroll. */
     overflow-x: auto;
+    overflow-y: hidden;
     white-space: pre;
   }
   & pre code {
