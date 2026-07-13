@@ -116,6 +116,7 @@
     "check:gfm-spec": "tsx scripts/fetch-gfm-spec.mts",
     "check:normalizer-parity": "tsx scripts/fetch-reference-normalizer.mts && tsx scripts/check-normalizer-parity.mts",
     "report:conformance": "node --import tsx scripts/conformance-report.mts",
+    "report:conformance:check": "node --import tsx scripts/conformance-report.mts --check",
     "bench": "tsx scripts/bench-streaming.mts",
     "bench:browser": "tsx scripts/bench-browser.mts",
     "bench:competitors": "npm --prefix bench/competitors run bench",

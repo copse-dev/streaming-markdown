@@ -488,8 +488,8 @@ attribute-less inline allowlist** (`b i u s del ins sub sup kbd mark br`,
 Everything with attributes, and all block/structural raw HTML, stays escaped.
 
 So the realistic ceiling excludes those **64 HTML examples**: **588 in-scope
-examples**, of which the renderer currently satisfies **569 (~97%)**. Counting all
-652 examples the baseline is **579 (~89%)**. Both numbers move as non-HTML
+examples**, of which the renderer currently satisfies **569/588 (~97%)**. Counting all
+652 examples the baseline is **579/652 (~89%)**. Both numbers move as non-HTML
 conformance grows — `summaryBySection` in the baseline JSON carries the live
 per-section counts; treat the two headline figures here as approximate. The full
 live table (both specs × both policies, headline + in-scope ceiling + per-section
@@ -518,7 +518,7 @@ each harness pins a *second* baseline under the shipping `passthrough` default
 (`conformance-baseline-passthrough.json`, `gfm-conformance-baseline-passthrough.json`),
 regenerated with `UPDATE_COMMONMARK_PASSTHROUGH_BASELINE=1` /
 `UPDATE_GFM_PASSTHROUGH_BASELINE=1`. Passthrough passes a few more of the spec
-examples (CommonMark **583**/652, GFM **593**/672 vs escape's 579 / 589) — raw HTML
+examples than escape — CommonMark **583**/652 vs **579**/652, GFM **593**/672 vs **589**/672 — raw HTML
 flows to the sink instead of being escaped, so several Raw-HTML / HTML-block examples
 now match the spec verbatim while **5** escape-mode-only shapes (inline raw-HTML
 examples #619–624 in CommonMark, #638–643 in GFM, whose escaped output happens to

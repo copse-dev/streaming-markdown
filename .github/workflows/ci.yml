@@ -87,6 +87,13 @@ jobs:
       - name: Normalizer parity
         run: npm run check:normalizer-parity
 
+      # Gate the living docs against the baseline JSONs: fail if any conformance
+      # number cited in docs/ARCHITECTURE.md no longer matches what the fixtures
+      # produce. The report generator only helps if someone remembers to run it;
+      # this makes CI remember, so the prose can't silently drift again.
+      - name: Conformance numbers in docs
+        run: npm run report:conformance:check
+
   # Consumer-floor smoke test (#113). `engines.node` is `>=20`, but the dev
   # toolchain needs 21+, so the `build` job can't run on 20. This job builds
   # with the dev toolchain on Node 22, then switches the runner to Node 20 and
