@@ -202,6 +202,45 @@ function renderListItem(item: RenderedListItem): string {
   return `<li>${item.html}</li>`
 }
 
+/**
+ * Strip app-specific task-list decorations for GFM/CommonMark conformance
+ * comparison.
+ *
+ * GitHub tags task lists with `contains-task-list` (on the `<ul>`) and
+ * `task-list-item` (on each `<li>`) so their bullets can be hidden, and this
+ * renderer mirrors that markup. The cmark-gfm spec examples don't carry those
+ * classes, so — exactly like {@link stripAppLinkAttributes} and
+ * {@link stripAppCodeDecorations} — they're decorations that must be removed
+ * before comparing rendered output against the spec's expected HTML.
+ *
+ * The renderer also serializes the disabled checkbox with bare boolean
+ * attributes (`<input type="checkbox" disabled>`), whereas cmark-gfm writes the
+ * empty-string form (`<input disabled="" type="checkbox">`). Those are the same
+ * markup — a purely cosmetic serialization choice — but the spec normalizer (a
+ * faithful port of the reference `normalize.py`, which must stay byte-for-byte
+ * identical to it) preserves the distinction, so canonicalize the checkbox's
+ * boolean attributes here to match the spec's serialization.
+ *
+ * Test-only measurement scaffolding: it does not change any runtime rendering.
+ */
+export function stripTaskListDecorations(html: string): string {
+  return html
+    .replace(/<(ul|li)\b([^>]*?)>/gi, (match, tag: string, attrs: string) => {
+      if (!/\bclass\s*=/i.test(attrs)) return match
+      const cleaned = attrs.replace(/\s+class\s*=\s*"([^"]*)"/gi, (_m, cls: string) => {
+        const kept = cls
+          .split(/\s+/)
+          .filter((c) => c !== '' && c !== 'contains-task-list' && c !== 'task-list-item')
+          .join(' ')
+        return kept ? ` class="${kept}"` : ''
+      })
+      return `<${tag}${cleaned}>`
+    })
+    .replace(/<input\b[^>]*\btype="checkbox"[^>]*>/gi, (tag) =>
+      tag.replace(/\s(disabled|checked)(?=[\s>])/gi, ' $1=""'),
+    )
+}
+
 function renderParagraph(slice: string, linkRefs: LinkReferenceMap, tight = false): string {
   const body = stripParagraphIndent(dropTrailingNewline(slice))
   const rendered = renderProseBlock(body, linkRefs, tight ? 'space' : 'newline')

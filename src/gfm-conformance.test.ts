@@ -29,6 +29,7 @@ import { stripAppCodeDecorations } from './highlight.ts'
 import { highlightjsHighlighter } from './highlight-hljs.ts'
 import { fullEntityDecoder } from './entity-decoder-full.ts'
 import { stripAppImageAttributes, stripAppLinkAttributes } from './inline-links.ts'
+import { stripTaskListDecorations } from './render-blocks.ts'
 import { normalizeHtml } from '../tests/commonmark/normalize.ts'
 import {
   gfmSpecVersion,
@@ -89,9 +90,11 @@ const spec = loadGfmSpec()
 type HtmlPolicy = 'escape' | 'passthrough'
 
 function conforms(example: SpecExample, policy: HtmlPolicy): boolean {
-  const html = stripAppCodeDecorations(
-    stripAppImageAttributes(
-      stripAppLinkAttributes(renderMarkdownUnsafe(example.markdown, { htmlPolicy: policy })),
+  const html = stripTaskListDecorations(
+    stripAppCodeDecorations(
+      stripAppImageAttributes(
+        stripAppLinkAttributes(renderMarkdownUnsafe(example.markdown, { htmlPolicy: policy })),
+      ),
     ),
   )
   return normalizeHtml(html) === normalizeHtml(example.html)
