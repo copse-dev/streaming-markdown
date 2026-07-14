@@ -100,8 +100,22 @@ jobs:
       # ratchet, so a release can't ship a commit CI would have blocked on a PR.
       - name: Typecheck
         run: npm run typecheck
+      # Fetch the GFM spec.txt (gitignored, not on npm) exactly like ci.yml does
+      # before ITS coverage run: without it the GFM conformance suite self-skips
+      # and the lines only it exercises read as uncovered — which failed the
+      # v1.0.0-rc.1 release gate at 99.9% vs the 99.98% baseline from a
+      # perfectly green tree. "Mirrors CI exactly" includes the fixtures.
+      - name: Fetch + verify GFM spec
+        run: npm run check:gfm-spec
       - name: Test + coverage
         run: npm run coverage:ci
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage/lcov-report
+          if-no-files-found: ignore
       - name: Build
         run: npm run build
       - name: Normalizer parity
