@@ -84,14 +84,14 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          # Node 24 bundles npm 11.x (>= 11.5.1), which npm Trusted Publishing
-          # requires. Using it avoids upgrading npm in place at publish time —
-          # that in-place self-upgrade could prune npm's own bundled `sigstore`
-          # dependency and break provenance generation during `npm publish`.
-          node-version: 24
+          # The gate below must mirror ci.yml EXACTLY, and that includes the
+          # Node version: V8's coverage attribution shifts between majors, so
+          # the coverage-baseline ratchet pinned under ci.yml's Node 22 reads
+          # ~0.1% lower under Node 24 and fails a release from a green tree
+          # (seen cutting v1.0.0-rc.1: 99.9% vs the 99.98% baseline). Gate on
+          # 22; the publish step switches to Node 24 just-in-time.
+          node-version: 22
           cache: npm
-          registry-url: https://registry.npmjs.org
-          scope: '@copse'
 
       - run: npm ci
 
@@ -154,6 +154,21 @@ jobs:
           git add package.json package-lock.json CHANGELOG.md
           git commit -m "chore(release): ${{ steps.version.outputs.tag }}"
           git tag -a "${{ steps.version.outputs.tag }}" -m "${{ steps.version.outputs.tag }}"
+
+      # Switch to Node 24 ONLY for the publish: it bundles npm 11.x
+      # (>= 11.5.1), which npm Trusted Publishing requires. Doing the switch
+      # here rather than up top keeps the release gate on ci.yml's exact Node
+      # version (see the first setup-node step), and avoids upgrading npm in
+      # place — that in-place self-upgrade could prune npm's own bundled
+      # `sigstore` dependency and break provenance generation. dist/ is
+      # already built (plain JS) and no install runs after the switch, so the
+      # Node-22-built node_modules stays valid.
+      - uses: actions/setup-node@v6
+        if: ${{ !inputs.dry_run }}
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          scope: '@copse'
 
       # Publish BEFORE pushing so a failed publish (e.g. bad token) leaves main
       # and the tag list untouched — the commit + tag exist only locally on the
