@@ -18,6 +18,7 @@
  * deterministic in render order, which walks blocks in document order.
  */
 import { dropTrailingNewline, stripFourColumnIndent } from './block-patterns.ts'
+import { escapeHtml } from './escape.ts'
 import { decodeEscapes, normalizeReferenceLabel } from './link-references.ts'
 import { activeConfig } from './config.ts'
 
@@ -229,17 +230,33 @@ export function footnoteRefHtml(ctx: FootnoteContext, label: string): string | n
 }
 
 /**
- * Replace resolvable `[^label]` references in one unshielded text segment,
- * splicing the generated HTML through `emit` (the inline-pass side table) so
- * it survives `escapeHtmlTextNodes`. Backslash-escaped `\[` is already
- * PUA-encoded when this runs, so escaped brackets never match.
+ * Replace `[^label]` references in one unshielded text segment, splicing the
+ * generated HTML through `emit` (the inline-pass side table) so it survives
+ * `escapeHtmlTextNodes`. Backslash-escaped `\[` is already PUA-encoded when
+ * this runs, so escaped brackets never match.
+ *
+ * Resolvable references become numbered `<sup>` links. A reference that is
+ * not (yet) resolvable keeps its literal text but is wrapped in
+ * `<span class="footnote-ref-unresolved">` (#230): visually identical to
+ * GitHub's literal render, but addressable — a streaming host can dim or hide
+ * not-yet-defined citations until their definitions arrive, at which point
+ * the reference upgrades to the numbered link in place (#110). Two carve-outs
+ * keep prior parsing intact: a ref immediately followed by `(` or `[` is left
+ * alone so link resolution can read it (`[^chat](url)` renders as a link,
+ * matching GitHub), and with no active context AND footnotes disabled the
+ * text is untouched (the `footnotes: false` gate stays byte-identical). The
+ * pending-line path runs without a context — every complete ref there wraps,
+ * converging with the committed render either way at commit.
  */
 export function renderFootnoteRefs(text: string, emit: (html: string) => string): string {
+  if (!text.includes('[^')) return text
   const ctx = activeFootnotes
-  if (!ctx || !text.includes('[^')) return text
-  return text.replace(FOOTNOTE_REF_RE, (match, label: string) => {
-    const html = footnoteRefHtml(ctx, label)
-    return html === null ? match : emit(html)
+  return text.replace(FOOTNOTE_REF_RE, (match, label: string, offset: number) => {
+    const html = ctx ? footnoteRefHtml(ctx, label) : null
+    if (html !== null) return emit(html)
+    const next = text[offset + match.length]
+    if (next === '(' || next === '[') return match
+    return emit(`<span class="footnote-ref-unresolved">${escapeHtml(match)}</span>`)
   })
 }
 

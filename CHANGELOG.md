@@ -5,6 +5,65 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-07-14
+
+### Bug Fixes
+
+- keep the pending tail above the trailing footnotes section (#228) (`7a34c18`)
+- namespace ids to prevent cross-instance collisions; a11y parity (#221) (`ddcf474`)
+- enable math grammar before renderer construction (#193) (`4825084`)
+
+### Performance
+
+- sealed-commit path consumes scan events — render-once span adoption + event-verified prefix (#213) (`2a3b920`)
+- release settled leading definitions of an open blank-free link-ref run (#212) (`5002a0f`)
+- sealed-commit memos and targeted link-ref patches — ADR 0004 Phase 2 (#203) (`4cef347`)
+- pending-line plain-text fast path — append inert deltas to the DOM text node (#202) (`5773d76`)
+- selector-free hot path, single-parse commits, inert-definition skips (#197) (`4415614`)
+
+### Documentation
+
+- correct GFM conformance numbers after task-list baseline bump (#223) (`f0f942f`)
+- document CommonMark-vs-GFM equal-length nesting divergence (#208) (`365c245`)
+- correct drifted spec numbers; generate the report from baselines (#207) (`5fe883a`)
+- ADR 0005 — industry benchmarks and evals for the plumbing (#198) (`6dc8b3a`)
+- post-merge table regeneration + published LLM-delta-sized parity section (#210) (`e463ae2`)
+- measure the direct-DOM floor — verdict: do not build it (#201) (`263e349`)
+- final combined tables — escape-all parity row on the hot-path code (#200) (`93222d9`)
+- genericise sample artifact path in normalizeHostImagePath (#199) (`7fabdd3`)
+
+### Tests
+
+- pin the three Babelmark divergence cases not covered by the spec suites (#222) (`7536297`)
+- strip task-list decorations so GFM task lists score 2/2 (#209) (`31e5dda`)
+
+### Continuous Integration
+
+- fetch the GFM spec before the gate; print uncovered lines on coverage failure (#233) (`9fd3d87`)
+- gate on ci.yml's Node version; switch to Node 24 only to publish (#232) (`bc82ff0`)
+- gate docs numbers against baselines (--check) (#225) (`3c23c9c`)
+
+### Chores
+
+- Bump actions/upload-artifact from 4 to 7 (#205) (`295e180`)
+- Bump actions/create-github-app-token from 2 to 3 (#206) (`2bc0e02`)
+- Bump actions/cache from 4 to 6 (#204) (`ba30554`)
+
+### Other Changes
+
+- Footnote streaming presentation: CSS snap follow, section + unresolved refs held until resolve/settle; prereleases under `next` (#229) (`0105400`)
+- Promote experimental tier to stable v1 API at 1.0 release (#227) (`f5f47a3`)
+- Style pending mermaid diagrams with consistent streaming indicators (#226) (`066c283`)
+- Document first-party React bindings and component API (#211) (`b0291df`)
+- Improve hero demo streaming UX and fix layout shifts (#224) (`f547340`)
+- bench(competitors): validate rendered output per contestant — coverage + structure metrics (#214) (`80e246c`)
+- perf(scan) + guard: fix measured long-document super-linear terms; op-count doubling gate (ADR 0004 Phase 3) (#215) (`03bf055`)
+- htmlPolicy 'escape-all': literalize every raw tag, retire the balance guards (#196) (`4160cce`)
+- Re-rooted append points for open raw containers (ADR 0004 Phase 2) (#194) (`c82fc55`)
+- smd like-for-like benchmarking, feature gates, and the sealed-block plan (ADR 0004 Phases 0–1) (#195) (`37ad049`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v.0.11.0...v1.0.0
+
 ## [0.11.0] - 2026-07-12
 
 ### ⚠ BREAKING CHANGES

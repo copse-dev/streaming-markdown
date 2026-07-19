@@ -219,11 +219,19 @@ jobs:
         # code (0) and stay green, defeating the guard.
         shell: bash
         # The bench streams several large fixtures through jsdom back to back
-        # (footnote #110, incremental-scan #111, lazy-quote sections); the peak
-        # heap exceeds Node's default cap on the runner and aborts with an OOM
-        # (exit 134). Raise the old-space limit so the full run completes.
+        # (footnote #110, incremental-scan #111, lazy-quote sections) — and
+        # jsdom permanently retains the DOMPurify string path's per-call
+        # DOMParser document (~1 MB per sanitize at bench-sized inputs; it
+        # survives forced GC, and bare DOMPurify-on-jsdom reproduces it with
+        # no library code involved — see #231). Thousands of string-path
+        # sanitizes accumulate multiple GB over one run, so the ceiling must
+        # clear the whole FIXED-SIZE workload with margin: 6144 sat within
+        # ~1 GB of the peak and any allocation growth in a PR tipped it into
+        # OOM (exit 134). jsdom-only — browsers and the sanitizeInto fragment
+        # path do not retain. The durable fix (per-section subprocesses) is
+        # tracked in #231.
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: --max-old-space-size=12288
         run: npm run bench | tee bench-output.txt
 
       - name: Upload bench output
