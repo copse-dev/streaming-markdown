@@ -1247,7 +1247,7 @@
       <input type="checkbox" id="speed-check" checked>
       Fast
     </label>
-    <span id="fidelity-badge" class="fidelity-badge" style="visibility:hidden">&#10003; outputs match</span>
+    <span id="fidelity-badge" class="fidelity-badge" style="visibility:hidden">&#10003; at-rest match</span>
   </div>
 
   <div class="lazy-bar lazy-bar--inline" title="Neither library is in the page's main bundle. Each is fetched the first time the stream actually needs it.">
@@ -1533,6 +1533,7 @@ el.innerHTML = <span class="fn">sanitizeRenderedMarkdown</span>(
 
 <script type="module">
 import {
+  renderMarkdown,
   renderStreamingMarkdown,
   StreamingMarkdownRenderer,
   isBrowserSanitizerSupported,
@@ -2506,12 +2507,21 @@ function startCompare() {
       clearInterval(compareTimer);
       compareTimer = null;
       compareStreaming = false;
+      // The driver knows this is EOF; seal the final line so the streaming
+      // emitters commit it before fidelity is checked against the at-rest
+      // renderer. Core update() calls cannot infer EOF from a growing string.
+      const settledText = sealDoc(text);
+      stringOutput.innerHTML = renderStreamingMarkdown(settledText, renderConfig);
+      domRenderer.update(settledText);
+      compareUpdates++;
+      ensureSnapAnchor(stringOutput);
+      ensureSnapAnchor(domOutput);
       stringOutput.classList.remove('is-streaming');
       domOutput.classList.remove('is-streaming');
       const elapsed = performance.now() - compareStart;
       stringStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
       domStats.innerHTML = formatStats(elapsed, text.length, compareUpdates);
-      checkFidelity(text);
+      checkFidelity(settledText);
       // The stream has settled — swap any ```mermaid scaffolding for SVG and
       // any pending math for rendered KaTeX.
       hydrateDiagrams(stringOutput);
@@ -2570,7 +2580,8 @@ function rerenderAfterHighlight() {
     if (!heroStreaming) { hydrateDiagrams(heroOutput); hydrateMath(heroOutput); }
   }
   if (compareText && comparePos > 0) {
-    const partial = compareText.slice(0, comparePos);
+    const streamed = compareText.slice(0, comparePos);
+    const partial = compareStreaming ? streamed : sealDoc(streamed);
     stringOutput.innerHTML = renderStreamingMarkdown(partial, renderConfig);
     domOutput.classList.add('no-settle');
     domOutput.innerHTML = '';
@@ -2579,6 +2590,7 @@ function rerenderAfterHighlight() {
     stringOutput.scrollTop = stringOutput.scrollHeight;
     domOutput.scrollTop = domOutput.scrollHeight;
     if (!compareStreaming) {
+      checkFidelity(partial);
       hydrateDiagrams(stringOutput);
       hydrateDiagrams(domOutput);
       hydrateMath(stringOutput);
@@ -2634,18 +2646,21 @@ function normalizeStreamOutput(html) {
 }
 
 function checkFidelity(text) {
-  // Compare the rendered content of both panels once the document is complete.
-  // The two emitters converge on identical output; only their DOM scaffolding
-  // differs, which normalizeStreamOutput() removes before comparing.
+  // Compare both streaming paths with a fresh at-rest render. Previously this
+  // function ignored `text` and only proved that the two streaming emitters
+  // agreed with each other — they could share the same unsettled final tail.
   const stringHtml = normalizeStreamOutput(stringOutput.innerHTML);
   const domHtml = normalizeStreamOutput(domOutput.innerHTML);
+  const atRestHtml = normalizeStreamOutput(renderMarkdown(text, renderConfig).toString());
   fidelityBadge.style.visibility = 'visible';
-  if (stringHtml === domHtml) {
+  if (stringHtml === domHtml && domHtml === atRestHtml) {
     fidelityBadge.className = 'fidelity-badge';
-    fidelityBadge.textContent = '✓ outputs match';
+    fidelityBadge.textContent = '✓ at-rest match';
   } else {
     fidelityBadge.className = 'fidelity-badge checking';
-    fidelityBadge.textContent = '≠ outputs differ';
+    fidelityBadge.textContent = stringHtml === domHtml
+      ? '≠ at-rest differs'
+      : '≠ emitters differ';
   }
 }
 

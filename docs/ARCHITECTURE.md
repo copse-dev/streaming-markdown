@@ -322,6 +322,13 @@ When extending the renderer or its CSS, preserve these rules:
   the literal backticks. This bounds a malformed opener's mid-line stall without guessing
   a non-standard closing rule.
 
+  **End of stream is host state.** Neither streaming emitter can distinguish "the last
+  token arrived" from "more text may still arrive" by inspecting a growing string. A host
+  that knows the stream closed must supply a final commit boundary (the demo's `sealDoc`
+  appends a newline) or switch to `renderMarkdown` for the at-rest frame. The demo fidelity
+  check seals both streaming paths and compares each with a fresh at-rest render; agreement
+  between the two streaming paths alone is not a convergence proof.
+
   Pending shapes (`streaming-pending-matrix.test.ts`):
 
   | While streaming         | DOM / class                                                      | Raw marker hidden?      | Inline MD in tail? |
