@@ -2,8 +2,7 @@ import { firstDirectChild, lastDirectChild } from './dom-scan.ts'
 import { splitTableRow, TABLE_SEP_RE } from './block-tokenizer.ts'
 import { dropTrailingNewline } from './block-patterns.ts'
 import { escapeHtml } from './escape.ts'
-import { pendingHoldIndex } from './inline-emphasis.ts'
-import { renderStreamingInline } from './render-pending-line.ts'
+import { renderStreamingInlinePending } from './render-pending-line.ts'
 import { sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml } from './html-sink.ts'
 
@@ -17,13 +16,9 @@ function tableLines(source: string): string[] {
   return trimmed.split('\n')
 }
 
-function visibleCellSource(raw: string): string {
-  return raw.slice(0, pendingHoldIndex(raw))
-}
-
 function renderStreamingTableCell(raw: string): SanitizedHtml | '' {
-  const visible = visibleCellSource(raw)
-  return visible ? sanitizeRenderedMarkdown(renderStreamingInline(visible)) : ''
+  const visible = renderStreamingInlinePending(raw)
+  return visible ? sanitizeRenderedMarkdown(visible) : ''
 }
 
 function setStreamingCellContent(cell: HTMLTableCellElement, raw: string): void {

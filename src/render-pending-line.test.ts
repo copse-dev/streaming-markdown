@@ -52,4 +52,37 @@ describe('renderPendingLine list streaming edge cases', () => {
     assert.equal(renderPendingLine('## '), '')
     assert.match(sanitizeRenderedMarkdown(renderPendingLine('## Title')), /Title/)
   })
+
+  it('reveals an unclosed code span as inert forming code without delimiter syntax', () => {
+    const html = sanitizeRenderedMarkdown(renderPendingLine('run `npm & **literal'))
+    assert.equal(
+      html,
+      'run <code class="stream-forming-inline-code">npm &amp; **literal</code>',
+    )
+  })
+
+  it('keeps multi-backtick forming code opaque until a matching run arrives', () => {
+    const forming = sanitizeRenderedMarkdown(renderPendingLine('A ````mermaid``` fence'))
+    assert.equal(
+      forming,
+      'A <code class="stream-forming-inline-code">mermaid``` fence</code>',
+    )
+
+    const settled = sanitizeRenderedMarkdown(renderPendingLine('A ```` ```mermaid ```` fence'))
+    assert.equal(settled, 'A <code>```mermaid</code> fence')
+  })
+
+  it('reveals forming inline code in structured pending lines', () => {
+    const cases: Array<[string, Parameters<typeof renderPendingLine>[1]]> = [
+      ['- run `npm', {}],
+      ['### run `npm', {}],
+      ['> run `npm', {}],
+      ['  run `npm', { openListItemFirstLine: '- parent' }],
+    ]
+    for (const [source, options] of cases) {
+      const html = sanitizeRenderedMarkdown(renderPendingLine(source, options))
+      assert.match(html, /run <code class="stream-forming-inline-code">npm<\/code>/)
+      assert.doesNotMatch(html, /`npm/)
+    }
+  })
 })
