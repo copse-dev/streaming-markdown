@@ -82,7 +82,7 @@ jobs:
           # Full history + tags so the changelog can diff against the last tag.
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           # The gate below must mirror ci.yml EXACTLY, and that includes the
           # Node version: V8's coverage attribution shifts between majors, so
@@ -177,7 +177,7 @@ jobs:
       # `sigstore` dependency and break provenance generation. dist/ is
       # already built (plain JS) and no install runs after the switch, so the
       # Node-22-built node_modules stays valid.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: ${{ !inputs.dry_run }}
         with:
           node-version: 24
