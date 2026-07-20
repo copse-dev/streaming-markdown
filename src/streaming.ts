@@ -422,10 +422,17 @@ function clearListContinuationDom(completedEl: HTMLElement): void {
 function isParagraphContinuationPending(split: StreamingSplit): boolean {
   const { pending, openListItemFirstLine } = split
   return (
-    split.paragraphContinuation === true &&
+    (split.inlineCodeContinuation === true ||
+      (split.paragraphContinuation === true &&
+        isBlockLevelPending(pending, openListItemFirstLine))) &&
     blockPendingTag(pending, openListItemFirstLine) === 'p' &&
-    isBlockLevelPending(pending, openListItemFirstLine)
+    pending !== ''
   )
+}
+
+/** Inline-code holds continue the same source line; ordinary continuations add a soft break. */
+function paragraphContinuationSeam(split: StreamingSplit): string {
+  return split.inlineCodeContinuation === true ? '' : '\n'
 }
 
 function paragraphContinuationSpanHtml(pendingInner: string): string {
@@ -438,9 +445,13 @@ function paragraphContinuationSpanHtml(pendingInner: string): string {
  * the committed soft break will in the host theme (a space under collapsing
  * white-space, a line break under `white-space: pre-wrap`).
  */
-function appendParagraphContinuationHtml(rendered: string, pendingInner: string): string | null {
+function appendParagraphContinuationHtml(
+  rendered: string,
+  pendingInner: string,
+  seam: string,
+): string | null {
   if (!rendered.endsWith('</p>')) return null
-  return `${rendered.slice(0, -'</p>'.length)}\n${paragraphContinuationSpanHtml(pendingInner)}</p>`
+  return `${rendered.slice(0, -'</p>'.length)}${seam}${paragraphContinuationSpanHtml(pendingInner)}</p>`
 }
 
 /** The trailing committed paragraph a pending continuation renders into. */
@@ -472,6 +483,7 @@ function syncParagraphContinuationDom(
   completedEl: HTMLElement,
   pendingInner: SanitizedHtml | '',
   active: boolean,
+  seam: string,
 ): boolean {
   const host = findTrailingParagraphHost(completedEl)
   if (!host) return false
@@ -488,8 +500,9 @@ function syncParagraphContinuationDom(
 
   let el: Element | null = existing
   if (!el) {
-    // Soft break as a real text node in the <p> (see appendParagraphContinuationHtml).
-    host.append(document.createTextNode('\n'))
+    // Ordinary continuations carry a real soft-break text node; an inline-code
+    // hold starts in the same source line and therefore has no seam.
+    if (seam) host.append(document.createTextNode(seam))
     el = document.createElement('span')
     host.append(el)
   }
@@ -540,7 +553,16 @@ function syncBlockPendingDom(
 
   if (isParagraphContinuationPending(split)) {
     clearBlockPendingDom(completedEl, ['continuation', 'list-items', 'non-list-direct'])
-    if (syncParagraphContinuationDom(completedEl, pendingInner, active)) return
+    if (
+      syncParagraphContinuationDom(
+        completedEl,
+        pendingInner,
+        active,
+        paragraphContinuationSeam(split),
+      )
+    ) {
+      return
+    }
     // No trailing <p> host — fall through to a standalone pending block.
   }
 
@@ -913,7 +935,11 @@ function renderStreamingMarkdownCore(content: string): string {
   if (!pendingInner) return rendered
 
   if (isParagraphContinuationPending(split)) {
-    const inserted = appendParagraphContinuationHtml(body, pendingInner)
+    const inserted = appendParagraphContinuationHtml(
+      body,
+      pendingInner,
+      paragraphContinuationSeam(split),
+    )
     if (inserted) return `${inserted}${section}`
   }
 
@@ -1191,7 +1217,11 @@ export class StreamingMarkdownRenderer {
 
     const { pendingInner, pendingVisible } = renderPendingTail(split, formingActive, pendingInTable)
 
-    if (pendingVisible && isBlockLevelPending(pending, openListItemFirstLine)) {
+    if (
+      pendingVisible &&
+      (isBlockLevelPending(pending, openListItemFirstLine) ||
+        isParagraphContinuationPending(split))
+    ) {
       syncBlockPendingDom(completedEl, split, pendingInner, true)
       syncInlinePendingDom(pendingEl, '', false)
       this.pendingFast = armPendingFastPath(
