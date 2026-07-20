@@ -393,6 +393,14 @@ describe('renderStreamingMarkdown (holds unresolved bold)', () => {
     const html = renderStreamingMarkdown('done\nintro **bold text**')
     assert.match(html, /<strong>bold text<\/strong>/)
   })
+
+  it('streams a malformed inline-code tail instead of stalling the paragraph', () => {
+    const source = 'A ````mermaid``` fence streams in as inert source'
+    const html = renderStreamingMarkdown(source)
+    assert.match(html, /<p>A <span class="stream-pending[^>]*"><code class="stream-forming-inline-code">/)
+    assert.match(html, /mermaid``` fence streams in as inert source<\/code>/)
+    assert.doesNotMatch(html, />````mermaid/)
+  })
 })
 
 describe('StreamingMarkdownRenderer (#119 incremental render)', () => {
@@ -537,5 +545,40 @@ describe('StreamingMarkdownRenderer (#119 incremental render)', () => {
     const pending = host.querySelector(':scope > span.stream-pending') as HTMLElement
     assert.equal(pending.hidden, true)
     assert.equal(pending.textContent, '')
+  })
+
+  it('keeps a forming inline-code preview inside the trailing paragraph', () => {
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    r.update('A ````mermaid')
+
+    const paragraph = host.querySelector('.stream-complete > p')
+    const continuation = paragraph?.querySelector('.stream-pending-paragraph-continuation')
+    const forming = continuation?.querySelector('code.stream-forming-inline-code')
+    assert.ok(paragraph)
+    assert.ok(continuation)
+    assert.equal(paragraph.textContent, 'A mermaid')
+    assert.equal(forming?.textContent, 'mermaid')
+
+    r.update('A ````mermaid``` fence streams')
+    assert.strictEqual(host.querySelector('.stream-complete > p'), paragraph)
+    assert.strictEqual(
+      paragraph.querySelector('.stream-pending-paragraph-continuation'),
+      continuation,
+    )
+    assert.equal(paragraph.textContent, 'A mermaid``` fence streams')
+  })
+
+  it('converges an unmatched forming code span to the at-rest literal render', () => {
+    const source = 'A ````mermaid``` fence streams in as inert source'
+    const host = document.createElement('div')
+    const r = new StreamingMarkdownRenderer(host)
+    r.update(source)
+    assert.ok(host.querySelector('code.stream-forming-inline-code'))
+
+    r.update(`${source}\n`)
+    const complete = host.querySelector('.stream-complete') as HTMLElement
+    assert.equal(complete.innerHTML, renderMarkdown(`${source}\n`))
+    assert.equal(host.querySelector('code.stream-forming-inline-code'), null)
   })
 })

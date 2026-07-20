@@ -8,6 +8,7 @@ import {
   tokenizeBlocks,
   type BlockToken,
 } from './block-tokenizer.ts'
+import { nextCodeSpan } from './inline-code-spans.ts'
 import { emphasisSpansNewline, pendingHoldIndex } from './inline-emphasis.ts'
 
 export interface StreamingSplit {
@@ -25,6 +26,12 @@ export interface StreamingSplit {
    * merge upward on commit (#11).
    */
   paragraphContinuation?: boolean
+  /**
+   * `pending` starts at an unresolved inline-code opener in the same source
+   * line as the trailing committed paragraph. Emitters keep its forming code
+   * preview inside that `<p>` without inserting a soft-break seam.
+   */
+  inlineCodeContinuation?: boolean
 }
 
 /**
@@ -74,7 +81,17 @@ function splitOpenParagraph(block: BlockToken, content: string): StreamingSplit 
 
   if (inlineHold < openText.length) {
     const cut = block.start + inlineHold
-    return { complete: content.slice(0, cut), pending: content.slice(cut) }
+    const held = openText.slice(inlineHold)
+    const codeSpan = nextCodeSpan(held, 0)
+    const inlineCodeContinuation = codeSpan?.type === 'unclosed' && codeSpan.open === 0
+    return {
+      complete: content.slice(0, cut),
+      pending: content.slice(cut),
+      // pendingHoldIndex cuts exactly at an unresolved code opener when code
+      // is the earliest hold. The forming preview can then remain inline with
+      // the safe paragraph prefix instead of appearing as a sibling block.
+      ...(inlineCodeContinuation ? { inlineCodeContinuation: true } : {}),
+    }
   }
 
   const split = splitOpenBlockAtLastNewline(block, content)
