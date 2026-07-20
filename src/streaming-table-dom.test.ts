@@ -39,6 +39,14 @@ describe('syncFormingTableDom', () => {
     assert.equal(bodyRows[1]?.className, 'stream-pending-row')
   })
 
+  it('reveals forming inline code inside a streaming cell', () => {
+    const el = container()
+    syncFormingTableDom(el, '| a | b |\n| --- | --- |\n| run `npm | ready |')
+    const code = el.querySelector('tbody code.stream-forming-inline-code')
+    assert.equal(code?.textContent, 'npm')
+    assert.doesNotMatch(el.textContent ?? '', /`npm/)
+  })
+
   it('reuses the existing forming table and shrinks the header when columns drop', () => {
     const el = container()
     syncFormingTableDom(el, '| a | b | c |')
@@ -74,6 +82,12 @@ describe('buildFormingTableHtml (string path)', () => {
     assert.match(html, /<thead><tr><th>a<\/th><th>b<\/th><\/tr><\/thead>/)
     assert.match(html, /<tr><td>1<\/td><td>2<\/td><\/tr>/)
     assert.match(html, /<tr class="stream-pending-row"><td>3<\/td><td>4<\/td><\/tr>/)
+  })
+
+  it('renders forming inline code in the string table path', () => {
+    const html = buildFormingTableHtml('| a | b |\n| --- | --- |\n| run `npm | ready |')
+    assert.match(html, /run <code class="stream-forming-inline-code">npm<\/code>/)
+    assert.doesNotMatch(html, /`npm/)
   })
 
   it('marks no row pending when the source ends with a newline', () => {

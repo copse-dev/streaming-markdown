@@ -315,6 +315,19 @@ When extending the renderer or its CSS, preserve these rules:
   and the partial URL is never rendered or autolinked — then the completed `[label](url)` upgrades
   to a real `<a>` on commit ([#617](https://github.com/copse-dev/agent-pane/issues/617)). Only the trailing forming link is touched; earlier complete
   links, `[ref]` shortcuts, and `[` inside code spans or after a backslash are left alone.
+  **Forming inline code** follows the same progressive-preview rule: an unmatched backtick
+  run keeps its delimiter hidden but reveals its escaped, markdown-opaque contents inside
+  `<code class="stream-forming-inline-code">`. A matching run promotes it to ordinary
+  `<code>`; if the line settles unmatched, the at-rest CommonMark render wins and restores
+  the literal backticks. This bounds a malformed opener's mid-line stall without guessing
+  a non-standard closing rule.
+
+  **End of stream is host state.** Neither streaming emitter can distinguish "the last
+  token arrived" from "more text may still arrive" by inspecting a growing string. A host
+  that knows the stream closed must supply a final commit boundary (the demo's `sealDoc`
+  appends a newline) or switch to `renderMarkdown` for the at-rest frame. The demo fidelity
+  check seals both streaming paths and compares each with a fresh at-rest render; agreement
+  between the two streaming paths alone is not a convergence proof.
 
   Pending shapes (`streaming-pending-matrix.test.ts`):
 
@@ -322,6 +335,7 @@ When extending the renderer or its CSS, preserve these rules:
   | ----------------------- | ---------------------------------------------------------------- | ----------------------- | ------------------ |
   | Prose paragraph         | `<p class="stream-pending-paragraph">`                           | n/a                     | yes                |
   | Lazy ¶ continuation     | `\n` + `<span class="stream-pending-paragraph-continuation">` inside the open `<p>` | n/a | yes                |
+  | Half-open inline code   | `<code class="stream-forming-inline-code">` in a same-line pending continuation | yes | no (escaped/opaque) |
   | `- item` / `1. item`    | `<ul>/<ol>` with native `<li class="stream-pending-list-item">`  | yes                     | yes                |
   | Nested `  - item`       | nested `<ul>/<ol>` inside open `<li>`                            | yes                     | yes                |
   | Lazy list continuation  | `<span class="stream-pending-list-continuation">` in open `<li>` | n/a (plain text)        | yes                |

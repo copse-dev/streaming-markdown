@@ -35,7 +35,7 @@ const PYTHON = process.env['PYTHON'] ?? 'python3'
 // diverge so a new divergence cannot hide behind an existing entry.
 const ALLOWED_STRING_DIVERGENCES: Record<
   number,
-  { kind: 'expected' | 'rendered' | 'both'; reason: string }
+  { kind: 'expected' | 'rendered' | 'both'; reason: string; optional?: boolean }
 > = {
   156: {
     kind: 'expected',
@@ -48,7 +48,12 @@ const ALLOWED_STRING_DIVERGENCES: Record<
   158: { kind: 'expected', reason: 'HTML block: stray < inside raw text parsed differently' },
   173: {
     kind: 'expected',
-    reason: 'HTML block: <style> raw-text element swallows following text in HTMLParser',
+    reason:
+      'HTML block: <style> raw-text element swallowing varies across Python HTMLParser versions',
+    // Python 3.9/3.12 diverge from the JS port here; Python 3.11 does not, and
+    // hosted runners can therefore exhibit either behavior. Both preserve
+    // pass-set parity, so accept either without weakening new-divergence checks.
+    optional: true,
   },
   616: {
     kind: 'expected',
@@ -198,7 +203,7 @@ for (const e of spec) {
 }
 const staleAllow = Object.keys(ALLOWED_STRING_DIVERGENCES)
   .map(Number)
-  .filter((n) => !usedAllow.has(n))
+  .filter((n) => !usedAllow.has(n) && !ALLOWED_STRING_DIVERGENCES[n]?.optional)
   .sort((a, b) => a - b)
 
 const problems: string[] = []
