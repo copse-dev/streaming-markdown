@@ -12,7 +12,7 @@ import {
 } from './block-tokenizer.ts'
 import { decodeSafeMarkdownEntities, escapeHtml } from './escape.ts'
 import { isPendingFootnoteDefLine } from './footnotes.ts'
-import { scanCodeSpans } from './inline-code-spans.ts'
+import { nextCodeSpan, scanCodeSpans } from './inline-code-spans.ts'
 import { pendingHoldIndex } from './inline-emphasis.ts'
 import { renderProseInline } from './render-prose-inline.ts'
 
@@ -176,6 +176,28 @@ export function renderStreamingInline(text: string): string {
   return renderProseInline(revealFormingLink(text))
 }
 
+/**
+ * Render a held, unclosed code span as inert forming code instead of hiding an
+ * arbitrarily long tail. Delimiter syntax stays suppressed, and the contents
+ * are escaped/opaque to every other inline grammar just like settled code.
+ */
+function formingInlineCodeHtml(held: string): string {
+  const span = nextCodeSpan(held, 0)
+  if (!span || span.type !== 'unclosed' || span.open !== 0) return ''
+  const content = held.slice(span.open + span.runLen).replace(/\n/g, ' ')
+  if (content === '') return ''
+  return `<code class="stream-forming-inline-code">${escapeHtml(content)}</code>`
+}
+
+/** Render the safe prefix plus an inert preview when the hold is an open code span. */
+export function renderStreamingInlinePending(text: string): string {
+  const hold = pendingHoldIndex(text)
+  const visible = text.slice(0, hold)
+  const formingCode = formingInlineCodeHtml(text.slice(hold))
+  if (!visible && !formingCode) return ''
+  return renderStreamingInline(visible) + formingCode
+}
+
 export interface RenderPendingLineOptions {
   openListItemFirstLine?: string
 }
@@ -193,19 +215,21 @@ export function renderPendingLine(pending: string, options: RenderPendingLineOpt
   if (isListContinuationPending(pending, openListItemFirstLine)) {
     const hold = pendingHoldIndex(pending)
     const visible = pending.slice(0, hold)
-    if (!visible) return ''
+    const formingCode = formingInlineCodeHtml(pending.slice(hold))
+    if (!visible && !formingCode) return ''
     const dedented = dedentLazyContinuation(visible, openListItemFirstLine ?? '')
-    return renderStreamingInline(dedented)
+    return renderStreamingInline(dedented) + formingCode
   }
 
   const listMatch = matchPendingListMarker(pending)
   if (listMatch) {
     const hold = pendingHoldIndex(pending)
     const visible = pending.slice(0, hold)
-    if (!visible) return ''
+    const formingCode = formingInlineCodeHtml(pending.slice(hold))
+    if (!visible && !formingCode) return ''
     const markerLen = listMatch[0].length
-    if (visible.length <= markerLen) return ''
-    return renderStreamingInline(visible.slice(markerLen))
+    if (visible.length <= markerLen && !formingCode) return ''
+    return renderStreamingInline(visible.slice(markerLen)) + formingCode
   }
 
   if (isIncompleteListMarkerPrefix(pending)) {
@@ -224,8 +248,9 @@ export function renderPendingLine(pending: string, options: RenderPendingLineOpt
     if (!title) return ''
     const hold = pendingHoldIndex(title)
     const visible = title.slice(0, hold)
-    if (!visible) return ''
-    return renderStreamingInline(visible)
+    const formingCode = formingInlineCodeHtml(title.slice(hold))
+    if (!visible && !formingCode) return ''
+    return renderStreamingInline(visible) + formingCode
   }
 
   if (isPendingBlockquoteLine(pending)) {
@@ -240,19 +265,18 @@ export function renderPendingLine(pending: string, options: RenderPendingLineOpt
     if (!body.trim()) return ''
     const hold = pendingHoldIndex(body)
     const visible = body.slice(0, hold)
-    if (!visible) return ''
-    return renderStreamingInline(visible)
+    const formingCode = formingInlineCodeHtml(body.slice(hold))
+    if (!visible && !formingCode) return ''
+    return renderStreamingInline(visible) + formingCode
   }
 
   if (isAmbiguousBlockLine(pending)) {
     const hold = pendingHoldIndex(pending)
     const visible = pending.slice(0, hold)
-    if (!visible) return ''
-    return escapeHtml(decodeSafeMarkdownEntities(visible))
+    const formingCode = formingInlineCodeHtml(pending.slice(hold))
+    if (!visible && !formingCode) return ''
+    return escapeHtml(decodeSafeMarkdownEntities(visible)) + formingCode
   }
 
-  const hold = pendingHoldIndex(pending)
-  const visible = pending.slice(0, hold)
-  if (!visible) return ''
-  return renderStreamingInline(stripParagraphIndent(visible))
+  return renderStreamingInlinePending(stripParagraphIndent(pending))
 }
