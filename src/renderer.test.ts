@@ -701,6 +701,25 @@ describe('renderMarkdownUnsafe CommonMark structure fixes', () => {
     assert.match(renderMarkdownUnsafe('*foo\\\nbar*'), /<em>foo<br>bar<\/em>/)
   })
 
+  it('keeps punctuation-closed emphasis right-flanking before a hard break', () => {
+    // The hard-break sentinel must count as flanking whitespace; otherwise a
+    // closer after `?` / `.` / `!` fails CommonMark right-flanking and stays literal.
+    assert.match(
+      renderMarkdownUnsafe('**What Copse does now**  \n**Is pulling it possible?**  \nnext'),
+      /<strong>What Copse does now<\/strong><br><strong>Is pulling it possible\?<\/strong><br>next/,
+    )
+    assert.match(renderMarkdownUnsafe('**bold?**  \ntext'), /<strong>bold\?<\/strong><br>text/)
+    assert.match(renderMarkdownUnsafe('**bold!**  \ntext'), /<strong>bold!<\/strong><br>text/)
+    assert.match(renderMarkdownUnsafe('**bold.**  \ntext'), /<strong>bold\.<\/strong><br>text/)
+    assert.match(renderMarkdownUnsafe('*em?*  \ntext'), /<em>em\?<\/em><br>text/)
+    assert.match(renderMarkdownUnsafe('**bold?**\\\ntext'), /<strong>bold\?<\/strong><br>text/)
+    assert.match(renderMarkdownUnsafe('~~strike?~~  \ntext'), /<del>strike\?<\/del><br>text/)
+    assert.match(
+      renderMarkdownUnsafe('letter**  \n**next**'),
+      /letter\*\*<br><strong>next<\/strong>/,
+    )
+  })
+
   it('passes benign raw inline HTML through and keeps it escaped in code spans', () => {
     const html = renderMarkdownUnsafe('a <del>gone</del> x<sub>1</sub> <kbd>Ctrl</kbd> line<br>next')
     assert.match(html, /<del>gone<\/del>/)
