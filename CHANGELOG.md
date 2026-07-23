@@ -5,6 +5,24 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-07-23
+
+### Bug Fixes
+
+- treat hard-break sentinel as flanking whitespace (#238) (`5107a13`)
+
+### Chores
+
+- Bump the npm-minor-patch group with 3 updates (#236) (`2a390ec`)
+- Bump actions/setup-node from 6 to 7 (#235) (`1e5b24e`)
+- Bump typescript from 6.0.3 to 7.0.2 (#237) (`322ae1d`)
+
+### Other Changes
+
+- Fix streaming inline code preview (#234) (`6fad7de`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.0.0...v1.0.1
+
 ## [1.0.0] - 2026-07-14
 
 ### Bug Fixes
