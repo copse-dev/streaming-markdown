@@ -27,8 +27,16 @@ const UNICODE_PUNCTUATION_RE = /[\p{P}\p{S}]/u
  * output and the CommonMark/GFM conformance suites are byte-identical — the
  * predicate below short-circuits before ever calling it.
  */
+/**
+ * Hard-break sentinel inserted before emphasis runs (`\uFFFE`). A hard break
+ * replaces a newline, so the sentinel must count as flanking whitespace —
+ * otherwise a closer after punctuation (`?**` + hard break) fails CommonMark's
+ * right-flanking check and the markers stay literal.
+ */
+const HARD_BREAK_SENTINEL = '\uFFFE'
+
 function isFlankingWhitespace(ch: string): boolean {
-  return ch === '' || /\s/.test(ch)
+  return ch === '' || ch === HARD_BREAK_SENTINEL || /\s/.test(ch)
 }
 
 function isFlankingPunctuation(ch: string): boolean {
