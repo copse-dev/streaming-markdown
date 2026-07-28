@@ -5,6 +5,16 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-07-28
+
+### Chores
+
+- Bump katex in the npm-minor-patch group (#240) (`7e453f3`)
+- Bump c8 from 11.0.0 to 12.0.0 (#241) (`ba12378`)
+- Bump dompurify from 3.4.11 to 3.4.12 in /bench/competitors (#239) (`b7224e8`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.0.1...v1.0.2
+
 ## [1.0.1] - 2026-07-23
 
 ### Bug Fixes
