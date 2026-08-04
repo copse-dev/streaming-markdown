@@ -5,6 +5,14 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-08-04
+
+### Chores
+
+- Bump the npm-minor-patch group with 3 updates (#242) (`daf715d`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.0.2...v1.0.3
+
 ## [1.0.2] - 2026-07-28
 
 ### Chores
