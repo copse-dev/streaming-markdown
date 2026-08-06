@@ -5,6 +5,15 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-08-06
+
+### Chores
+
+- Bump undici from 7.28.0 to 7.29.0 in /bench/competitors (#243) (`5ca3b80`)
+- Bump undici from 7.28.0 to 7.29.0 (#244) (`22f64ec`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.0.3...v1.0.4
+
 ## [1.0.3] - 2026-08-04
 
 ### Chores
