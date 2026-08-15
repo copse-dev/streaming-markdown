@@ -178,7 +178,7 @@
     "entities": "^8.0.0",
     "esbuild": "^0.28.1",
     "highlight.js": "^11.11.1",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.1",
     "katex": "^0.18.1",
     "playwright-core": "^1.61.1",
     "react": "^19.2.7",
