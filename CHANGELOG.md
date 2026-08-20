@@ -5,6 +5,15 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-08-20
+
+### Chores
+
+- Bump @types/jsdom from 28.0.3 to 30.0.0 (#251) (`a88e625`)
+- Bump the npm-minor-patch group with 5 updates (#250) (`37f8b3a`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.0.6...v1.0.7
+
 ## [1.0.6] - 2026-08-15
 
 ### Chores
