@@ -1,9 +1,8 @@
 name: Notify agent-pane
 
-# Push-model dependency sync: poke copse-dev/agent-pane with a
-# repository_dispatch so its sync-streaming-markdown.yml workflow bumps
-# @copse/streaming-markdown and opens a PR immediately — no waiting for
-# dependabot's weekly schedule and cooldown.
+# Push-model dependency sync: poke copse-dev/agent-pane's
+# sync-streaming-markdown.yml so it bumps @copse/streaming-markdown and opens a
+# PR immediately — no waiting for dependabot's weekly schedule and cooldown.
 #
 # This workflow fires on:
 #   * release: published  — covers releases cut BY HAND in the GitHub UI.
@@ -15,15 +14,18 @@ name: Notify agent-pane
 #   * workflow_dispatch    — a manual escape hatch to (re)notify agent-pane for
 #     any tag, e.g. to replay a dispatch that failed or to sync an older tag.
 #
-# GITHUB_TOKEN is scoped to this repo and cannot dispatch cross-repo, so this
-# needs a fine-grained PAT stored as the AGENT_PANE_DISPATCH_TOKEN repo secret:
-#   github.com -> Settings -> Developer settings -> Fine-grained tokens
-#   Repository access: copse-dev/agent-pane only
-#   Permissions: Contents -> Read and write (the repository_dispatch endpoint
-#   sits under Contents)
-# A GitHub App installation token works too if PAT expiry rotation is a
-# concern. Until the secret exists this workflow simply fails on its one step,
-# and releases themselves are unaffected.
+# GITHUB_TOKEN is scoped to this repo and cannot dispatch cross-repo, so the
+# call below authenticates as the copse-release-bot GitHub App instead — the
+# same App release.yml already uses to push version bumps past the `main`
+# ruleset. An installation token is minted per run, expires in ~1h, and is
+# scoped here to ONE repository and ONE permission: Actions: write on
+# agent-pane. That is the narrowest grant that can start a workflow, and
+# notably it cannot push code — which the previous fine-grained PAT
+# (AGENT_PANE_DISPATCH_TOKEN, Contents: write for the repository_dispatch
+# endpoint) could. See the workflow_dispatch note on the step below.
+#
+# Nothing long-lived lives in CI as a result: the only stored secrets are the
+# App id and private key, shared with release.yml.
 
 on:
   release:
@@ -35,8 +37,8 @@ on:
         required: true
         type: string
 
-# The job only calls the API on the *other* repo via the PAT; this workflow
-# needs nothing from its own GITHUB_TOKEN.
+# The job authenticates to the *other* repo as the App; this workflow needs
+# nothing from its own GITHUB_TOKEN.
 permissions: {}
 
 jobs:
@@ -49,16 +51,37 @@ jobs:
     # .release is absent there, so the prerelease check is release-only).
     if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
     steps:
-      - name: Send repository_dispatch to agent-pane
+      # Scoped to agent-pane, not this repo: `owner` + `repositories` are what
+      # cross the repo boundary. Left empty, create-github-app-token mints a
+      # token for the CURRENT repository only — which is why release.yml's
+      # existing token cannot be reused for this call.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: copse-dev
+          repositories: agent-pane
+          # Downscope below the installation's own permissions. The App holds
+          # Contents: write org-wide (release.yml needs it here); this token
+          # deliberately does not carry it.
+          permission-actions: write
+
+      - name: Dispatch the agent-pane bump workflow
         env:
-          GH_TOKEN: ${{ secrets.AGENT_PANE_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # release event supplies tag_name; manual runs supply inputs.tag.
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
-          gh api repos/copse-dev/agent-pane/dispatches \
-            -f event_type=streaming-markdown-release \
-            -f "client_payload[version]=$VERSION" \
-            -f "client_payload[tag]=$TAG"
-          echo "Dispatched streaming-markdown-release $VERSION to copse-dev/agent-pane"
+          # workflow_dispatch rather than repository_dispatch: the former needs
+          # only Actions: write on agent-pane, the latter sits under Contents
+          # and would hand this job the ability to push code there. No --ref, so
+          # the call follows agent-pane's default branch and a rename there
+          # cannot silently point this at a stale one. (The target workflow must
+          # exist on that default branch to be dispatchable at all.)
+          gh workflow run sync-streaming-markdown.yml \
+            --repo copse-dev/agent-pane \
+            -f "version=$VERSION"
+          echo "Dispatched sync-streaming-markdown for $VERSION to copse-dev/agent-pane"
