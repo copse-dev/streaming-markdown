@@ -5,6 +5,18 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2026-08-24
+
+### Continuous Integration
+
+- dispatch agent-pane as the release App over workflow_dispatch (#252) (`153581f`)
+
+### Chores
+
+- Bump the npm-minor-patch group with 3 updates (#253) (`1a5bcde`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.0.7...v1.0.8
+
 ## [1.0.7] - 2026-08-20
 
 ### Chores
