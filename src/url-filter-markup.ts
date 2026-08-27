@@ -175,6 +175,10 @@ function parseInert(html: string): Element | null {
  * `transformSvg` / `transformHtml` by hand, or serializing outside a DOM sink.
  * Prefer the node path ({@link parseAndFilterMarkup}) where the markup is going
  * straight into an element — it avoids the re-parse and the injection sink.
+ *
+ * Note this path re-serializes: even with nothing filtered the output is not
+ * byte-identical to the input (`<image/>` comes back as `<image></image>`, and
+ * attribute quoting is normalized). Semantics are preserved; exact bytes are not.
  */
 export function filterMarkupUrlsString(html: string, source: UrlSource): string {
   const holder = parseAndFilterMarkup(html, source)

