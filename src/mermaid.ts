@@ -1,5 +1,8 @@
 import { mermaidSourceCandidates } from './mermaid-source.ts'
 import { setHostTrustedHtml, type TrustedHTMLValue } from './html-sink.ts'
+import { injectFilteredMarkup } from './url-filter-markup.ts'
+import { withConfig } from './config.ts'
+import type { UrlPolicy } from './url-policy.ts'
 
 // PROTOTYPE (#lazy-load): the diagram-renderer registry, the mermaid analogue of
 // the pluggable code highlighter. Unlike highlight.js, the mermaid *library* is
@@ -58,6 +61,19 @@ export interface HydrateDiagramsOptions {
    * will be rejected by the page's CSP.
    */
   transformSvg?: (svg: string) => string | TrustedHTMLValue
+  /**
+   * {@link UrlPolicy} to enforce over the backend's SVG before it is injected —
+   * the mermaid analogue of the sink's link/image gate, and the only thing that
+   * sees a `url()` in an injected `<style>` or an `<img>` inside a
+   * `<foreignObject>`.
+   *
+   * Passed explicitly rather than read from the ambient render config because
+   * hydration runs *after* the synchronous render scope has been restored
+   * (config.ts). `StreamingMarkdownRenderer.hydrate()` forwards its own
+   * `urlPolicy` here; a direct caller that installed one process-wide via
+   * `setDefaultConfig` need not pass it.
+   */
+  urlPolicy?: UrlPolicy | null
 }
 
 /** Read a pending container's diagram source from its `<pre class="mermaid">`. */
@@ -69,7 +85,16 @@ function readDiagramSource(container: Element): string {
 function markRendered(container: Element, svg: string | TrustedHTMLValue): void {
   container.classList.remove('mermaid-diagram--pending')
   container.classList.add('mermaid-diagram--rendered')
+  // Filtered node path first: it decides every URL *before* anything is in a
+  // live document, so an off-origin subresource never gets to start its fetch.
+  if (injectFilteredMarkup(container, svg, 'diagram')) return
   setHostTrustedHtml(container, svg)
+}
+
+/** Run one injection under an explicitly supplied policy, when the caller passed one. */
+function withUrlPolicy(urlPolicy: UrlPolicy | null | undefined, inject: () => void): void {
+  if (urlPolicy === undefined) inject()
+  else withConfig({ urlPolicy }, inject)
 }
 
 function markError(container: Element): void {
@@ -116,7 +141,9 @@ export async function hydratePendingDiagrams(
       // TrustedHTML — so fail the diagram without re-rendering every
       // candidate just to hit the same sink error.
       try {
-        markRendered(container, options.transformSvg ? options.transformSvg(svg) : svg)
+        withUrlPolicy(options.urlPolicy, () => {
+          markRendered(container, options.transformSvg ? options.transformSvg(svg) : svg)
+        })
         ok = true
         rendered++
       } catch {

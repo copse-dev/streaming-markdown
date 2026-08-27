@@ -59,6 +59,16 @@ export {
 // sanitizer rather than replacing them. Scope it via
 // `MarkdownConfig.linkImagePolicy`. See docs/EXTENDING.md.
 export { type LinkImagePolicy } from './link-image-policy.ts'
+// PROTOTYPE (#url-policy): the TrustedURL-shaped gate every emitted URL passes
+// through — markdown links/images/autolinks, raw-HTML passthrough destinations,
+// and the URLs inside diagram/math markup that bypasses the sink sanitizer.
+export {
+  type UrlPolicy,
+  type UrlRequest,
+  type UrlSink,
+  type UrlSource,
+} from './url-policy.ts'
+export { filterMarkupUrlsString } from './url-filter-markup.ts'
 // Trusted Types support: every internal `innerHTML` write routes through the
 // html-sink chokepoint, which sanitizes and then blesses the markup with a TT
 // policy when one is active (a lazily created `streaming-markdown` policy by

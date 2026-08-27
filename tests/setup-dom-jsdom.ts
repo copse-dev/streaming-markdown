@@ -16,6 +16,9 @@ Object.assign(globalThis, {
   Element: win.Element,
   HTMLElement: win.HTMLElement,
   Node: win.Node,
+  // Needed by the post-sink URL filter, which parses markup in an inert
+  // (browsing-context-free) document before deciding what may be injected.
+  DOMParser: win.DOMParser,
 })
 
 // jsdom has no native Sanitizer API (`Element.setHTML`), so the default backend

@@ -1084,6 +1084,9 @@ export class StreamingMarkdownRenderer {
     if (mathRenderer) {
       const mathOptions: HydrateMathOptions = { renderer: mathRenderer }
       if (options.transformHtml) mathOptions.transformHtml = options.transformHtml
+      // Hydration runs outside the render's config scope, so the policy has to
+      // travel with the options rather than be read from ambient config.
+      if (this.config.urlPolicy != null) mathOptions.urlPolicy = this.config.urlPolicy
       math = await hydratePendingMath(this.host, mathOptions)
     }
     let diagrams = 0
@@ -1091,6 +1094,7 @@ export class StreamingMarkdownRenderer {
     if (diagramRenderer) {
       const diagramOptions: HydrateDiagramsOptions = { renderer: diagramRenderer }
       if (options.transformSvg) diagramOptions.transformSvg = options.transformSvg
+      if (this.config.urlPolicy != null) diagramOptions.urlPolicy = this.config.urlPolicy
       diagrams = await hydratePendingDiagrams(this.host, diagramOptions)
     }
     // Hydration rewrites scaffold elements in place — an out-of-band mutation

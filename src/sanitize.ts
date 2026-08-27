@@ -1,5 +1,10 @@
 import { activeConfig } from './config.ts'
 import { applyLinkImagePolicy } from './link-image-policy.ts'
+import {
+  applyUrlPolicy,
+  hasUrlPolicy,
+  URL_POLICY_MARKER_ATTR,
+} from './url-policy.ts'
 import { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize-browser.ts'
 
 // Defense-in-depth over the hand-assembled HTML that `renderMarkdown()` emits.
@@ -206,6 +211,31 @@ export interface SanitizeExtension {
 // `id` cannot enable DOM clobbering of arbitrary page-global names.
 const FOOTNOTE_ID_RE = /^(?:fn(?:ref)?-[A-Za-z0-9_-]+|[A-Za-z0-9_-]*footnote-label)$/
 
+// Raw-HTML passthrough is the one population of `<a>`/`<img>` the inline
+// emitters never touched, so the sink is the only place its URLs can be gated.
+// The two populations serialize identically, which is what the marker
+// distinguishes (see URL_POLICY_MARKER_ATTR).
+function gateUrlPolicy(node: Element, tagName: string): void {
+  if (!hasUrlPolicy() || typeof node.getAttribute !== 'function') return
+  if (node.hasAttribute(URL_POLICY_MARKER_ATTR)) {
+    node.removeAttribute(URL_POLICY_MARKER_ATTR)
+    return
+  }
+  const attribute = tagName === 'a' ? 'href' : tagName === 'img' ? 'src' : null
+  if (attribute === null) return
+  const raw = node.getAttribute(attribute)
+  if (raw === null || raw === '') return
+  const decided = applyUrlPolicy(
+    raw,
+    tagName === 'img' ? 'image' : 'navigation',
+    'markdown',
+    tagName,
+    attribute,
+  )
+  if (decided === null) node.removeAttribute(attribute)
+  else if (decided !== raw) node.setAttribute(attribute, decided)
+}
+
 function gateElement(node: Element, tagName: string): void {
   // The DOMPurify backend's hook also fires for text/comment nodes, which
   // carry no attributes — only real elements have an id to gate.
@@ -224,6 +254,11 @@ function gateElement(node: Element, tagName: string): void {
     node.setAttribute('disabled', '')
     return
   }
+  // Host URL policy (opt-in, off by default) for destinations that did NOT come
+  // from the inline emitters — i.e. raw HTML passed through to the sink, which
+  // never met `safeLinkHref`. Renderer-emitted links carry the marker and were
+  // decided already; consume it so no attacker-visible attribute survives.
+  gateUrlPolicy(node, tagName)
   // Core link/image origin policy (opt-in, off by default) — a no-op unless a
   // policy is installed. Runs before the host hook so the host sees the already
   // origin-vetted `<a>`/`<img>`, and composes with (never replaces) it.
@@ -278,9 +313,12 @@ function buildSanitizerConfig(): SanitizerConfig {
   const allowedTags = extension?.allowedTags
     ? [...ALLOWED_TAGS, ...extension.allowedTags]
     : ALLOWED_TAGS
-  const allowedAttr = extension?.allowedAttr
+  const extensionAttr = extension?.allowedAttr
     ? [...ALLOWED_ATTR, ...extension.allowedAttr]
     : ALLOWED_ATTR
+  // The marker has to survive the backend's attribute filter long enough for the
+  // gate to read it; the gate then removes it, so it never reaches the DOM.
+  const allowedAttr = hasUrlPolicy() ? [...extensionAttr, URL_POLICY_MARKER_ATTR] : extensionAttr
   return { allowedTags, allowedAttr, onElement: gateElement }
 }
 
