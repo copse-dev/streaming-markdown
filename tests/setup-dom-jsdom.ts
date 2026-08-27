@@ -19,6 +19,13 @@ Object.assign(globalThis, {
   // Needed by the post-sink URL filter, which parses markup in an inert
   // (browsing-context-free) document before deciding what may be injected.
   DOMParser: win.DOMParser,
+  // The same filter parses CSS with a constructible stylesheet. jsdom supports
+  // them, but only exposes the constructor on its window — without this the
+  // filter silently takes its no-CSSOM fallback and the real path is never
+  // tested. (jsdom does NOT build CSSOM for DOMParser/createHTMLDocument
+  // documents the way browsers do, which is why the filter does not rely on
+  // `style.sheet`.)
+  CSSStyleSheet: win.CSSStyleSheet,
 })
 
 // jsdom has no native Sanitizer API (`Element.setHTML`), so the default backend

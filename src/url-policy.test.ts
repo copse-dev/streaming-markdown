@@ -195,7 +195,7 @@ describe('urlPolicy — post-sink markup (mermaid SVG shape)', () => {
   it('preserves same-document fragment refs, or every arrowhead disappears', () => {
     const { policy, seen } = recordingPolicy(blockSubresources)
     const out = withConfig({ urlPolicy: policy }, () => filterMarkupUrlsString(SVG, 'diagram'))
-    assert.match(out, /url\(#arrow-end\)/)
+    assert.match(out, /url\(["']?#arrow-end["']?\)/, 'CSS parser re-serializes; the ref survives')
     assert.match(out, /href="#node-shape"/)
     assert.equal(
       seen.some((r) => r.raw.startsWith('#')),
@@ -244,6 +244,26 @@ describe('urlPolicy — mermaid hydration end to end', () => {
     assert.equal(host.querySelector('img')?.hasAttribute('src'), false)
     assert.ok(host.querySelector('.mermaid-diagram--rendered'), 'still marked rendered')
     assert.equal(host.querySelector('use')?.getAttribute('href'), '#marker')
+  })
+
+  it('does not leave a container in both the rendered and error states', async () => {
+    // Both injection sinks can throw (Trusted Types rejects the filter's own
+    // DOMParser call under enforcement), and the caller then marks the diagram
+    // errored — the two state classes must never coexist.
+    const throwing: DiagramRenderer = { render: () => Promise.resolve({ svg: EVIL_SVG }) }
+    const host = pendingHost()
+    const exploding: UrlPolicy = {
+      createURL() {
+        throw new Error('policy blew up mid-injection')
+      },
+    }
+    const count = await hydratePendingDiagrams(host, { renderer: throwing, urlPolicy: exploding })
+
+    assert.equal(count, 0)
+    const container = host.querySelector('.mermaid-diagram')
+    assert.equal(container?.classList.contains('mermaid-diagram--error'), true)
+    assert.equal(container?.classList.contains('mermaid-diagram--rendered'), false)
+    assert.ok(host.querySelector('pre.mermaid'), 'inert source stays visible')
   })
 
   it('leaves the SVG untouched when no policy is supplied', async () => {
@@ -365,12 +385,113 @@ describe('urlPolicy — filter edge cases', () => {
       '<svg><image href="https://cdn.example/a.png"/><style>a{background:url(https://cdn.example/b.png)}</style></svg>'
     const out = filter(markup, (r) => r.raw)
     assert.match(out, /href="https:\/\/cdn\.example\/a\.png"/)
-    assert.match(out, /url\(https:\/\/cdn\.example\/b\.png\)/)
+    assert.match(out, /url\(["']?https:\/\/cdn\.example\/b\.png["']?\)/)
   })
 
   it('skips an empty <style> and non-URL attributes', () => {
     const out = filter('<style></style><div class="x" data-y="z">t</div>', () => null)
     assert.match(out, /class="x"/)
     assert.match(out, /data-y="z"/)
+  })
+})
+
+describe('urlPolicy — CSS filtering without a CSS parser', () => {
+  // The no-CSSStyleSheet fallback: an SSR shim with a DOM but no CSSOM. Its
+  // output can still end up in a browser, so each author syntax is scanned
+  // directly. Exercised by removing the global for the duration of the call.
+  const withoutCssom = <T,>(fn: () => T): T => {
+    const globals = globalThis as { CSSStyleSheet?: unknown }
+    const saved = globals.CSSStyleSheet
+    delete globals.CSSStyleSheet
+    try {
+      return fn()
+    } finally {
+      if (saved !== undefined) globals.CSSStyleSheet = saved
+    }
+  }
+
+  const filterCss = (css: string, decide: (r: UrlRequest) => string | null): string => {
+    const { policy } = recordingPolicy(decide)
+    return withoutCssom(() =>
+      withConfig({ urlPolicy: policy }, () =>
+        filterMarkupUrlsString(`<svg><style>${css}</style></svg>`, 'diagram'),
+      ),
+    )
+  }
+
+  it('catches @import in the string form, which url() matching misses', () => {
+    const out = filterCss('@import "https://attacker.example/a";', () => null)
+    assert.doesNotMatch(out, /attacker\.example/)
+  })
+
+  it('catches @import in the url() form', () => {
+    const out = filterCss('@import url(https://attacker.example/b);', () => null)
+    assert.doesNotMatch(out, /attacker\.example/)
+  })
+
+  it('catches the bare strings image-set accepts, in both spellings', () => {
+    const out = filterCss(
+      '.a{background-image:image-set("https://attacker.example/c" 1x)}' +
+        '.b{background-image:-webkit-image-set("https://attacker.example/d" 2x)}',
+      () => null,
+    )
+    assert.doesNotMatch(out, /attacker\.example/)
+  })
+
+  it('still honours a rewrite rather than only blocking', () => {
+    const out = filterCss('@import "https://cdn.example/e";', () => 'https://proxy.example/e')
+    assert.match(out, /proxy\.example/)
+    assert.doesNotMatch(out, /cdn\.example/)
+  })
+
+  it('leaves same-document fragment refs alone', () => {
+    const out = filterCss('.a{marker-end:url(#arrow)}', () => null)
+    assert.match(out, /url\(["']?#arrow["']?\)/)
+  })
+})
+
+describe('urlPolicy — CSS filtering through the CSS parser', () => {
+  const filterCss = (css: string, decide: (r: UrlRequest) => string | null): string => {
+    const { policy } = recordingPolicy(decide)
+    return withConfig({ urlPolicy: policy }, () =>
+      filterMarkupUrlsString(`<svg><style>${css}</style></svg>`, 'diagram'),
+    )
+  }
+
+  it('rewrites an @import rather than only blocking it', () => {
+    const out = filterCss('@import "https://cdn.example/a";', (r) =>
+      r.attribute === '@import' ? 'https://proxy.example/a' : r.raw,
+    )
+    assert.doesNotMatch(out, /cdn\.example/)
+    // Chromium drops @import from a constructible sheet outright (per the CSSOM
+    // spec) so nothing is left to rewrite; jsdom keeps the rule, and there the
+    // rewritten href must be what lands.
+    if (/@import/.test(out)) assert.match(out, /proxy\.example/)
+  })
+
+  it('presents @import to the policy with a style sink', () => {
+    const { policy, seen } = recordingPolicy(() => null)
+    withConfig({ urlPolicy: policy }, () =>
+      filterMarkupUrlsString('<svg><style>@import "https://a.example/x";</style></svg>', 'diagram'),
+    )
+    // Skipped entirely on an engine that drops @import before we ever see it.
+    if (seen.length > 0) {
+      assert.equal(seen[0]?.sink, 'style')
+      assert.equal(seen[0]?.attribute, '@import')
+    }
+  })
+
+  it('falls back rather than throwing when the CSS parser rejects outright', () => {
+    const globals = globalThis as { CSSStyleSheet?: unknown }
+    const saved = globals.CSSStyleSheet
+    globals.CSSStyleSheet = function Broken() {
+      throw new Error('no constructible stylesheets here')
+    }
+    try {
+      const out = filterCss('.a{background:url(https://attacker.example/z)}', () => null)
+      assert.doesNotMatch(out, /attacker\.example/, 'the fallback still filters')
+    } finally {
+      globals.CSSStyleSheet = saved
+    }
   })
 })

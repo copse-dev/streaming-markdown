@@ -83,12 +83,16 @@ function readDiagramSource(container: Element): string {
 }
 
 function markRendered(container: Element, svg: string | TrustedHTMLValue): void {
-  container.classList.remove('mermaid-diagram--pending')
-  container.classList.add('mermaid-diagram--rendered')
+  // Inject BEFORE flipping the state classes: both sinks here can throw (Trusted
+  // Types rejecting a plain-string SVG, or rejecting the filter's own parse), and
+  // the caller then calls markError. Setting `--rendered` first left a container
+  // carrying `--rendered` AND `--error` at once, with conflicting styling.
+  //
   // Filtered node path first: it decides every URL *before* anything is in a
   // live document, so an off-origin subresource never gets to start its fetch.
-  if (injectFilteredMarkup(container, svg, 'diagram')) return
-  setHostTrustedHtml(container, svg)
+  if (!injectFilteredMarkup(container, svg, 'diagram')) setHostTrustedHtml(container, svg)
+  container.classList.remove('mermaid-diagram--pending')
+  container.classList.add('mermaid-diagram--rendered')
 }
 
 /** Run one injection under an explicitly supplied policy, when the caller passed one. */

@@ -5,6 +5,7 @@ import {
   hasUrlPolicy,
   URL_POLICY_MARKER_ATTR,
 } from './url-policy.ts'
+import { sinkForAttribute, URL_ATTR_NAMES, URL_LIST_ATTR_NAMES } from './url-filter-markup.ts'
 import { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize-browser.ts'
 
 // Defense-in-depth over the hand-assembled HTML that `renderMarkdown()` emits.
@@ -221,19 +222,35 @@ function gateUrlPolicy(node: Element, tagName: string): void {
     node.removeAttribute(URL_POLICY_MARKER_ATTR)
     return
   }
-  const attribute = tagName === 'a' ? 'href' : tagName === 'img' ? 'src' : null
-  if (attribute === null) return
-  const raw = node.getAttribute(attribute)
-  if (raw === null || raw === '') return
-  const decided = applyUrlPolicy(
-    raw,
-    tagName === 'img' ? 'image' : 'navigation',
-    'markdown',
-    tagName,
-    attribute,
-  )
-  if (decided === null) node.removeAttribute(attribute)
-  else if (decided !== raw) node.setAttribute(attribute, decided)
+  // Every URL-bearing attribute, on any element — the same classifier the
+  // post-sink walker uses. Naming `a`/`img` here instead left `srcset` and
+  // `poster` unpoliced whenever a host widened the allowlist to admit them.
+  for (const attr of Array.from(node.attributes)) {
+    const local = (attr.localName || attr.name).toLowerCase()
+    const isList = URL_LIST_ATTR_NAMES.has(local)
+    if (!isList && !URL_ATTR_NAMES.has(local)) continue
+    if (attr.value === '') continue
+    const decided = isList
+      ? filterUrlList(attr.value, tagName, local)
+      : applyUrlPolicy(attr.value, sinkForAttribute(tagName, local), 'markdown', tagName, attr.name)
+    if (decided === null) node.removeAttribute(attr.name)
+    else if (decided !== attr.value) node.setAttribute(attr.name, decided)
+  }
+}
+
+/** Comma-separated candidate list (`srcset`), policed per candidate. */
+function filterUrlList(value: string, tagName: string, local: string): string | null {
+  const kept: string[] = []
+  for (const candidate of value.split(',')) {
+    const trimmed = candidate.trim()
+    if (trimmed === '') continue
+    const space = trimmed.search(/\s/)
+    const url = space === -1 ? trimmed : trimmed.slice(0, space)
+    const descriptor = space === -1 ? '' : trimmed.slice(space)
+    const decided = applyUrlPolicy(url, 'image', 'markdown', tagName, local)
+    if (decided !== null) kept.push(decided + descriptor)
+  }
+  return kept.length === 0 ? null : kept.join(', ')
 }
 
 function gateElement(node: Element, tagName: string): void {
