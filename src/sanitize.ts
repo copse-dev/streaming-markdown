@@ -72,17 +72,21 @@ const ALLOWED_TAGS = [
 ]
 
 // `class` carries highlight.js and mermaid hooks; `target`/`rel` support the
-// neutral `target="_blank"` decoration a host may opt into. Host-specific link
-// routing attributes (e.g. `data-browser-link` / `data-workspace-link`) are NOT
-// in the core allowlist (#146): a host that emits them via `appLinkDecorator`
-// (`@copse/streaming-markdown/host/workspace`) widens the sink itself through
-// `MarkdownConfig.sanitizeExtension` / `setDefaultConfig`.
+// neutral `target="_blank"` decoration a host may opt into.
+//
+// No `data-*` name appears below: every custom data attribute passes generically
+// (`DATA_ATTR_NAME_SOURCE`), matching DOMPurify's `ALLOW_DATA_ATTR` default so
+// both shipped backends behave identically. That covers the renderer's own
+// markers (`data-ordered-marker`, `data-footnotes`, `data-footnote-ref`,
+// `data-footnote-backref`) and the host routing attributes #146 evicted
+// (`data-browser-link` / `data-workspace-link`) without an allowlist edit each.
+// See the caveat on {@link SanitizeExtension} for the one place `data-*` is not
+// inert, and how a host re-narrows there.
 const ALLOWED_ATTR = [
   'href',
   'target',
   'rel',
   'class',
-  'data-ordered-marker',
   // GFM table column alignment (`<th align>`/`<td align>`) — presentational, no XSS surface.
   'align',
   // Task-list checkbox attributes (#614) — read-only booleans, no XSS surface.
@@ -96,13 +100,10 @@ const ALLOWED_ATTR = [
   'id',
   // GFM footnote / task-list accessibility hooks (#216/#217): `aria-label` on
   // task checkboxes and backrefs, `aria-describedby` linking a ref to the
-  // footnotes heading, and the `data-footnote*` semantic markers GitHub emits.
-  // All presentational/semantic only — no XSS surface.
+  // footnotes heading. (The `data-footnote*` semantic markers GitHub emits need
+  // no entry — see the generic `data-*` note above.)
   'aria-label',
   'aria-describedby',
-  'data-footnotes',
-  'data-footnote-ref',
-  'data-footnote-backref',
 ]
 
 /**
@@ -190,6 +191,23 @@ export function getSanitizerBackend(): SanitizerBackend | null {
  * task-list `<input>`), letting the host drop or lock down its own tags (e.g.
  * remove any non-artifact `<img>` and strip its `src`). Set it per render via
  * `MarkdownConfig.sanitizeExtension`.
+ *
+ * **`data-*` caveat.** Custom data attributes pass generically (see
+ * `DATA_ATTR_NAME_SOURCE`), so no host needs an `allowedAttr` entry for one.
+ * That is safe because `data-*` is inert in HTML — but it is *not* inert on a
+ * page running a framework that binds to it: htmx (`data-hx-get`), Alpine
+ * (`data-x-on:click`) and Stimulus (`data-controller` / `data-action`) all give
+ * the namespace behaviour. A host mounting sanitized output into such a page is
+ * handing model-authored content a live wire, and should re-narrow with
+ * `onElement` — drop every `data-` attribute the host did not itself emit:
+ *
+ * ```ts
+ * onElement: (node) => {
+ *   for (const { name } of Array.from(node.attributes)) {
+ *     if (name.startsWith('data-') && !MINE.has(name)) node.removeAttribute(name)
+ *   }
+ * }
+ * ```
  */
 export interface SanitizeExtension {
   allowedTags?: readonly string[]

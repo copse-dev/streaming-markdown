@@ -69,4 +69,104 @@ describe('raw-HTML escaping boundary (htmlPolicy: escape)', () => {
   it('preserves benign attribute-less inline HTML', () => {
     assert.match(escaped('<sub>2</sub> and <kbd>Esc</kbd>'), /<sub>2<\/sub> and <kbd>Esc<\/kbd>/)
   })
+
+  // #146 dropped the host-specific `data-*` link attributes from the core
+  // allowlists, but only the sink got a replacement hook — this gate was left
+  // with none, so a host `linkDecorator` emitting them had its `<a …>` open tag
+  // escaped to literal text while the matching `</a>` survived. The gate now
+  // matches the generic `data-*` shape.
+  describe('anchors carrying decorator data-* attributes', () => {
+    const decorated = (attrs: string, policy: 'escape' | 'escape-all' = 'escape') =>
+      renderMarkdownUnsafe('[the docs](https://example.com/page)', {
+        htmlPolicy: policy,
+        linkDecorator: () => attrs,
+      })
+
+    it('preserves a host decorator\u2019s browser-link anchor', () => {
+      const html = decorated(' target="_blank" rel="noopener noreferrer" data-browser-link="true"')
+      assert.match(html, /<a href="https:\/\/example\.com\/page" target="_blank" rel="noopener noreferrer" data-browser-link="true">/)
+      assert.doesNotMatch(html, /&lt;a /)
+    })
+
+    it('preserves a host decorator\u2019s workspace-link anchor', () => {
+      const html = decorated(' class="workspace-markdown-link" data-workspace-link="true"')
+      assert.match(html, /<a href="[^"]*" class="workspace-markdown-link" data-workspace-link="true">/)
+      assert.doesNotMatch(html, /&lt;a /)
+    })
+
+    it('preserves them under escape-all too', () => {
+      const html = decorated(' data-browser-link="true"', 'escape-all')
+      assert.match(html, /<a href="[^"]*" data-browser-link="true">/)
+    })
+
+    it('leaves no stray unbalanced </a> behind', () => {
+      const html = decorated(' data-browser-link="true"')
+      assert.equal((html.match(/<a /g) ?? []).length, (html.match(/<\/a>/g) ?? []).length)
+    })
+
+    it('accepts a valueless data attribute and interleaved ordering', () => {
+      assert.match(decorated(' data-x class="c" data-y="1" title="t"'), /<a href="[^"]*" data-x class="c" data-y="1" title="t">/)
+    })
+
+    it('still escapes a raw anchor whose data-* rides alongside an event handler', () => {
+      const html = escaped('<a href="https://example.com" data-browser-link="true" onclick="alert(1)">x</a>')
+      assert.doesNotMatch(html, /<a[^>]*onclick/i)
+      assert.match(html, /&lt;a /i)
+    })
+
+    it('still escapes a raw javascript: anchor wearing a data-* attribute', () => {
+      const html = escaped('<a href="javascript:alert(1)" data-workspace-link="true">x</a>')
+      assert.doesNotMatch(html, /<a href="javascript:/i)
+      assert.match(html, /&lt;a /i)
+    })
+
+    it('drops a non-data unknown attribute but keeps the anchor', () => {
+      assert.match(escaped('<a href="https://example.com" datax="1">x</a>'), /<a href="https:\/\/example\.com">/)
+    })
+  })
+
+  // The shape test above is all-or-nothing and fails badly, not safely: `</a>`
+  // is a separate arm and survives on its own, so one unrecognised attribute
+  // used to yield escaped source text plus a stray unbalanced close tag.
+  describe('unrecognised anchor attributes degrade instead of mangling', () => {
+    it('drops the unknown attribute and keeps a well-formed anchor', () => {
+      const html = escaped('<a href="https://example.com" style="position:fixed" datax="1">x</a>')
+      assert.match(html, /<a href="https:\/\/example\.com">x<\/a>/)
+      assert.doesNotMatch(html, /style=/i)
+    })
+
+    it('leaves no unbalanced </a> for an unrecognised attribute', () => {
+      const html = escaped('<a href="https://example.com" style="x">y</a>')
+      assert.equal((html.match(/<a /g) ?? []).length, (html.match(/<\/a>/g) ?? []).length)
+    })
+
+    it('keeps the allowlisted attributes while dropping the rest', () => {
+      const html = escaped('<a href="https://example.com" style="x" class="c" data-k="v" title="t">y</a>')
+      assert.match(html, /<a href="https:\/\/example\.com" class="c" data-k="v" title="t">/)
+    })
+
+    it('still refuses a dangerous scheme rather than narrowing to it', () => {
+      const html = escaped('<a href="javascript:alert(1)" style="x">y</a>')
+      assert.doesNotMatch(html, /<a href="javascript:/i)
+      assert.match(html, /&lt;a /i)
+    })
+
+    it('still refuses an event handler rather than dropping just that attribute', () => {
+      const html = escaped('<a href="https://example.com" onclick="alert(1)">y</a>')
+      assert.doesNotMatch(html, /<a /i)
+      assert.match(html, /&lt;a /i)
+    })
+
+    it('leaves an unquoted href escaped whole (no scheme to validate)', () => {
+      assert.match(escaped('<a href=javascript:alert(1) style="x">y</a>'), /&lt;a /i)
+    })
+
+    it('does not turn a non-anchor unknown tag into markup', () => {
+      assert.match(escaped('<div class="x">y</div>'), /&lt;div /i)
+    })
+
+    it('does not mint an href-less anchor from a href-shaped attribute value', () => {
+      assert.match(escaped('<a data-x="href=">y</a>'), /&lt;a /i)
+    })
+  })
 })

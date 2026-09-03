@@ -91,10 +91,19 @@ describe('enforceSanitizerAllowlist (native backend narrowing)', () => {
     assert.equal(root.innerHTML, '<p>keep</p>bare text')
   })
 
-  it('strips attributes outside the allowlist', () => {
-    const root = parse('<a href="/x" class="c" onclick="evil()" data-x="1">link</a>')
+  it('strips attributes outside the allowlist, event handlers included', () => {
+    const root = parse('<a href="/x" class="c" onclick="evil()" style="position:fixed">link</a>')
     enforceSanitizerAllowlist(root, config)
     assert.equal(root.innerHTML, '<a href="/x" class="c">link</a>')
+  })
+
+  // `data-*` is the deliberate exception: it passes generically, matching
+  // DOMPurify's `ALLOW_DATA_ATTR` default so the two backends agree
+  // (sanitize-data-attributes.test.ts pins that parity).
+  it('keeps data-* without an allowlist entry', () => {
+    const root = parse('<a href="/x" data-x="1" data-footnote-ref>link</a>')
+    enforceSanitizerAllowlist(root, config)
+    assert.equal(root.innerHTML, '<a href="/x" data-x="1" data-footnote-ref="">link</a>')
   })
 
   it('drops content of dangerous containers rather than unwrapping them', () => {
