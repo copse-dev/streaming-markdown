@@ -5,6 +5,19 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-03
+
+### Bug Fixes
+
+- stop destroying anchors that carry data-* attributes (#257) (`cfe1660`)
+
+### Chores
+
+- Bump @types/react-dom in the npm-minor-patch group (#256) (`45764f3`)
+- Bump dompurify in the npm-minor-patch group (#254) (`fef86b5`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.0.8...v1.1.0
+
 ## [1.0.8] - 2026-08-24
 
 ### Continuous Integration

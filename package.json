@@ -1,6 +1,6 @@
 {
   "name": "@copse/streaming-markdown",
-  "version": "1.0.8",
+  "version": "1.1.0",
   "description": "Streaming-capable CommonMark markdown renderer (string HTML + incremental DOM emitters)",
   "license": "Apache-2.0",
   "type": "module",
