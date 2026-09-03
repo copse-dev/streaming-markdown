@@ -1,3 +1,4 @@
+import { DATA_ATTR_NAME_RE } from './data-attributes.ts'
 import type { SanitizerBackend, SanitizerConfig } from './sanitize.ts'
 
 // Zero-dependency sanitizer backend built on the native Sanitizer API
@@ -6,7 +7,8 @@ import type { SanitizerBackend, SanitizerConfig } from './sanitize.ts'
 // scripts, event-handler attributes, and unsafe URLs); a strict allowlist walk
 // then narrows the result to exactly the tags/attributes the renderer produces
 // and runs the core/host per-element gate — identical posture to the DOMPurify
-// backend.
+// backend, `data-*` included (that walk once diverged by stripping every data
+// attribute DOMPurify's `ALLOW_DATA_ATTR` default kept).
 
 // `setHTML` is a recent addition and may be missing from the ambient DOM lib.
 // The options arg carries a Sanitizer config; `elements`/`attributes` are
@@ -65,7 +67,12 @@ export function enforceSanitizerAllowlist(root: ParentNode, config: SanitizerCon
       continue
     }
     for (const attr of Array.from(el.attributes)) {
-      if (!allowedAttr.has(attr.name.toLowerCase())) el.removeAttribute(attr.name)
+      // `data-*` passes generically, matching DOMPurify's `ALLOW_DATA_ATTR`
+      // default so the two shipped backends stay interchangeable — without it
+      // this walk silently stripped every host/renderer data attribute the
+      // DOMPurify backend kept (see DATA_ATTR_NAME_SOURCE for why generically).
+      const name = attr.name.toLowerCase()
+      if (!allowedAttr.has(name) && !DATA_ATTR_NAME_RE.test(name)) el.removeAttribute(attr.name)
     }
     config.onElement?.(el, tag)
   }

@@ -145,8 +145,17 @@ When extending the renderer or its CSS, preserve these rules:
     per-element gate so a host's injected markup (e.g. its artifact `<img>`) survives
     sanitization. The core allowlist stays the security gate; keep additions narrow.
 
-  A host emitting attributes outside the escape/sink allowlists must also widen
-  `SAFE_OUTER_TAG_RE` (`escape.ts`) to match.
+  A host emitting attributes outside the sink allowlist widens it via
+  `sanitizeExtension`; that is the only allowlist a host has to touch. **`data-*`
+  needs no widening at all** — custom data attributes pass both gates
+  generically (`data-attributes.ts`), matching DOMPurify's `ALLOW_DATA_ATTR`
+  default so the two shipped backends stay interchangeable. A host on a page
+  running htmx/Alpine/Stimulus, where `data-*` is not inert, re-narrows with
+  `sanitizeExtension.onElement`. The pre-sink escape gate (`SAFE_OUTER_TAG_RE`,
+  `escape.ts`) is not configurable and matches decorator anchors by shape; an
+  anchor it does not recognise degrades to its allowlisted attributes
+  (`narrowAnchor`) rather than being escaped whole, which would leave the
+  matching `</a>` behind as a stray close tag.
 - **Valid block HTML.** Block elements (`<ul>`, `<ol>`, `<h3>`, `<h4>`, `<pre>`, `<table>`,
   `<hr>`) must never end up inside `<p>`. Mixed single-newline blocks (heading → subheading → list)
   are common in LLM output; split at block boundaries before wrapping paragraphs.

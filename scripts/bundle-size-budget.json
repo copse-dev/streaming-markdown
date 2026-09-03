@@ -33,7 +33,7 @@
     },
     "./sanitizers/browser": {
       "file": "dist/sanitize-browser.js",
-      "gzipBudget": 590
+      "gzipBudget": 640
     },
     "./diagrams/mermaid": {
       "file": "dist/mermaid-mermaidjs.js",
