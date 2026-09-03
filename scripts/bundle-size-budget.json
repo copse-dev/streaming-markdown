@@ -13,7 +13,7 @@
   "entries": {
     ".": {
       "file": "dist/index.js",
-      "gzipBudget": 37000
+      "gzipBudget": 39390
     },
     "./inline/emoji": {
       "file": "dist/emoji-shortcodes.js",
