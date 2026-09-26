@@ -255,12 +255,12 @@ import { createInputSmoother } from '@copse/streaming-markdown/smoothing'
 const renderer = new StreamingMarkdownRenderer(host)
 const smoother = createInputSmoother({
   update: (text) => renderer.update(text), // the sink for each revealed prefix
-  charsPerSecond: 600,                     // the rate knob (default 600)
+  cadence: 'adaptive',                     // follow the stream's own rate (default 'fixed')
 })
 
 for await (const fullTextSoFar of stream) smoother.push(fullTextSoFar)
-smoother.flush()   // stream end / final chunk: release everything now — no lag
-smoother.dispose() // tear down (cancels any pending frame)
+smoother.finish(() => showFinalRender()) // stream end: drain the rest, then settle
+smoother.dispose()                       // tear down (cancels any pending frame)
 ```
 
 `push(text)` takes the **full accumulated message so far** (the same argument
@@ -268,6 +268,51 @@ smoother.dispose() // tear down (cancels any pending frame)
 the target. That is exactly the streaming contract the pending-state machinery
 and DOM morph already converge on, so smoothing composes with them for free
 rather than fighting the morph.
+
+### Cadence: fixed or adaptive
+
+- **`'fixed'`** (the default, for compatibility) walks the revealed prefix at a
+  constant `charsPerSecond` (default 600). It is predictable, but it does not
+  follow the stream: a transport slower than the rate still shows as bursts
+  (each chunk drains in a frame or two, then the reveal waits for the next),
+  and one faster than the rate falls further and further behind.
+- **`'adaptive'`** — recommended for LLM output — reveals at a velocity that
+  tracks the arrival rate, running about `lagMs` (default 120) behind it. The
+  velocity is low-pass filtered, so a steady stream reveals steadily, a burst
+  speeds the reveal up over a few frames rather than in one jump, and the lag
+  stays bounded however fast the model is. After a frame gap long enough to
+  mean the page was hidden, it catches up at once instead of replaying text.
+
+Measured on a transport delivering 12 characters every 50ms, `'fixed'` leaves
+the text frozen in roughly two frames of three; `'adaptive'` advances it in
+nearly every frame, 4–5 characters at a time.
+
+### Ending the stream: `finish` or `flush`
+
+- **`finish(onSettled?)`** reveals whatever is still pending over a short drain
+  (~60ms of lag, whatever the cadence), then calls `onSettled` once — the place
+  to swap in a final, at-rest render. It settles synchronously when nothing is
+  pending, smoothing is off, or the page is hidden. A `push` after `finish`
+  means the stream resumed and drops the pending callback.
+- **`flush()`** releases everything immediately (and settles a pending
+  `finish`). Use it when completion must carry no delay at all.
+
+### Where a frame may end
+
+A revealed prefix never ends right after markdown punctuation or whitespace
+(`` ` * _ ~ [ ] ( ) | # > ! - + = . : < \ `` and digits): the cut moves forward
+past that run — a bounded few characters — so a frame always ends just after a
+word character. Otherwise the half-arrived syntax would show raw for a frame
+before the renderer could tell what it becomes: the first two backticks of a
+closing fence, the `||` of a table separator, a `1.` before its list item, the
+brackets of `[text]` before `(url)` arrives, or a trailing newline briefly
+opening an empty line. A cut also never splits a surrogate pair.
+
+### Re-rendering mid-stream
+
+Pass `initial` with the text already on screen when a host rebuilds a message
+element partway through a stream: the reveal starts from its end instead of
+replaying the whole message.
 
 ### Why input smoothing, not output animation
 
@@ -283,15 +328,19 @@ package does not own.
 
 ### Guarantees
 
-- **Convergence.** After `flush()` the sink has seen the full text, so the
-  rendered DOM equals a single un-smoothed `update(fullText)` — asserted against
-  a direct full-string render in the tests.
+- **Convergence.** After `flush()`, or once `finish()` settles, the sink has
+  seen the full text, so the rendered DOM equals a single un-smoothed
+  `update(fullText)` — asserted against a direct full-string render in the
+  tests, for both cadences.
 - **`prefers-reduced-motion`.** Honoured by default: when the environment reports
   reduced motion, smoothing is disabled and `push` passes straight through
   immediately (`respectReducedMotion: false` overrides; `disabled: true` forces
   pass-through unconditionally). `smoother.enabled` reports which mode is active.
-- **No completion lag.** `flush()` releases the whole pending target at once and
-  stops the loop, so stream end never carries artificial delay.
+- **No completion lag on demand.** `flush()` releases the whole pending target
+  at once and stops the loop; `finish()` drains it within a few frames.
+- **Never recursive.** A frame scheduler that calls back synchronously (some
+  test shims do) cannot pace anything; the smoother detects it and releases
+  text as it is pushed instead of recursing.
 - **Environment-guarded.** `requestAnimationFrame` / `cancelAnimationFrame`,
   `performance.now`, and `matchMedia` are all read through defaulted, injectable
   seams (`requestFrame` / `cancelFrame` / `now` / `matchMedia` options), so the

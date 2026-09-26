@@ -129,13 +129,20 @@
     font-size: 0.67em;
   }
 
-  /* Spacing for the committed-stream wrapper (`stream-complete`) and its pending
-     tail (`stream-pending-block`), both emitted by the DOM streaming renderer. */
-  & .stream-complete > .stream-pending-block:last-child,
-  & .stream-complete > h2 + .stream-pending-block,
-  & .stream-complete > h3 + .stream-pending-block,
-  & .stream-complete > h4 + .stream-pending-block {
+  /* The pending tail (`stream-pending-block`, the block still streaming inside
+     `stream-complete`) must sit exactly where the committed block that replaces
+     it will, or the answer hops each time a block finishes. So it follows the
+     committed rhythm above rather than a flat margin: a pending paragraph (its
+     own margin is zeroed in core.css) takes the gap `p + p` / `h2 + p` would
+     give it and none after anything else, a pending heading after prose takes
+     `p + h2`'s, nothing sits above the first block, and every other pending
+     block keeps its element's own margin. */
+  & .stream-complete > :is(p, ul, ol, h1, h2, h3, h4, h5, h6) + .stream-pending-paragraph,
+  & .stream-complete > p + .stream-pending-heading {
     margin-top: var(--sm-space-sm, 8px);
+  }
+  & .stream-complete > .stream-pending-block:first-child {
+    margin-top: 0;
   }
 
   & code {

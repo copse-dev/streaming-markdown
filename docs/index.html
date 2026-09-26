@@ -1290,7 +1290,8 @@
       <code>createInputSmoother</code> (behind the
       <code>@copse/streaming-markdown/smoothing</code> subpath, never in the main
       bundle) steadies that into a per-character reveal by throttling the string
-      fed to <code>update()</code> on animation frames. It smooths the
+      fed to <code>update()</code> on animation frames, at a speed that adapts
+      to the stream's own rate (<code>cadence: 'adaptive'</code>). It smooths the
       <strong>input</strong>, not the output — every released value is a prefix
       of the full text, so it composes with the pending-block machinery instead
       of fighting the DOM morph. Both panes below receive the
@@ -1304,7 +1305,7 @@
       <input type="checkbox" id="smooth-check" checked>
       Smoothing on
     </label>
-    <span id="smooth-fidelity-badge" class="fidelity-badge" style="visibility:hidden">&#10003; converged after flush</span>
+    <span id="smooth-fidelity-badge" class="fidelity-badge" style="visibility:hidden">&#10003; converged at stream end</span>
   </div>
 
   <div class="compare-panels">
@@ -1326,9 +1327,10 @@
   </div>
 
   <p style="color:var(--text-muted);font-size:0.8rem;margin-top:0.9rem;">
-    On stream end the smoother <code>flush()</code>es the full target, so
-    completion never carries artificial lag and the smoothed DOM converges on
-    exactly what a single un-smoothed <code>update(fullText)</code> produces.
+    On stream end the smoother's <code>finish()</code> drains what it still
+    holds over a few frames — no final jump — and the smoothed DOM converges on
+    exactly what a single un-smoothed <code>update(fullText)</code> produces
+    (<code>flush()</code> releases it all at once instead).
     It honours <code>prefers-reduced-motion: reduce</code> by disabling itself
     (pass-through) — as does turning <em>Smoothing on</em> off above.
   </p>
@@ -2671,9 +2673,10 @@ startCompare();
 // The same bursty source drives two panes. The left calls renderer.update()
 // directly on each arriving burst — the DOM leaps a whole word at a time. The
 // right pushes each burst into createInputSmoother, which releases the growing
-// string a few characters per animation frame. On stream end we flush() and
-// assert the two panes converge on identical DOM (the smoother's convergence
-// guarantee). Toggling "Smoothing on" off constructs the smoother `disabled`,
+// string a few characters per animation frame at a speed that follows the
+// stream's own rate. On stream end we finish() — the smoother drains its tail,
+// then settles — and assert the two panes converge on identical DOM (the
+// smoother's convergence guarantee). Toggling "Smoothing on" off constructs the smoother `disabled`,
 // so it passes every push straight through — the right pane then matches the
 // left burst-for-burst, showing the before/after in one place.
 const SMOOTH_SOURCE = `## Streaming a model reply
@@ -2688,24 +2691,21 @@ typewriter cadence that trails the raw pane and catches up only at the end.
 - Every released value is a *prefix* of the full text, so pending-block
   highlighting keeps working unchanged.
 - The reveal walks toward each new target instead of snapping to it.
-- On stream end a single \`flush()\` drops the remaining tail in at once.
+- The reveal speed follows the stream's own rate, so it neither drains
+  each lump and waits nor falls behind.
+- On stream end \`finish()\` drains the last few characters, then settles.
 
 \`\`\`js
 const smoother = createInputSmoother({
   update: (t) => renderer.update(t),
+  cadence: 'adaptive',
 })
 for await (const full of stream) smoother.push(full)
-smoother.flush() // stream end: converge, no lag
+smoother.finish(() => settle()) // stream end: drain, then converge
 \`\`\`
 
 The left pane leaps while the right pane types — then both settle on exactly
 the same DOM.`;
-
-// Reveal rate for the smoothed pane. Deliberately pitched near the stream's
-// average arrival rate (below the 600/s library default) so the reveal reads as
-// a continuous typewriter that trails the bursty raw pane, rather than draining
-// each lump and waiting — that gap is the whole point of the demo.
-const SMOOTH_CPS = 220;
 
 const rawOutput = document.getElementById('raw-output');
 const smoothOutput = document.getElementById('smooth-output');
@@ -2760,7 +2760,12 @@ function startSmoothDemo() {
       ensureSnapAnchor(smoothOutput);
       smoothStats.innerHTML = `<span class="stat-val">${smoothFrames}</span> frames`;
     },
-    charsPerSecond: SMOOTH_CPS,
+    // Follows the stream's own arrival rate, so the reveal reads as a
+    // continuous typewriter trailing the bursty raw pane rather than draining
+    // each lump and waiting — no rate to hand-tune. The bursts here are
+    // deliberately sparse (one every 300–470 ms), so trail by about one burst.
+    cadence: 'adaptive',
+    lagMs: 400,
     // Off → pass-through, byte-for-byte identical to feeding the raw bursts.
     disabled: !smoothCheck.checked,
   });
@@ -2770,14 +2775,17 @@ function startSmoothDemo() {
 
   const tick = () => {
     if (pos >= text.length) {
-      // Stream end: release the whole target now (no completion lag) and stop.
-      activeSmoother.flush();
-      stopSmoothDemo();
+      smoothBurstTimer = null;
       rawOutput.classList.remove('is-streaming');
-      smoothOutput.classList.remove('is-streaming');
-      checkSmoothConvergence();
       revealSettledBottom(rawOutput);
-      revealSettledBottom(smoothOutput);
+      // Stream end: the smoother drains what it still holds, then settles. A
+      // replay in the meantime disposes it, which drops this callback.
+      activeSmoother.finish(() => {
+        stopSmoothDemo();
+        smoothOutput.classList.remove('is-streaming');
+        checkSmoothConvergence();
+        revealSettledBottom(smoothOutput);
+      });
       return;
     }
     pos = advanceBurst(text, pos);
@@ -2799,7 +2807,7 @@ function startSmoothDemo() {
   tick();
 }
 
-// After flush the smoothed pane has seen the full text, so both panes now hold
+// Once finish() settles the smoothed pane has seen the full text, so both panes now hold
 // the whole document — assert their rendered content matches (reusing the
 // comparison section's scaffolding-stripping normalizer).
 function checkSmoothConvergence() {
@@ -2808,7 +2816,7 @@ function checkSmoothConvergence() {
   smoothFidelityBadge.style.visibility = 'visible';
   if (rawHtml === smoothHtml) {
     smoothFidelityBadge.className = 'fidelity-badge';
-    smoothFidelityBadge.textContent = '✓ converged after flush';
+    smoothFidelityBadge.textContent = '✓ converged at stream end';
   } else {
     smoothFidelityBadge.className = 'fidelity-badge checking';
     smoothFidelityBadge.textContent = '≠ panes differ';
