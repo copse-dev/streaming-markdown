@@ -401,6 +401,32 @@ describe('convergence — smoothed reveal equals a single un-smoothed render', (
     assert.ok(atRest.includes('stream-complete'))
   })
 
+  it('adaptive cadence converges after finish settles', () => {
+    const atRest = renderInto((r) => r.update(SAMPLE))
+    const clock = fakeScheduler()
+    let settled = false
+    const smoothed = renderInto((r) => {
+      const smoother = createInputSmoother({
+        update: (t) => r.update(t),
+        cadence: 'adaptive',
+        now: clock.now,
+        requestFrame: clock.requestFrame,
+        cancelFrame: clock.cancelFrame,
+        matchMedia: () => ({ matches: false }),
+      })
+      for (let i = 1; i <= SAMPLE.length; i += 7) {
+        smoother.push(SAMPLE.slice(0, i))
+        clock.tick(30)
+      }
+      smoother.push(SAMPLE)
+      smoother.finish(() => (settled = true))
+      while (clock.pending > 0) clock.tick(16)
+      smoother.dispose()
+    })
+    assert.equal(settled, true)
+    assert.equal(smoothed, atRest)
+  })
+
   it('disabled smoother is byte-identical to feeding chunks straight to update', () => {
     const atRest = renderInto((r) => r.update(SAMPLE))
     const passThrough = renderInto((r) => {
@@ -411,6 +437,282 @@ describe('convergence — smoothed reveal equals a single un-smoothed render', (
       smoother.dispose()
     })
     assert.equal(passThrough, atRest)
+  })
+})
+
+describe('createInputSmoother — adaptive cadence', () => {
+  const FRAME_MS = 1000 / 60
+  const PROSE =
+    'The quick brown fox jumps over the lazy dog while the answer keeps streaming. '.repeat(12)
+
+  /** Push `text` `chunk` characters every `everyMs`; return the characters revealed per frame. */
+  function streamSteadily(chunk: number, everyMs: number): { perFrame: number[]; seen: string[] } {
+    const clock = fakeScheduler()
+    const seen: string[] = []
+    const smoother = createInputSmoother({
+      update: (t) => seen.push(t),
+      cadence: 'adaptive',
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+      matchMedia: () => ({ matches: false }),
+    })
+    const perFrame: number[] = []
+    let sent = 0
+    let nextChunkAt = 0
+    let shown = 0
+    for (let t = 0; sent < PROSE.length || clock.pending > 0; t += FRAME_MS) {
+      while (t >= nextChunkAt && sent < PROSE.length) {
+        sent = Math.min(PROSE.length, sent + chunk)
+        smoother.push(PROSE.slice(0, sent))
+        nextChunkAt += everyMs
+      }
+      clock.tick(FRAME_MS)
+      const now = seen.at(-1)?.length ?? 0
+      perFrame.push(now - shown)
+      shown = now
+    }
+    smoother.dispose()
+    return { perFrame, seen }
+  }
+
+  it('reveals a chunky steady stream a little every frame, not a chunk at a time', () => {
+    // 12 characters every 50ms — a fast cloud model's cadence.
+    const { perFrame } = streamSteadily(12, 50)
+    const live = perFrame.slice(10, -10)
+    const frozen = live.filter((step) => step === 0).length
+    assert.ok(frozen / live.length < 0.1, `text froze in ${frozen}/${live.length} frames`)
+    assert.ok(Math.max(...live) <= 8, `largest frame step ${Math.max(...live)}`)
+  })
+
+  it('the fixed cadence reveals the same stream in bursts (why adaptive exists)', () => {
+    const clock = fakeScheduler()
+    const seen: string[] = []
+    const smoother = createInputSmoother({
+      update: (t) => seen.push(t),
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+      matchMedia: () => ({ matches: false }),
+    })
+    let frozen = 0
+    let shown = 0
+    let sent = 0
+    for (let frame = 0; frame < 120; frame++) {
+      if (frame % 3 === 0) smoother.push(PROSE.slice(0, (sent += 12)))
+      clock.tick(FRAME_MS)
+      const now = seen.at(-1)?.length ?? 0
+      if (now === shown) frozen++
+      shown = now
+    }
+    smoother.dispose()
+    assert.ok(frozen / 120 > 0.3, `fixed cadence froze in only ${frozen}/120 frames`)
+  })
+
+  it('keeps pace with a much faster stream instead of falling ever further behind', () => {
+    const clock = fakeScheduler()
+    let shown = ''
+    const smoother = createInputSmoother({
+      update: (t) => (shown = t),
+      cadence: 'adaptive',
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+    })
+    let text = ''
+    for (let i = 0; i < 180; i++) {
+      text += 'abcdefghij '.repeat(3) // ~2000 characters a second
+      smoother.push(text)
+      clock.tick(FRAME_MS)
+    }
+    assert.ok(text.length - shown.length < 2000 * 0.3, `lag ${text.length - shown.length}`)
+    smoother.dispose()
+  })
+
+  it('only ever releases prefixes of the pushed text, ending on the whole text', () => {
+    const { seen } = streamSteadily(7, 40)
+    for (const text of seen) assert.ok(PROSE.startsWith(text))
+    assert.equal(seen.at(-1), PROSE)
+  })
+
+  it('catches up in one frame after a long stall, such as a hidden page', () => {
+    const clock = fakeScheduler()
+    let shown = ''
+    const smoother = createInputSmoother({
+      update: (t) => (shown = t),
+      cadence: 'adaptive',
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+    })
+    smoother.push(PROSE)
+    clock.tick(2000)
+    assert.equal(shown, PROSE)
+    smoother.dispose()
+  })
+})
+
+describe('createInputSmoother — reveal boundaries', () => {
+  /** Every prefix a fixed 1-char-per-frame smoother releases for `text`. */
+  function releases(text: string): string[] {
+    const clock = fakeScheduler()
+    const seen: string[] = []
+    const smoother = createInputSmoother({
+      update: (t) => seen.push(t),
+      charsPerSecond: 100, // one code unit per 10ms frame
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+      matchMedia: () => ({ matches: false }),
+    })
+    smoother.push(text)
+    while (clock.pending > 0) clock.tick(10)
+    smoother.dispose()
+    return seen
+  }
+
+  it('ends every frame right after a word character, never on markdown syntax or whitespace', () => {
+    const text = 'Intro.\n\n## Heading\n\n- item [docs](https://x) **bold**\n\n1. one\n\n| a |\n| - |\n| x |\n'
+    for (const prefix of releases(text).slice(0, -1)) {
+      assert.match(prefix, /[^\s`*_~[\]()|#>!\-+=.:<\\\d]$/, `frame ended undecided: ${JSON.stringify(prefix)}`)
+    }
+  })
+
+  it('carries a closing fence through in one step instead of flashing its backticks', () => {
+    const text = '```ts\nconst a = 1\n```\n\nAfter'
+    assert.ok(!releases(text).some((prefix) => /\n`{1,2}$/.test(prefix)))
+  })
+})
+
+describe('createInputSmoother — finish', () => {
+  it('drains the rest promptly, then settles once', () => {
+    const clock = fakeScheduler()
+    const seen: string[] = []
+    const smoother = createInputSmoother({
+      update: (t) => seen.push(t),
+      cadence: 'adaptive',
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+    })
+    const text = 'word '.repeat(80)
+    smoother.push(text)
+    clock.tick(16)
+    let settled = 0
+    smoother.finish(() => settled++)
+    assert.equal(settled, 0, 'not synchronous while text is left')
+    assert.notEqual(seen.at(-1), text)
+    for (let i = 0; i < 30 && clock.pending > 0; i++) clock.tick(16)
+    assert.equal(clock.pending, 0)
+    assert.equal(seen.at(-1), text)
+    assert.equal(settled, 1)
+    smoother.dispose()
+  })
+
+  it('settles synchronously when nothing is left to reveal', () => {
+    const clock = fakeScheduler()
+    const smoother = createInputSmoother({
+      update: () => {},
+      initial: 'done',
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+    })
+    let settled = false
+    smoother.finish(() => (settled = true))
+    assert.equal(settled, true)
+    smoother.dispose()
+  })
+
+  it('settles synchronously when smoothing is disabled', () => {
+    const seen: string[] = []
+    const smoother = createInputSmoother({ update: (t) => seen.push(t), disabled: true })
+    smoother.push('all of it')
+    let settled = false
+    smoother.finish(() => (settled = true))
+    assert.equal(settled, true)
+    assert.equal(seen.at(-1), 'all of it')
+    smoother.dispose()
+  })
+
+  it('treats a push after finish as the stream resuming', () => {
+    const clock = fakeScheduler()
+    const smoother = createInputSmoother({
+      update: () => {},
+      cadence: 'adaptive',
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+    })
+    smoother.push('first part')
+    let settled = false
+    smoother.finish(() => (settled = true))
+    smoother.push('first part and more')
+    for (let i = 0; i < 60; i++) clock.tick(16)
+    assert.equal(settled, false)
+    smoother.dispose()
+  })
+
+  it('flush settles a pending finish immediately', () => {
+    const clock = fakeScheduler()
+    const seen: string[] = []
+    const smoother = createInputSmoother({
+      update: (t) => seen.push(t),
+      charsPerSecond: 10,
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+    })
+    smoother.push('the whole message')
+    let settled = false
+    smoother.finish(() => (settled = true))
+    smoother.flush()
+    assert.equal(settled, true)
+    assert.equal(seen.at(-1), 'the whole message')
+    smoother.dispose()
+  })
+})
+
+describe('createInputSmoother — initial text and synchronous schedulers', () => {
+  it('does not replay text already on screen', () => {
+    const clock = fakeScheduler()
+    const seen: string[] = []
+    const smoother = createInputSmoother({
+      update: (t) => seen.push(t),
+      initial: 'Already shown. ',
+      charsPerSecond: 100,
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+    })
+    smoother.push('Already shown. More')
+    clock.tick(10)
+    assert.deepEqual(seen, ['Already shown. M'])
+    smoother.dispose()
+  })
+
+  it('releases text as it arrives on a scheduler that calls back synchronously', () => {
+    const seen: string[] = []
+    let requests = 0
+    const smoother = createInputSmoother({
+      update: (t) => seen.push(t),
+      cadence: 'adaptive',
+      now: () => 0,
+      requestFrame: (cb) => {
+        requests++
+        cb()
+        return 0
+      },
+      cancelFrame: () => {},
+    })
+    smoother.push('one two')
+    smoother.push('one two three')
+    assert.deepEqual(seen, ['one two', 'one two three'])
+    assert.equal(requests, 1, 'stops asking a scheduler that cannot pace')
+    let settled = false
+    smoother.finish(() => (settled = true))
+    assert.equal(settled, true)
+    smoother.dispose()
   })
 })
 

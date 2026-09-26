@@ -29,7 +29,7 @@
     },
     "./smoothing": {
       "file": "dist/smoothing.js",
-      "gzipBudget": 680
+      "gzipBudget": 1130
     },
     "./sanitizers/browser": {
       "file": "dist/sanitize-browser.js",
