@@ -21,6 +21,7 @@
 import type { HtmlPolicy } from './html-policy.ts'
 import type { SanitizeExtension, SanitizerBackend } from './sanitize.ts'
 import type { LinkImagePolicy } from './link-image-policy.ts'
+import type { UrlPolicy } from './url-policy.ts'
 import type { TrustedTypesPolicy } from './html-sink.ts'
 import type { LinkDecorator } from './inline-links.ts'
 import type { FenceHandler } from './fence-handlers.ts'
@@ -67,6 +68,17 @@ export interface MarkdownConfig {
   sanitizeExtension?: SanitizeExtension | null
   /** Opt-in link/image origin allowlist; `null` disables it (unrestricted). See link-image-policy.ts. */
   linkImagePolicy?: LinkImagePolicy | null
+  /**
+   * Opt-in host gate consulted for **every** URL this package emits — markdown
+   * links/images/autolinks, raw-HTML passthrough destinations, and the URLs
+   * inside diagram/math markup that bypasses the sink sanitizer. `null` (the
+   * default) disables it and every URL is emitted unchanged.
+   *
+   * Modelled on the `TrustedURL` type Trusted Types dropped (w3c/trusted-types#65):
+   * the scheme allowlist stays a floor a policy cannot lift, and everything above
+   * it is the host's. See url-policy.ts.
+   */
+  urlPolicy?: UrlPolicy | null
   /** Trusted Types policy used to bless sink output; `null` uses the default. See html-sink.ts. */
   trustedTypesPolicy?: TrustedTypesPolicy | null
   /**
