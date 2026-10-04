@@ -19,9 +19,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: copse-dev/agent-pane/.github/workflows/reviewer.yml@83018875340d6b98fb141f689a09698da518e413
+    uses: copse-dev/agent-pane/.github/workflows/reviewer.yml@0f5bea83c3b03f5ab364a3611f75ce7d4cab0c56
     with:
-      reviewer-ref: 83018875340d6b98fb141f689a09698da518e413
+      reviewer-ref: 0f5bea83c3b03f5ab364a3611f75ce7d4cab0c56
       pr: ${{ inputs.pr || 0 }}
     secrets:
       model-api-key: ${{ secrets.COPSE_REVIEW_OPENROUTER_API_KEY }}
