@@ -1,0 +1,29 @@
+name: Copse review
+
+# Runs the OSS reviewer on this repository's GitHub-hosted runners. The source
+# and reusable workflow are pinned together; no Copse service is involved.
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, labeled]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to review
+        required: true
+        type: number
+
+permissions: {}
+
+jobs:
+  review:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: copse-dev/agent-pane/.github/workflows/reviewer.yml@16f383412dbd021accb9c0dc8a58fa725de504e6
+    with:
+      reviewer-ref: 16f383412dbd021accb9c0dc8a58fa725de504e6
+      pr: ${{ inputs.pr || 0 }}
+    secrets:
+      model-api-key: ${{ secrets.COPSE_REVIEW_OPENROUTER_API_KEY }}
+      app-id: ${{ secrets.RELEASE_APP_ID }}
+      app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

@@ -213,6 +213,9 @@ transient DOM is not.
 
 ## Development
 
+Pull requests can receive advisory [Copse reviews](docs/COPSE-REVIEWER.md), running
+entirely in this repository's GitHub Actions alongside normal CI.
+
 ```bash
 npm install
 npm run typecheck   # tsc (strict, exactOptionalPropertyTypes)
