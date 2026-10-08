@@ -233,3 +233,5 @@ entirely outside the parent document. Serve the prebuilt frame document
 (`diagrams/mermaid/frame.html`) or build your own; theme, label font and the frame's
 accessible name are per-render options. Hosts retain navigation/native API enforcement.
 The existing in-document adapter is unchanged.
+For zoom, pan, reset and full screen on a rendered diagram, the optional
+`diagrams/mermaid/viewer` adds plain-DOM controls (`styles/diagram-viewer.css` styles them).
