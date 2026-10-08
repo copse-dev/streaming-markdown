@@ -63,6 +63,10 @@
         "./html-sink.js",
         "./streaming.js"
       ]
+    },
+    "./diagrams/mermaid/viewer": {
+      "file": "dist/mermaid-viewer.js",
+      "gzipBudget": 1600
     }
   }
 }

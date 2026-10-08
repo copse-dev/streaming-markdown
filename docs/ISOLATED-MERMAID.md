@@ -68,6 +68,28 @@ initialize the child, once. No markup, URLs, or native-operation requests are
 returned. The iframe has `allow-scripts`, without `allow-same-origin`, popups,
 top navigation or forms. Do not relax its sandbox attributes.
 
+## Optional viewer: zoom, pan, reset, full screen
+
+`diagrams/mermaid/viewer` adds controls to a rendered diagram — an isolated frame or an
+in-document SVG — with no framework:
+
+```ts
+import { attachDiagramViewer } from '@copse/streaming-markdown/diagrams/mermaid/viewer'
+import '@copse/streaming-markdown/styles/diagram-viewer.css' // optional cosmetic layer
+
+const viewer = attachDiagramViewer(diagram, {
+  labels: { zoomIn: t('zoomIn'), zoomOut: t('zoomOut'), reset: t('reset'), fullscreen: t('fullscreen') },
+})
+// later: viewer.dispose()
+```
+
+Wheel zooms, dragging pans at any zoom, `+`/`-`/`0` and the arrow keys work when the diagram has
+focus, and full screen is offered where the Fullscreen API is available. The frame is never
+re-parented (moving an iframe reloads it): the toolbar is inserted before it and the view is a
+transform on it, set through the CSSOM, so no inline `style` attributes or CSP changes are needed.
+The viewer also sets `pointer-events: none` on the frame, so a click cannot reach a link inside it.
+Pass `controls: false` to drive the returned handle (`zoomBy`, `panBy`, `reset`) from your own UI.
+
 ## Host responsibilities and limits
 
 **CSP is resource-load enforcement, not a complete network or navigation firewall.**

@@ -86,10 +86,16 @@
     "./styles/core.css": "./styles/core.css",
     "./styles/default.css": "./styles/default.css",
     "./styles/cjk.css": "./styles/cjk.css",
+    "./styles/diagram-viewer.css": "./styles/diagram-viewer.css",
     "./diagrams/mermaid/isolated": {
       "types": "./dist/mermaid-isolated.d.ts",
       "import": "./dist/mermaid-isolated.js",
       "default": "./dist/mermaid-isolated.js"
+    },
+    "./diagrams/mermaid/viewer": {
+      "types": "./dist/mermaid-viewer.d.ts",
+      "import": "./dist/mermaid-viewer.js",
+      "default": "./dist/mermaid-viewer.js"
     },
     "./diagrams/mermaid/frame": {
       "types": "./dist/mermaid-frame-runtime.d.ts",
