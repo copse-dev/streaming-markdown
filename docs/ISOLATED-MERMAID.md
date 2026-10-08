@@ -81,12 +81,18 @@ mountIsolatedDiagrams(host, diagrams)
 <Markdown markdown={text} onRender={(host) => mountIsolatedDiagrams(host, diagrams)} />
 ```
 
+Each frame starts its own Mermaid, so a long thread with many diagrams pays for all of them up
+front. Pass `lazy: true` to mount a frame only once its diagram comes near the viewport (within
+`300px`, for `300` ms so a fast scroll mounts nothing), then at an idle moment (at most `500` ms
+later); each value can be overridden with `lazy: { rootMargin, debounce, idleTimeout }`. A deferred
+diagram shows its source and has state `deferred`. Without IntersectionObserver it mounts at once.
+
 Only closed fences get a frame: the forming fence and the streaming tail are skipped because the
 renderer still reconciles them, while a closed fence is frozen, so its frame survives later
 updates. While a frame renders, the escaped source stays on screen and the frame is held out of
 layout; once ready the source is removed and the diagram gets `mermaid-diagram--isolated`. On
 failure the frame is disposed and the source stays as the inert fallback. State is recorded in
-`data-isolated-diagram` (`pending`, `rendered`, `failed`). Do not also configure a
+`data-isolated-diagram` (`deferred`, `pending`, `rendered`, `failed`). Do not also configure a
 `diagramRenderer` for the same render.
 
 If a proxy in front of your host mishandles framed HTML documents, fetch the frame document
@@ -128,6 +134,10 @@ The frame validates each field (`parseRenderRequest`): an unknown theme, a famil
 anything that could end a CSS declaration or open a `url()`, or font bytes that are not a
 non-empty `ArrayBuffer` of at most 4 MiB are dropped and the frame's defaults apply. Font bytes
 are copied per frame, so one buffer serves every diagram.
+
+The frame element is given `color-scheme: light`, matching the frame document. Without it a dark
+page (`color-scheme: dark`) would make the browser paint an opaque white backdrop behind every
+frame; with it the frame stays transparent and the diagram sits on whatever the host paints.
 
 Keep the handle and call `dispose()` when replacing/unmounting it. Pending work
 also cancels on abort or observed DOM removal. `ready` rejects on failure,

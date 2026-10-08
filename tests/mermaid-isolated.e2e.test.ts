@@ -1,6 +1,7 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer, type Server } from 'node:http'
+import { inflateSync } from 'node:zlib'
 import { build } from 'esbuild'
 import { chromium, type Browser, type Page } from 'playwright-core'
 import { readFileSync } from 'node:fs'
@@ -51,6 +52,11 @@ describe(
         } else if (req.url === '/frame.html') {
           res.setHeader('Content-Type', 'text/html')
           res.end(frameHtml)
+        } else if (req.url === '/dark') {
+          res.setHeader('Content-Type', 'text/html')
+          res.end(
+            `<meta name="color-scheme" content="dark"><style>html,body{margin:0;background:#123456}</style><script>globalThis.__name = fn => fn</script><script>${parent.outputFiles![0]!.text}</script>`,
+          )
         } else if (req.url === '/') {
           res.setHeader('Content-Type', 'text/html')
           res.end(
@@ -186,6 +192,40 @@ describe(
       assert.equal(inside.nodeFill, 'rgb(31, 32, 32)')
       assert.deepEqual(requests, [])
       await page.evaluate(() => (Reflect.get(window, 'prebuiltHandle') as Isolated.DiagramFrame).dispose())
+    })
+
+    it('keeps the frame transparent in a dark color-scheme page (no opaque backdrop)', async () => {
+      const dark = await browser.newPage()
+      try {
+        await dark.goto(`${origin}/dark`)
+        const box = await dark.evaluate(async () => {
+          const frame = Adapter.createMermaidFrame('graph LR; A[Start] --> B[Finish]', {
+            url: '/frame.html',
+            layoutWidth: 400,
+          })
+          document.body.append(frame.element)
+          await frame.ready
+          frame.element.style.border = '0'
+          const rect = frame.element.getBoundingClientRect()
+          return { x: rect.x, y: rect.y }
+        })
+        // Top-left corner of the frame: empty diagram background, so it shows whatever is behind
+        // the frame. Chromium's PNG rows start with a filter byte; the first pixel of the first row
+        // is stored raw under every filter, so it can be read without unfiltering.
+        const png = await dark.screenshot({ clip: { x: box.x + 2, y: box.y + 2, width: 1, height: 1 } })
+        let offset = 8
+        const idat: Buffer[] = []
+        while (offset < png.length) {
+          const length = png.readUInt32BE(offset)
+          const type = png.toString('ascii', offset + 4, offset + 8)
+          if (type === 'IDAT') idat.push(png.subarray(offset + 8, offset + 8 + length))
+          offset += 12 + length
+        }
+        const [, r, g, b] = inflateSync(Buffer.concat(idat))
+        assert.deepEqual([r, g, b], [0x12, 0x34, 0x56])
+      } finally {
+        await dark.close()
+      }
     })
 
     it('cancels pending work on disposal, removal and abort; rejects oversized source before loading', async () => {
