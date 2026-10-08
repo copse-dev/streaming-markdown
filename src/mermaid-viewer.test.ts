@@ -57,6 +57,46 @@ describe('attachDiagramViewer', () => {
     diagram.remove()
   })
 
+  for (const bounds of [
+    { minScale: 2, maxScale: 4, initialScale: 2, delta: 1 },
+    { minScale: 0.25, maxScale: 0.75, initialScale: 0.75, delta: -0.25 },
+    { minScale: 2, maxScale: 2, initialScale: 2, delta: 1 },
+  ]) {
+    it(`initializes and resets within ${bounds.minScale}–${bounds.maxScale}`, () => {
+      const { diagram, frame } = diagramWithFrame()
+      const viewer = attachDiagramViewer(diagram, bounds)
+      const reset = diagram.querySelector<HTMLButtonElement>('.mermaid-viewer__button--reset')!
+      assert.equal(viewer.scale, bounds.initialScale)
+      assert.equal(reset.disabled, true)
+      viewer.zoomBy(bounds.delta)
+      viewer.panBy(20, 30)
+      assert.equal(reset.disabled, false)
+      reset.click()
+      assert.equal(viewer.scale, bounds.initialScale)
+      assert.equal(frame.style.transform, `translate(0px, 0px) scale(${bounds.initialScale})`)
+      assert.equal(reset.disabled, true)
+      viewer.panBy(10, 10)
+      diagram.dispatchEvent(new window.KeyboardEvent('keydown', { key: '0', bubbles: true }))
+      assert.equal(frame.style.transform, `translate(0px, 0px) scale(${bounds.initialScale})`)
+      viewer.dispose()
+      diagram.remove()
+    })
+  }
+
+  it('rejects invalid bounds before changing the diagram', () => {
+    for (const bounds of [
+      { minScale: 0 }, { minScale: -1 }, { minScale: NaN }, { minScale: Infinity },
+      { maxScale: 0 }, { maxScale: -1 }, { maxScale: NaN }, { maxScale: Infinity },
+      { minScale: 4, maxScale: 2 },
+    ]) {
+      const { diagram } = diagramWithFrame()
+      const before = diagram.outerHTML
+      assert.throws(() => attachDiagramViewer(diagram, bounds), RangeError)
+      assert.equal(diagram.outerHTML, before)
+      diagram.remove()
+    }
+  })
+
   it('zooms with the wheel, pans by dragging and with the keyboard, ignoring the toolbar', () => {
     const { diagram, frame } = diagramWithFrame()
     const viewer = attachDiagramViewer(diagram)

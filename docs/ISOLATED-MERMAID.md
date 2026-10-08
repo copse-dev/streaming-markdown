@@ -88,6 +88,9 @@ focus, and full screen is offered where the Fullscreen API is available. The fra
 re-parented (moving an iframe reloads it): the toolbar is inserted before it and the view is a
 transform on it, set through the CSSOM, so no inline `style` attributes or CSP changes are needed.
 The viewer also sets `pointer-events: none` on the frame, so a click cannot reach a link inside it.
+`minScale` and `maxScale` must be finite, positive and ordered (equal bounds are allowed).
+Initial zoom and reset use 100% clamped to those bounds; reset also clears panning. Invalid
+bounds throw a `RangeError` before the viewer changes the diagram.
 Pass `controls: false` to drive the returned handle (`zoomBy`, `panBy`, `reset`) from your own UI.
 
 ## Host responsibilities and limits

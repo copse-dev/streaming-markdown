@@ -26,6 +26,7 @@ export interface DiagramViewerOptions {
   controls?: boolean
   /** Mouse-wheel zoom over the diagram (default `true`). */
   wheel?: boolean
+  /** Positive finite zoom bounds (defaults 0.5 and 3); minScale must not exceed maxScale. */
   minScale?: number
   maxScale?: number
   /** Scale change per button press, wheel notch or `+`/`-` key (default 0.25). */
@@ -36,6 +37,7 @@ export interface DiagramViewer {
   readonly scale: number
   zoomBy(step: number): void
   panBy(dx: number, dy: number): void
+  /** Clear panning and restore 100% zoom, clamped to the configured bounds. */
   reset(): void
   /** Removes the controls and listeners and restores the diagram's view. Idempotent. */
   dispose(): void
@@ -55,7 +57,7 @@ const KEY_PAN = 40
 
 /**
  * Attach a viewer to `diagram`, the element holding the rendered frame or SVG as a direct child.
- * Throws if there is nothing rendered to view.
+ * Throws if there is nothing rendered to view, or a RangeError for invalid zoom bounds.
  */
 export function attachDiagramViewer(diagram: HTMLElement, options: DiagramViewerOptions = {}): DiagramViewer {
   const found = diagram.querySelector<HTMLElement | SVGSVGElement>(':scope > iframe, :scope > svg')
@@ -65,7 +67,10 @@ export function attachDiagramViewer(diagram: HTMLElement, options: DiagramViewer
   const minScale = options.minScale ?? 0.5
   const maxScale = options.maxScale ?? 3
   const step = options.step ?? 0.25
-  let scale = 1
+  if (!Number.isFinite(minScale) || !Number.isFinite(maxScale) || minScale <= 0 || maxScale < minScale)
+    throw new RangeError('attachDiagramViewer: invalid zoom bounds')
+  const initialScale = Math.min(maxScale, Math.max(minScale, 1))
+  let scale = initialScale
   let x = 0
   let y = 0
 
@@ -94,7 +99,7 @@ export function attachDiagramViewer(diagram: HTMLElement, options: DiagramViewer
     diagram.dataset['viewerScale'] = String(scale)
     if (buttons.zoomIn) buttons.zoomIn.disabled = scale >= maxScale
     if (buttons.zoomOut) buttons.zoomOut.disabled = scale <= minScale
-    if (buttons.reset) buttons.reset.disabled = scale === 1 && x === 0 && y === 0
+    if (buttons.reset) buttons.reset.disabled = scale === initialScale && x === 0 && y === 0
   }
   const viewer: DiagramViewer = {
     get scale() {
@@ -110,7 +115,7 @@ export function attachDiagramViewer(diagram: HTMLElement, options: DiagramViewer
       apply()
     },
     reset() {
-      scale = 1
+      scale = initialScale
       x = 0
       y = 0
       apply()

@@ -127,7 +127,7 @@
     "build:demo": "npm run build && rm -f docs/streaming-markdown.*.mjs && esbuild docs/browser-entry.mjs --bundle --splitting --format=esm --platform=browser --outdir=docs --out-extension:.js=.mjs --entry-names=streaming-markdown.browser --chunk-names=streaming-markdown.[name]-[hash]",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
-    "test:e2e": "node --import tsx --test tests/trusted-types.e2e.test.ts tests/mermaid-isolated.e2e.test.ts",
+    "test:e2e": "node --import tsx --test tests/trusted-types.e2e.test.ts tests/mermaid-isolated.e2e.test.ts tests/mermaid-viewer.e2e.test.ts",
     "coverage": "c8 npm test",
     "coverage:check": "node --import tsx scripts/coverage-gate.mts",
     "coverage:update": "node --import tsx scripts/coverage-gate.mts --update",
