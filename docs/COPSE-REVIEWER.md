@@ -39,8 +39,11 @@ or run; full coverage and browser evidence remain owned by normal CI.
 Findings publish as advisory App reviews, anchored to the reviewed commit. The
 workflow checks for stale heads/bases, closed PRs and opt-out labels before posting.
 Full findings JSON, SARIF and the model event stream are retained as Actions
-artifacts for thirty days. The initial integration neither edits PR descriptions
-nor makes code changes. `@copse-review` commands are deferred.
+artifacts for thirty days. Description summaries are enabled: a completed review
+adds or updates Copse's managed summary block while preserving the author's text,
+including when no findings need a new review. The same stale-head/base and opt-out
+checks apply before updating the description. The integration does not make code
+changes. `@copse-review` commands are deferred.
 
 ## Updating the reviewer
 
