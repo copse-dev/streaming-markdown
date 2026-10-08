@@ -22,18 +22,27 @@ the repository/credential owner.
 
 ## Starting a review
 
-Reviews are manual. Open Actions → Copse review → Run workflow, select `main`
-and enter the PR number, or run:
+Same-repository PRs are reviewed automatically when opened, reopened, updated
+or marked ready. The credential-free `copse-review-request.yml` workflow signals
+the reviewer, which then runs from trusted `main` through `workflow_run`. This
+also gives same-repository Dependabot PRs access to the configured model/App
+credentials without using `pull_request_target`.
+
+To start an additional review, open Actions → Copse review → Run workflow,
+select `main` and enter the PR number, or run:
 
 ```sh
 gh workflow run copse-review.yml --repo copse-dev/streaming-markdown --ref main -f pr=123
 ```
 
-The initiating actor and any rerunning actor must have repository write access.
-The PR must target `main` and its head and base must both belong to this repository.
-Fork PRs are rejected even when dispatched by a maintainer. Opening, pushing or
-labelling a PR does not start a review. For a draft, add `copse-review` before
-manual dispatch. `copse-review-skip` opts out.
+Human initiating/rerunning actors need repository write access. Dependabot can
+automatically request reviews only for its own same-repository PRs. The PR must
+target `main`, and its head and base must both belong to this repository. Fork
+PRs are rejected even when dispatched by a maintainer. A stale request does not
+review a newer head; the new push supplies a fresh request. For a draft, add
+`copse-review` and push, mark ready or dispatch manually; adding the label alone
+does not start a review. `copse-review-skip` opts out. Description edits and
+feedback labels do not start another review.
 
 The reviewer pins the PR head and base, reads its conversation, and runs the
 detected `build`, `typecheck` and `test` scripts. This package has no lint script,
