@@ -9,7 +9,7 @@ import {
   getActiveFootnoteContext,
   setActiveFootnoteContext,
 } from './footnotes.ts'
-import { type MarkdownConfig, withConfig } from './config.ts'
+import { activeConfig, type MarkdownConfig, withConfig } from './config.ts'
 import { renderBlocks, renderFootnoteSection } from './render-blocks.ts'
 import { sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 
@@ -21,18 +21,14 @@ export { escapeHtml } from './escape.ts'
  * `<pre>` code block (#616); it is set only at the top level, never in recursive
  * list/blockquote rendering. Shared so the streaming frozen/tail path renders
  * slices byte-identically to `renderMarkdown` (its full-morph fallback) — the two
- * must not drift (#21).
+ * must not drift (#21). `indentedCode` comes from the active config
+ * (`MarkdownConfig.indentedCode`), so call this inside the render's config scope.
  */
-export const TOP_LEVEL_RENDER_OPTS = { htmlFromIndent: true, indentedCode: true } as const
+export function topLevelRenderOpts(): { htmlFromIndent: true; indentedCode: boolean } {
+  return { htmlFromIndent: true, indentedCode: activeConfig().indentedCode !== false }
+}
 
 export interface RenderMarkdownOptions extends MarkdownConfig {
-  /**
-   * Recognize 4-column (space or tab) indented lines as CommonMark indented code
-   * blocks. Defaults to `true` — indented code is supported and conforms (#9).
-   * Set `false` to opt out and render such lines as prose paragraphs instead (an
-   * intentional divergence; see docs/ARCHITECTURE.md "Indented code blocks").
-   */
-  indentedCode?: boolean
   /**
    * Pre-computed `tokenizeBlocks(raw)` result. Supplying it lets the streaming
    * hot path reuse a single tokenization instead of re-scanning `raw` (#21).
@@ -58,11 +54,11 @@ export interface RenderMarkdownOptions extends MarkdownConfig {
  * pipelines), use {@link renderMarkdownUnsafe} and sanitize at your own sink.
  */
 // Only `MarkdownConfig` fields belong in the ambient scope. `tokens` (a
-// potentially large per-call array) and `indentedCode` are call options read
-// directly by renderMarkdownCore; leaking them into the ambient object would
-// hand an outer render's tokens to any nested render that consulted them.
+// potentially large per-call array) is a call option read directly by
+// renderMarkdownCore; leaking it into the ambient object would hand an outer
+// render's tokens to any nested render that consulted them.
 function scopedConfig(options: RenderMarkdownOptions): MarkdownConfig {
-  const { tokens, indentedCode, ...config } = options
+  const { tokens, ...config } = options
   return config
 }
 
@@ -94,11 +90,7 @@ export function renderMarkdownUnsafe(raw: string, options: RenderMarkdownOptions
 function renderMarkdownCore(raw: string, options: RenderMarkdownOptions): string {
   const tokens = options.tokens ?? tokenizeBlocks(raw)
   const linkRefs = collectLinkReferenceDefinitions(raw, tokens)
-  const renderOpts = {
-    linkRefs,
-    htmlFromIndent: TOP_LEVEL_RENDER_OPTS.htmlFromIndent,
-    indentedCode: options.indentedCode ?? TOP_LEVEL_RENDER_OPTS.indentedCode,
-  }
+  const renderOpts = { linkRefs, ...topLevelRenderOpts() }
   // GFM footnotes (#72): with definitions present, install a document-scoped
   // context so inline `[^label]` references resolve (numbered in first-use
   // order) and append the trailing footnotes section for the referenced ones.

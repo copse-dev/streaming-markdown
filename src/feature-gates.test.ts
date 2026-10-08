@@ -1,7 +1,7 @@
 import '../tests/setup-dom-jsdom.ts'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderMarkdownUnsafe } from './renderer.ts'
+import { renderMarkdown, renderMarkdownUnsafe } from './renderer.ts'
 import { renderStreamingMarkdown, StreamingMarkdownRenderer } from './streaming.ts'
 import { tokenizeBlocks } from './block-tokenizer.ts'
 import { withConfig } from './config.ts'
@@ -107,5 +107,52 @@ describe('gates in the streaming path', () => {
     assert.doesNotMatch(hostA.innerHTML, /class="footnotes"/)
     assert.match(hostB.innerHTML, /class="footnotes"/)
     assert.match(hostB.innerHTML, /<a href="https:\/\/example\.com"/)
+  })
+})
+
+describe('indentedCode config gate', () => {
+  // Top-level indented prose (the LLM shape the gate exists for), then a list
+  // whose item holds indented code: the gate is top-level only, so the nested
+  // block must stay `<pre><code>`.
+  const doc =
+    'Intro\n\n    indented prose line\n    and its second line\n\nAfter\n\n- item\n\n      nested code\n'
+  const off = { indentedCode: false }
+
+  it('defaults on: a top-level indented block is code', () => {
+    assert.match(renderMarkdownUnsafe(doc), /<pre><code>indented prose line\n/)
+  })
+
+  it('off at rest: the top-level block is prose, nested indented code is kept', () => {
+    const html = renderMarkdownUnsafe(doc, off)
+    assert.match(html, /<p>indented prose line\nand its second line<\/p>/)
+    assert.match(html, /<li>[\s\S]*<pre><code>nested code\n<\/code><\/pre>/)
+  })
+
+  it('renderStreamingMarkdown honours the gate', () => {
+    const streamed = String(renderStreamingMarkdown(doc, off))
+    assert.doesNotMatch(streamed, /<pre><code>indented prose/)
+    assert.match(streamed, /<p>indented prose line\nand its second line<\/p>/)
+  })
+
+  it('StreamingMarkdownRenderer converges byte-identically to the gated at-rest render', () => {
+    const host = document.createElement('div')
+    const renderer = new StreamingMarkdownRenderer(host, off)
+    for (let i = 1; i <= doc.length; i++) {
+      renderer.update(doc.slice(0, i))
+      // A committed frame must never show the gated block as code, not just the
+      // final one: the frozen/tail path re-renders slices on every update.
+      assert.doesNotMatch(host.innerHTML, /<pre><code>indented prose/)
+    }
+    const committed = host.querySelector('.stream-complete')?.innerHTML
+    assert.equal(committed, String(renderMarkdown(doc, off)))
+  })
+
+  it('a gated renderer and a default renderer coexist without bleed', () => {
+    const hostA = document.createElement('div')
+    const hostB = document.createElement('div')
+    new StreamingMarkdownRenderer(hostA, off).update(doc)
+    new StreamingMarkdownRenderer(hostB).update(doc)
+    assert.doesNotMatch(hostA.innerHTML, /<pre><code>indented prose/)
+    assert.match(hostB.innerHTML, /<pre><code>indented prose line\n/)
   })
 })
