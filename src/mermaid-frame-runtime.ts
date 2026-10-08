@@ -54,11 +54,7 @@ export function createMermaidRunner(
           node.removeAttribute('data-processed')
           try {
             await mermaid.run({ nodes: [node], suppressErrors: true })
-            if (
-              container.querySelector('svg') &&
-              !container.querySelector('.error-icon') &&
-              !container.textContent?.includes('Syntax error in text')
-            ) {
+            if (container.querySelector('svg') && !container.querySelector('.error-icon')) {
               node.dataset['processed'] = 'true'
               rendered = true
               break

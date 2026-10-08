@@ -86,6 +86,21 @@ describe('isolated Mermaid runner', () => {
     assert.ok(dom.window.document.querySelector('svg'))
     dom.window.close()
   })
+  it('does not mistake a legitimate label for a Mermaid syntax error', async () => {
+    const dom = new JSDOM(
+      '<div class="mermaid-diagram"><pre class="mermaid">graph LR; A[Syntax error in text]</pre></div>',
+    )
+    const mermaid: FrameMermaid = {
+      initialize() {},
+      async run({ nodes }) {
+        nodes[0]!.innerHTML = '<svg><text>Syntax error in text</text></svg>'
+      },
+    }
+    await createMermaidRunner(mermaid)(dom.window.document)
+    assert.equal(dom.window.document.querySelector('svg')?.textContent, 'Syntax error in text')
+    dom.window.close()
+  })
+
   it('fails without returning SVG or delegates to an inert host fallback', async () => {
     const dom = new JSDOM(
       '<div class="mermaid-diagram"><pre class="mermaid">bad source</pre></div>',
