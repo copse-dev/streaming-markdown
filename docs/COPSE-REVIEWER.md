@@ -22,11 +22,18 @@ the repository/credential owner.
 
 ## Starting a review
 
-Ready PRs opened, reopened or marked ready by a collaborator with write access
-are reviewed automatically. Add `copse-review` to review a draft or rerun an
-existing PR. Remove and re-add the label for a subsequent run. Other label changes
-and pushes alone do not start a review. `copse-review-skip` opts out. Maintainers
-can also run the workflow manually with a PR number, including a fork PR.
+Reviews are manual. Open Actions → Copse review → Run workflow, select `main`
+and enter the PR number, or run:
+
+```sh
+gh workflow run copse-review.yml --repo copse-dev/streaming-markdown --ref main -f pr=123
+```
+
+The initiating actor and any rerunning actor must have repository write access.
+The PR must target `main` and its head and base must both belong to this repository.
+Fork PRs are rejected even when dispatched by a maintainer. Opening, pushing or
+labelling a PR does not start a review. For a draft, add `copse-review` before
+manual dispatch. `copse-review-skip` opts out.
 
 The reviewer pins the PR head and base, reads its conversation, and runs the
 detected `build`, `typecheck` and `test` scripts. This package has no lint script,
@@ -39,8 +46,11 @@ or run; full coverage and browser evidence remain owned by normal CI.
 Findings publish as advisory App reviews, anchored to the reviewed commit. The
 workflow checks for stale heads/bases, closed PRs and opt-out labels before posting.
 Full findings JSON, SARIF and the model event stream are retained as Actions
-artifacts for thirty days. The initial integration neither edits PR descriptions
-nor makes code changes. `@copse-review` commands are deferred.
+artifacts for thirty days. Description summaries are enabled: a completed review
+adds or updates Copse's managed summary block while preserving the author's text,
+including when no findings need a new review. The same stale-head/base and opt-out
+checks apply before updating the description. The integration does not make code
+changes. `@copse-review` commands are deferred.
 
 ## Updating the reviewer
 
