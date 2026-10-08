@@ -219,12 +219,30 @@ describe('mountIsolatedDiagrams lazy mounting', () => {
     host.remove()
   })
 
+  it('disconnects a diagram removed before intersection and allows remounting after reinsertion', async () => {
+    const host = renderedHost()
+    mountIsolatedDiagrams(host, { url: '/frame.html', lazy: true })
+    const diagram = host.querySelector<HTMLElement>('.mermaid-diagram')!
+    host.remove()
+    await until(() => observers[0]!.disconnected)
+    assert.equal(diagram.hasAttribute(ISOLATED_DIAGRAM_ATTRIBUTE), false)
+    assert.equal(channels.length, 0)
+
+    document.body.append(host)
+    mountIsolatedDiagrams(host, { url: '/frame.html', lazy: { debounce: 0 } })
+    assert.equal(observers.length, 2)
+    intersect(observers[1]!, true)
+    await until(() => !!host.querySelector('iframe'))
+    host.remove()
+  })
+
   it('skips a deferred diagram removed before it became due, and mounts at once without IntersectionObserver', async () => {
     const host = renderedHost()
     mountIsolatedDiagrams(host, { url: '/frame.html', lazy: { debounce: 0 } })
     intersect(observers[0]!, true)
     host.remove()
     await wait(20)
+    assert.ok(observers[0]!.disconnected)
     assert.equal(host.querySelector('iframe'), null)
     const mountedBeforeRemoval = channels.length
     assert.equal(mountedBeforeRemoval, 0)
@@ -242,5 +260,27 @@ describe('mountIsolatedDiagrams lazy mounting', () => {
     mountIsolatedDiagrams(eager, { url: '/frame.html', lazy: true })
     assert.ok(eager.querySelector('iframe'))
     eager.remove()
+  })
+
+  it('does not mount stale idle work after removal and reinsertion', async () => {
+    const idle: Array<() => void> = []
+    Object.defineProperty(globalThis, 'requestIdleCallback', {
+      configurable: true,
+      value: (callback: () => void) => idle.push(callback),
+    })
+    const host = renderedHost()
+    mountIsolatedDiagrams(host, { url: '/frame.html', lazy: { debounce: 0 } })
+    intersect(observers[0]!, true)
+    await until(() => idle.length === 1)
+    host.remove()
+    const diagram = host.querySelector<HTMLElement>('.mermaid-diagram')!
+    await until(() => !diagram.hasAttribute(ISOLATED_DIAGRAM_ATTRIBUTE))
+    document.body.append(host)
+    mountIsolatedDiagrams(host, { url: '/frame.html', lazy: true })
+    idle[0]!()
+    assert.equal(channels.length, 0)
+    assert.equal(diagram.getAttribute(ISOLATED_DIAGRAM_ATTRIBUTE), 'deferred')
+    host.remove()
+    await until(() => observers[1]!.disconnected)
   })
 })

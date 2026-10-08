@@ -235,8 +235,19 @@ function deferMount(
 ): void {
   diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'deferred')
   let timer: ReturnType<typeof setTimeout> | undefined
+  let cancelled = false
+  const removalObserver = new MutationObserver(() => {
+    if (diagram.isConnected) return
+    cancelled = true
+    clearTimeout(timer)
+    observer.disconnect()
+    removalObserver.disconnect()
+    // Allow the same node to be mounted again if the host later reinserts it.
+    diagram.removeAttribute(ISOLATED_DIAGRAM_ATTRIBUTE)
+  })
   const observer = new IntersectionObserver(
     (entries) => {
+      if (cancelled) return
       if (!entries.at(-1)?.isIntersecting) {
         clearTimeout(timer)
         return
@@ -245,8 +256,12 @@ function deferMount(
       timer = setTimeout(() => {
         observer.disconnect()
         requestIdle(() => {
+          removalObserver.disconnect()
           // The renderer may have rebuilt the message meanwhile; the new copy mounts on its own.
-          if (diagram.isConnected && diagram.getAttribute(ISOLATED_DIAGRAM_ATTRIBUTE) === 'deferred')
+          if (
+            !cancelled && diagram.isConnected &&
+            diagram.getAttribute(ISOLATED_DIAGRAM_ATTRIBUTE) === 'deferred'
+          )
             mountFrame(diagram, pre, options)
         }, idleTimeout)
       }, debounce)
@@ -254,6 +269,7 @@ function deferMount(
     { rootMargin, threshold: 0 },
   )
   observer.observe(diagram)
+  removalObserver.observe(diagram.ownerDocument, { childList: true, subtree: true })
 }
 
 function mountFrame(
