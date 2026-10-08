@@ -102,3 +102,11 @@ can hold different policies without bleed (see [#137 / ADR 0003](decisions/0003-
 Please report security issues privately via the repository's security advisories
 (GitHub → **Security → Report a vulnerability**) rather than a public issue, so a
 fix can ship before disclosure.
+
+## Optional isolated Mermaid execution
+
+The [isolated adapter](ISOLATED-MERMAID.md) moves parsing, temporary DOM, and SVG
+insertion into an opaque frame with a fixed CSP. It is opt-in and is distinct from
+the legacy `DiagramRenderer` SVG-insertion path. Read the host responsibilities
+before treating it as a containment boundary: CSP alone does not prevent frame
+self-navigation or establish comprehensive network isolation.

@@ -85,7 +85,22 @@
     },
     "./styles/core.css": "./styles/core.css",
     "./styles/default.css": "./styles/default.css",
-    "./styles/cjk.css": "./styles/cjk.css"
+    "./styles/cjk.css": "./styles/cjk.css",
+    "./diagrams/mermaid/isolated": {
+      "types": "./dist/mermaid-isolated.d.ts",
+      "import": "./dist/mermaid-isolated.js",
+      "default": "./dist/mermaid-isolated.js"
+    },
+    "./diagrams/mermaid/frame": {
+      "types": "./dist/mermaid-frame-runtime.d.ts",
+      "import": "./dist/mermaid-frame-runtime.js",
+      "default": "./dist/mermaid-frame-runtime.js"
+    },
+    "./diagrams/mermaid/build": {
+      "types": "./dist/mermaid-frame-document.d.ts",
+      "import": "./dist/mermaid-frame-document.js",
+      "default": "./dist/mermaid-frame-document.js"
+    }
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -106,7 +121,7 @@
     "build:demo": "npm run build && rm -f docs/streaming-markdown.*.mjs && esbuild docs/browser-entry.mjs --bundle --splitting --format=esm --platform=browser --outdir=docs --out-extension:.js=.mjs --entry-names=streaming-markdown.browser --chunk-names=streaming-markdown.[name]-[hash]",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
-    "test:e2e": "node --import tsx --test tests/trusted-types.e2e.test.ts",
+    "test:e2e": "node --import tsx --test tests/trusted-types.e2e.test.ts tests/mermaid-isolated.e2e.test.ts",
     "coverage": "c8 npm test",
     "coverage:check": "node --import tsx scripts/coverage-gate.mts",
     "coverage:update": "node --import tsx scripts/coverage-gate.mts --update",
@@ -180,6 +195,7 @@
     "highlight.js": "^11.11.1",
     "jsdom": "^30.0.1",
     "katex": "^0.18.1",
+    "mermaid": "^11.17.2",
     "playwright-core": "^1.61.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
