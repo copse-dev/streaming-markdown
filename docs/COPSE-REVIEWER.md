@@ -67,6 +67,7 @@ After a completed review, check the managed summary in the PR description and
 the findings artifacts in the Actions run. A review with no findings may post
 no new review comment, so the description summary is its visible result. Read
 the reported validation limits before treating the review as complete coverage.
+Check the reviewed commit in the summary against the PR's current head.
 
 ## Updating the reviewer
 
