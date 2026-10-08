@@ -52,6 +52,13 @@ including when no findings need a new review. The same stale-head/base and opt-o
 checks apply before updating the description. The integration does not make code
 changes. `@copse-review` commands are deferred.
 
+## Checking the result
+
+After a completed review, check the managed summary in the PR description and
+the findings artifacts in the Actions run. A review with no findings may post
+no new review comment, so the description summary is its visible result. Read
+the reported validation limits before treating the review as complete coverage.
+
 ## Updating the reviewer
 
 Review the upstream changes and update both the workflow reference and
