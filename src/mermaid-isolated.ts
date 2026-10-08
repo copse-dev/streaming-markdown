@@ -151,3 +151,70 @@ export function createMermaidFrame(source: string, options: MermaidFrameOptions)
   })
   return { element, ready, dispose }
 }
+
+/** Attribute recording a diagram's isolated state: `pending`, `rendered` or `failed`. */
+export const ISOLATED_DIAGRAM_ATTRIBUTE = 'data-isolated-diagram'
+
+/** Class a diagram carries once its frame has rendered (its source `<pre>` is gone). */
+export const ISOLATED_DIAGRAM_CLASS = 'mermaid-diagram--isolated'
+
+export interface IsolatedDiagramsOptions extends Omit<MermaidFrameOptions, 'layoutWidth' | 'signal'> {
+  /**
+   * Called once per diagram when its frame has rendered or failed, e.g. to add host controls. A
+   * failed diagram keeps its escaped source as the inert fallback.
+   */
+  onSettled?: (diagram: HTMLElement, state: 'rendered' | 'failed', frame: DiagramFrame) => void
+}
+
+/** Closed mermaid fences awaiting a frame: not forming, not inside the streaming tail, not mounted. */
+const MOUNTABLE_SELECTOR =
+  `.mermaid-diagram.mermaid-diagram--pending:not(.stream-fence-forming):not([${ISOLATED_DIAGRAM_ATTRIBUTE}])`
+
+/**
+ * Mount an isolated frame into every closed mermaid fence under `root` that does not have one
+ * yet. Call it after each streaming `update()` (or once after an at-rest render); repeat calls are
+ * cheap and idempotent.
+ *
+ * Only a diagram whose fence has closed is mounted: the forming fence and anything in the
+ * streaming tail are skipped, because the renderer still reconciles those. A closed fence is
+ * frozen, so the frame survives later updates. While the frame renders, the source stays visible
+ * and the frame is held out of layout; once ready, the source is removed and the diagram gets
+ * {@link ISOLATED_DIAGRAM_CLASS}. On failure the frame is disposed and the source stays as the inert
+ * fallback. Frames removed with their diagram dispose themselves.
+ *
+ * Do not also configure a `diagramRenderer` for the same render: the two paths would race for
+ * the same scaffolding.
+ */
+export function mountIsolatedDiagrams(root: ParentNode, options: IsolatedDiagramsOptions): void {
+  const { onSettled, ...frameOptions } = options
+  for (const diagram of Array.from(root.querySelectorAll<HTMLElement>(MOUNTABLE_SELECTOR))) {
+    if (diagram.closest('.stream-forming, .stream-pending')) continue
+    const pre = diagram.querySelector<HTMLElement>(':scope > pre.mermaid')
+    if (!pre) continue
+    diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'pending')
+    const frame = createMermaidFrame(pre.textContent ?? '', {
+      ...frameOptions,
+      ...(diagram.clientWidth > 0 ? { layoutWidth: diagram.clientWidth } : {}),
+    })
+    // Out of layout until it has a size; the source stays on screen meanwhile.
+    frame.element.style.position = 'absolute'
+    frame.element.style.visibility = 'hidden'
+    diagram.append(frame.element)
+    frame.ready.then(
+      () => {
+        pre.remove()
+        frame.element.style.removeProperty('position')
+        frame.element.style.removeProperty('visibility')
+        diagram.classList.remove('mermaid-diagram--pending')
+        diagram.classList.add(ISOLATED_DIAGRAM_CLASS)
+        diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'rendered')
+        onSettled?.(diagram, 'rendered', frame)
+      },
+      () => {
+        frame.dispose()
+        diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'failed')
+        onSettled?.(diagram, 'failed', frame)
+      },
+    )
+  }
+}
