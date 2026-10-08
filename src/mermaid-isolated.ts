@@ -3,21 +3,47 @@ import {
   MAX_DIAGRAM_SOURCE_LENGTH,
   parseDiagramSize,
   type DiagramSize,
+  type MermaidTheme,
 } from './mermaid-frame-protocol.ts'
 
 export {
   MAX_DIAGRAM_DIMENSION,
   MAX_DIAGRAM_SOURCE_LENGTH,
+  MAX_FONT_BYTES,
+  MERMAID_THEMES,
   parseDiagramSize,
   parseDiagramSource,
+  parseRenderRequest,
 } from './mermaid-frame-protocol.ts'
-export type { DiagramSize } from './mermaid-frame-protocol.ts'
+export type { DiagramSize, MermaidTheme, RenderRequest } from './mermaid-frame-protocol.ts'
 
 export interface MermaidFrameOptions {
-  /** Trusted, host-packaged document produced by buildMermaidFrameHtml. Never model input. */
+  /**
+   * Trusted, host-packaged document: the prebuilt `diagrams/mermaid/frame.html`, or one produced by
+   * buildMermaidFrameHtml. Never model input.
+   */
   url: string
   layoutWidth?: number
   signal?: AbortSignal
+  /** Mermaid theme for this diagram. Defaults to the frame's own (`default` for the prebuilt one). */
+  theme?: MermaidTheme
+  /** CSS font-family list for labels, e.g. `Inter, sans-serif`. Names, spaces, commas and quotes only. */
+  fontFamily?: string
+  /**
+   * Font bytes to install in the frame for this diagram, e.g. a woff2 the host already ships. The
+   * frame's `font-src 'none'` cannot load URLs. Name it in `fontFamily` to use it. The bytes are
+   * copied, so one buffer can serve many frames.
+   */
+  font?: { family: string; data: ArrayBuffer | ArrayBufferView }
+  /** Accessible name for the frame. Defaults to `Mermaid diagram`; pass a localized, descriptive one. */
+  title?: string
+}
+
+function copyBytes(data: ArrayBuffer | ArrayBufferView): ArrayBuffer {
+  if (data instanceof ArrayBuffer) return data.slice(0)
+  const copy = new Uint8Array(data.byteLength)
+  copy.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength))
+  return copy.buffer
 }
 
 export interface DiagramFrame {
@@ -35,7 +61,7 @@ export interface DiagramFrame {
 export function createMermaidFrame(source: string, options: MermaidFrameOptions): DiagramFrame {
   const element = document.createElement('iframe')
   element.className = 'mermaid-frame'
-  element.title = 'Mermaid diagram'
+  element.title = options.title ?? 'Mermaid diagram'
   element.setAttribute('sandbox', 'allow-scripts')
   element.setAttribute('referrerpolicy', 'no-referrer')
   element.setAttribute('tabindex', '-1')
@@ -100,7 +126,21 @@ export function createMermaidFrame(source: string, options: MermaidFrameOptions)
       element.onload = null
       try {
         // An opaque origin requires '*'; this targets one exact window and private port.
-        element.contentWindow?.postMessage({ type: 'render', source }, '*', [channel.port2])
+        // The frame validates every optional field (see parseRenderRequest) and drops bad ones.
+        const font = options.font
+          ? { family: options.font.family, data: copyBytes(options.font.data) }
+          : undefined
+        element.contentWindow?.postMessage(
+          {
+            type: 'render',
+            source,
+            theme: options.theme,
+            fontFamily: options.fontFamily,
+            font,
+          },
+          '*',
+          font ? [channel.port2, font.data] : [channel.port2],
+        )
       } catch {
         finish(null)
       }
@@ -110,4 +150,71 @@ export function createMermaidFrame(source: string, options: MermaidFrameOptions)
     element.src = options.url
   })
   return { element, ready, dispose }
+}
+
+/** Attribute recording a diagram's isolated state: `pending`, `rendered` or `failed`. */
+export const ISOLATED_DIAGRAM_ATTRIBUTE = 'data-isolated-diagram'
+
+/** Class a diagram carries once its frame has rendered (its source `<pre>` is gone). */
+export const ISOLATED_DIAGRAM_CLASS = 'mermaid-diagram--isolated'
+
+export interface IsolatedDiagramsOptions extends Omit<MermaidFrameOptions, 'layoutWidth' | 'signal'> {
+  /**
+   * Called once per diagram when its frame has rendered or failed, e.g. to add host controls. A
+   * failed diagram keeps its escaped source as the inert fallback.
+   */
+  onSettled?: (diagram: HTMLElement, state: 'rendered' | 'failed', frame: DiagramFrame) => void
+}
+
+/** Closed mermaid fences awaiting a frame: not forming, not inside the streaming tail, not mounted. */
+const MOUNTABLE_SELECTOR =
+  `.mermaid-diagram.mermaid-diagram--pending:not(.stream-fence-forming):not([${ISOLATED_DIAGRAM_ATTRIBUTE}])`
+
+/**
+ * Mount an isolated frame into every closed mermaid fence under `root` that does not have one
+ * yet. Call it after each streaming `update()` (or once after an at-rest render); repeat calls are
+ * cheap and idempotent.
+ *
+ * Only a diagram whose fence has closed is mounted: the forming fence and anything in the
+ * streaming tail are skipped, because the renderer still reconciles those. A closed fence is
+ * frozen, so the frame survives later updates. While the frame renders, the source stays visible
+ * and the frame is held out of layout; once ready, the source is removed and the diagram gets
+ * {@link ISOLATED_DIAGRAM_CLASS}. On failure the frame is disposed and the source stays as the inert
+ * fallback. Frames removed with their diagram dispose themselves.
+ *
+ * Do not also configure a `diagramRenderer` for the same render: the two paths would race for
+ * the same scaffolding.
+ */
+export function mountIsolatedDiagrams(root: ParentNode, options: IsolatedDiagramsOptions): void {
+  const { onSettled, ...frameOptions } = options
+  for (const diagram of Array.from(root.querySelectorAll<HTMLElement>(MOUNTABLE_SELECTOR))) {
+    if (diagram.closest('.stream-forming, .stream-pending')) continue
+    const pre = diagram.querySelector<HTMLElement>(':scope > pre.mermaid')
+    if (!pre) continue
+    diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'pending')
+    const frame = createMermaidFrame(pre.textContent ?? '', {
+      ...frameOptions,
+      ...(diagram.clientWidth > 0 ? { layoutWidth: diagram.clientWidth } : {}),
+    })
+    // Out of layout until it has a size; the source stays on screen meanwhile.
+    frame.element.style.position = 'absolute'
+    frame.element.style.visibility = 'hidden'
+    diagram.append(frame.element)
+    frame.ready.then(
+      () => {
+        pre.remove()
+        frame.element.style.removeProperty('position')
+        frame.element.style.removeProperty('visibility')
+        diagram.classList.remove('mermaid-diagram--pending')
+        diagram.classList.add(ISOLATED_DIAGRAM_CLASS)
+        diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'rendered')
+        onSettled?.(diagram, 'rendered', frame)
+      },
+      () => {
+        frame.dispose()
+        diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'failed')
+        onSettled?.(diagram, 'failed', frame)
+      },
+    )
+  }
 }

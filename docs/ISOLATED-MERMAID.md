@@ -4,7 +4,27 @@ The optional adapter runs Mermaid in an opaque iframe with a fixed, deny-by-defa
 CSP. The parser still emits inert source placeholders. The existing in-document
 `diagrams/mermaid` adapter is unchanged. This does not add raw SVG support.
 
-## Build the frame
+## Use the prebuilt frame
+
+The package ships a ready-made frame document, `diagrams/mermaid/frame.html`, built from the
+Mermaid version pinned in this package's devDependencies (recorded with its hashes in
+`diagrams/mermaid/frame.json`). Copy it into your static assets and serve it from a fixed,
+host-owned URL; a content-hashed file name (from `documentSha256`) lets it be cached forever.
+
+```ts
+// Vite
+import frameUrl from '@copse/streaming-markdown/diagrams/mermaid/frame.html?url'
+// webpack 5 (asset/resource)
+const frameUrl = new URL('@copse/streaming-markdown/diagrams/mermaid/frame.html', import.meta.url).href
+// or copy node_modules/@copse/streaming-markdown/dist/mermaid-frame.html as part of your build
+```
+
+Theme, label font and the frame's accessible name are **per-render options** on
+`createMermaidFrame` (below), so one document serves light and dark, any product font and any
+locale. Build your own frame (next section) only for a different Mermaid version or extra trusted
+bootstrap code.
+
+## Build the frame yourself
 
 Bundle a **separate browser entry** as one self-contained IIFE (no external chunks):
 
@@ -35,7 +55,45 @@ frame or object sources. It denies forms and base changes. Local SVG shapes/text
 remain usable. A `prepare` callback can install **bundled binary FontFace data**
 before Mermaid measures labels, without widening `font-src 'none'`.
 
-## Mount after markdown completes
+## Mount frames for closed fences
+
+`mountIsolatedDiagrams` does the mounting for you. Call it after every streaming `update()` (or
+once after an at-rest render); it is idempotent:
+
+```ts
+import {
+  mountIsolatedDiagrams,
+  type IsolatedDiagramsOptions,
+} from '@copse/streaming-markdown/diagrams/mermaid/isolated'
+
+const diagrams: IsolatedDiagramsOptions = {
+  url: '/mermaid-frame.html', // trusted deployment setting, never diagram input
+  onSettled(diagram, state) {
+    if (state === 'rendered') addControls(diagram) // e.g. zoom / full screen
+  },
+}
+
+renderer.update(text)
+mountIsolatedDiagrams(host, diagrams)
+
+// React
+<StreamingMarkdown markdown={text} onUpdate={(_, host) => mountIsolatedDiagrams(host, diagrams)} />
+<Markdown markdown={text} onRender={(host) => mountIsolatedDiagrams(host, diagrams)} />
+```
+
+Only closed fences get a frame: the forming fence and the streaming tail are skipped because the
+renderer still reconciles them, while a closed fence is frozen, so its frame survives later
+updates. While a frame renders, the escaped source stays on screen and the frame is held out of
+layout; once ready the source is removed and the diagram gets `mermaid-diagram--isolated`. On
+failure the frame is disposed and the source stays as the inert fallback. State is recorded in
+`data-isolated-diagram` (`pending`, `rendered`, `failed`). Do not also configure a
+`diagramRenderer` for the same render.
+
+If a proxy in front of your host mishandles framed HTML documents, fetch the frame document
+yourself and pass a `blob:` URL as `url` (the page's `frame-src` must then allow `blob:`): the
+frame stays sandboxed to an opaque origin and still enforces its own hash-pinned CSP.
+
+### Lower level: one frame
 
 ```ts
 import { createMermaidFrame } from '@copse/streaming-markdown/diagrams/mermaid/isolated'
@@ -53,6 +111,23 @@ try {
   // Present an inert textContent fallback owned by the host.
 }
 ```
+
+Per-render presentation, all optional:
+
+```ts
+createMermaidFrame(source, {
+  url: frameUrl,
+  theme: 'dark', // 'default' | 'dark' | 'forest' | 'neutral'
+  fontFamily: 'Inter, sans-serif', // CSS family list: names, spaces, commas, quotes
+  font: { family: 'Inter', data: interWoff2Bytes }, // installed via FontFace; font-src stays 'none'
+  title: t('diagram.title'), // the iframe's accessible name; defaults to "Mermaid diagram"
+})
+```
+
+The frame validates each field (`parseRenderRequest`): an unknown theme, a family list with
+anything that could end a CSS declaration or open a `url()`, or font bytes that are not a
+non-empty `ArrayBuffer` of at most 4 MiB are dropped and the frame's defaults apply. Font bytes
+are copied per frame, so one buffer serves every diagram.
 
 Keep the handle and call `dispose()` when replacing/unmounting it. Pending work
 also cancels on abort or observed DOM removal. `ready` rejects on failure,

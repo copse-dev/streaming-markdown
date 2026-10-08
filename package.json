@@ -106,7 +106,9 @@
       "types": "./dist/mermaid-frame-document.d.ts",
       "import": "./dist/mermaid-frame-document.js",
       "default": "./dist/mermaid-frame-document.js"
-    }
+    },
+    "./diagrams/mermaid/frame.html": "./dist/mermaid-frame.html",
+    "./diagrams/mermaid/frame.json": "./dist/mermaid-frame.json"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -123,7 +125,7 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "build": "npm run clean && tsc -p tsconfig.build.json && tsx scripts/build-mermaid-frame.mts",
     "build:demo": "npm run build && rm -f docs/streaming-markdown.*.mjs && esbuild docs/browser-entry.mjs --bundle --splitting --format=esm --platform=browser --outdir=docs --out-extension:.js=.mjs --entry-names=streaming-markdown.browser --chunk-names=streaming-markdown.[name]-[hash]",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",

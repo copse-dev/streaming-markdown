@@ -101,3 +101,30 @@ describe('<StreamingMarkdown> (incremental)', () => {
     flushSync(() => root.unmount())
   })
 })
+
+describe('host callbacks (onUpdate host, onRender)', () => {
+  it('passes the attached host to onUpdate on mount and on every update', () => {
+    const calls: { renderer: StreamingMarkdownRenderer; host: HTMLElement; connected: boolean }[] = []
+    const onUpdate = (renderer: StreamingMarkdownRenderer, host: HTMLElement) =>
+      calls.push({ renderer, host, connected: host.isConnected })
+    const { container, root } = mount(<StreamingMarkdown markdown="Hello" onUpdate={onUpdate} />)
+    flushSync(() => root.render(<StreamingMarkdown markdown="Hello **world**" onUpdate={onUpdate} />))
+    // Mount runs both layout effects (construct + update), so expect at least one call each for the
+    // mount and the update; every one must see the attached host.
+    assert.ok(calls.length >= 2)
+    assert.ok(calls.every((call) => call.connected && call.host === container.firstElementChild))
+    assert.ok(calls[0]!.renderer instanceof StreamingMarkdownRenderer)
+    flushSync(() => root.unmount())
+  })
+
+  it('calls onRender with the host after each at-rest write', () => {
+    const seen: string[] = []
+    const onRender = (host: HTMLElement) => seen.push(host.innerHTML)
+    const { container, root } = mount(<Markdown markdown="**a**" onRender={onRender} />)
+    flushSync(() => root.render(<Markdown markdown="**b**" onRender={onRender} />))
+    assert.equal(seen.length, 2)
+    assert.match(seen[1]!, /<strong>b<\/strong>/)
+    assert.equal(container.firstElementChild!.innerHTML, seen[1])
+    flushSync(() => root.unmount())
+  })
+})

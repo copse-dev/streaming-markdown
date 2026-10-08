@@ -1,5 +1,10 @@
 import { mermaidSourceCandidates, prepareMermaidSource } from './mermaid-source.ts'
-import { MAX_DIAGRAM_SOURCE_LENGTH, parseDiagramSource } from './mermaid-frame-protocol.ts'
+import {
+  MAX_DIAGRAM_SOURCE_LENGTH,
+  parseRenderRequest,
+  type FrameFont,
+  type MermaidTheme,
+} from './mermaid-frame-protocol.ts'
 
 /** Structural interface: Mermaid remains an optional peer, supplied only inside the frame bundle. */
 export interface FrameMermaid {
@@ -7,14 +12,14 @@ export interface FrameMermaid {
     startOnLoad: boolean
     securityLevel: 'strict'
     maxTextSize: number
-    theme: 'default' | 'dark' | 'forest' | 'neutral'
+    theme: MermaidTheme
     fontFamily: string
     themeVariables: { fontFamily: string }
   }): void
   run(options: { nodes: HTMLElement[]; suppressErrors: boolean }): Promise<void>
 }
 export interface MermaidRunnerOptions {
-  theme?: 'default' | 'dark' | 'forest' | 'neutral'
+  theme?: MermaidTheme
   fontFamily?: string
   /** Host-owned inert fallback presentation; never receives returned SVG. */
   onError?: (container: HTMLElement, source: string) => void
@@ -78,21 +83,44 @@ export interface MermaidFrameRuntimeOptions extends MermaidRunnerOptions {
   prepare?: () => Promise<void>
 }
 
-/** Install once in the hash-pinned frame bootstrap, never in the parent app. */
+/**
+ * Register font bytes the host sent with a render request. A FontFace built from a buffer is not a
+ * fetch, so the frame's `font-src 'none'` stays as it is. A face that fails to load leaves the
+ * diagram on its fallback family rather than failing the render.
+ */
+async function installFont(font: FrameFont): Promise<void> {
+  try {
+    const face = new FontFace(font.family, font.data)
+    document.fonts.add(await face.load())
+  } catch {
+    /* Render with the fallback family. */
+  }
+}
+
+/**
+ * Install once in the hash-pinned frame bootstrap, never in the parent app. The options are the
+ * frame's defaults; a render request may choose its own theme, font family and font bytes (see
+ * `RenderRequest`), so one prebuilt document serves every host presentation.
+ */
 export function startMermaidFrame(options: MermaidFrameRuntimeOptions): () => void {
-  const run = createMermaidRunner(options.mermaid, options)
   let disposed = false
   let activePort: MessagePort | undefined
   const receive = (event: MessageEvent<unknown>): void => {
     if (event.source !== window.parent || event.ports.length !== 1) return
-    const source = parseDiagramSource(event.data)
+    const request = parseRenderRequest(event.data)
     const port = event.ports[0]
-    if (source === null || !port) return
+    if (request === null || !port) return
+    const { source } = request
+    const runnerOptions: MermaidRunnerOptions = { ...options }
+    if (request.theme) runnerOptions.theme = request.theme
+    if (request.fontFamily) runnerOptions.fontFamily = request.fontFamily
+    const run = createMermaidRunner(options.mermaid, runnerOptions)
     window.removeEventListener('message', receive)
     activePort = port
     void (async () => {
       try {
         await options.prepare?.()
+        if (request.font) await installFont(request.font)
         if (disposed) return
         const diagram = document.createElement('div')
         diagram.className = 'mermaid-diagram'
