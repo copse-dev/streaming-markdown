@@ -3,21 +3,47 @@ import {
   MAX_DIAGRAM_SOURCE_LENGTH,
   parseDiagramSize,
   type DiagramSize,
+  type MermaidTheme,
 } from './mermaid-frame-protocol.ts'
 
 export {
   MAX_DIAGRAM_DIMENSION,
   MAX_DIAGRAM_SOURCE_LENGTH,
+  MAX_FONT_BYTES,
+  MERMAID_THEMES,
   parseDiagramSize,
   parseDiagramSource,
+  parseRenderRequest,
 } from './mermaid-frame-protocol.ts'
-export type { DiagramSize } from './mermaid-frame-protocol.ts'
+export type { DiagramSize, MermaidTheme, RenderRequest } from './mermaid-frame-protocol.ts'
 
 export interface MermaidFrameOptions {
-  /** Trusted, host-packaged document produced by buildMermaidFrameHtml. Never model input. */
+  /**
+   * Trusted, host-packaged document: the prebuilt `diagrams/mermaid/frame.html`, or one produced by
+   * buildMermaidFrameHtml. Never model input.
+   */
   url: string
   layoutWidth?: number
   signal?: AbortSignal
+  /** Mermaid theme for this diagram. Defaults to the frame's own (`default` for the prebuilt one). */
+  theme?: MermaidTheme
+  /** CSS font-family list for labels, e.g. `Inter, sans-serif`. Names, spaces, commas and quotes only. */
+  fontFamily?: string
+  /**
+   * Font bytes to install in the frame for this diagram, e.g. a woff2 the host already ships. The
+   * frame's `font-src 'none'` cannot load URLs. Name it in `fontFamily` to use it. The bytes are
+   * copied, so one buffer can serve many frames.
+   */
+  font?: { family: string; data: ArrayBuffer | ArrayBufferView }
+  /** Accessible name for the frame. Defaults to `Mermaid diagram`; pass a localized, descriptive one. */
+  title?: string
+}
+
+function copyBytes(data: ArrayBuffer | ArrayBufferView): ArrayBuffer {
+  if (data instanceof ArrayBuffer) return data.slice(0)
+  const copy = new Uint8Array(data.byteLength)
+  copy.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength))
+  return copy.buffer
 }
 
 export interface DiagramFrame {
@@ -35,7 +61,7 @@ export interface DiagramFrame {
 export function createMermaidFrame(source: string, options: MermaidFrameOptions): DiagramFrame {
   const element = document.createElement('iframe')
   element.className = 'mermaid-frame'
-  element.title = 'Mermaid diagram'
+  element.title = options.title ?? 'Mermaid diagram'
   element.setAttribute('sandbox', 'allow-scripts')
   element.setAttribute('referrerpolicy', 'no-referrer')
   element.setAttribute('tabindex', '-1')
@@ -100,7 +126,21 @@ export function createMermaidFrame(source: string, options: MermaidFrameOptions)
       element.onload = null
       try {
         // An opaque origin requires '*'; this targets one exact window and private port.
-        element.contentWindow?.postMessage({ type: 'render', source }, '*', [channel.port2])
+        // The frame validates every optional field (see parseRenderRequest) and drops bad ones.
+        const font = options.font
+          ? { family: options.font.family, data: copyBytes(options.font.data) }
+          : undefined
+        element.contentWindow?.postMessage(
+          {
+            type: 'render',
+            source,
+            theme: options.theme,
+            fontFamily: options.fontFamily,
+            font,
+          },
+          '*',
+          font ? [channel.port2, font.data] : [channel.port2],
+        )
       } catch {
         finish(null)
       }

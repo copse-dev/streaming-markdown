@@ -4,7 +4,27 @@ The optional adapter runs Mermaid in an opaque iframe with a fixed, deny-by-defa
 CSP. The parser still emits inert source placeholders. The existing in-document
 `diagrams/mermaid` adapter is unchanged. This does not add raw SVG support.
 
-## Build the frame
+## Use the prebuilt frame
+
+The package ships a ready-made frame document, `diagrams/mermaid/frame.html`, built from the
+Mermaid version pinned in this package's devDependencies (recorded with its hashes in
+`diagrams/mermaid/frame.json`). Copy it into your static assets and serve it from a fixed,
+host-owned URL; a content-hashed file name (from `documentSha256`) lets it be cached forever.
+
+```ts
+// Vite
+import frameUrl from '@copse/streaming-markdown/diagrams/mermaid/frame.html?url'
+// webpack 5 (asset/resource)
+const frameUrl = new URL('@copse/streaming-markdown/diagrams/mermaid/frame.html', import.meta.url).href
+// or copy node_modules/@copse/streaming-markdown/dist/mermaid-frame.html as part of your build
+```
+
+Theme, label font and the frame's accessible name are **per-render options** on
+`createMermaidFrame` (below), so one document serves light and dark, any product font and any
+locale. Build your own frame (next section) only for a different Mermaid version or extra trusted
+bootstrap code.
+
+## Build the frame yourself
 
 Bundle a **separate browser entry** as one self-contained IIFE (no external chunks):
 
@@ -53,6 +73,23 @@ try {
   // Present an inert textContent fallback owned by the host.
 }
 ```
+
+Per-render presentation, all optional:
+
+```ts
+createMermaidFrame(source, {
+  url: frameUrl,
+  theme: 'dark', // 'default' | 'dark' | 'forest' | 'neutral'
+  fontFamily: 'Inter, sans-serif', // CSS family list: names, spaces, commas, quotes
+  font: { family: 'Inter', data: interWoff2Bytes }, // installed via FontFace; font-src stays 'none'
+  title: t('diagram.title'), // the iframe's accessible name; defaults to "Mermaid diagram"
+})
+```
+
+The frame validates each field (`parseRenderRequest`): an unknown theme, a family list with
+anything that could end a CSS declaration or open a `url()`, or font bytes that are not a
+non-empty `ArrayBuffer` of at most 4 MiB are dropped and the frame's defaults apply. Font bytes
+are copied per frame, so one buffer serves every diagram.
 
 Keep the handle and call `dispose()` when replacing/unmounting it. Pending work
 also cancels on abort or observed DOM removal. `ready` rejects on failure,
