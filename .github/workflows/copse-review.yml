@@ -17,9 +17,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: copse-dev/agent-pane/.github/workflows/reviewer.yml@d69b518fc0a28c23a6f28b8d7329bd961b44f1dc
+    uses: copse-dev/agent-pane/.github/workflows/reviewer.yml@6bf52b8f196cce90295e6d8c74213e81db825bf5
     with:
-      reviewer-ref: d69b518fc0a28c23a6f28b8d7329bd961b44f1dc
+      reviewer-ref: 6bf52b8f196cce90295e6d8c74213e81db825bf5
       pr: ${{ inputs.pr }}
       post-summary: true
     secrets:
