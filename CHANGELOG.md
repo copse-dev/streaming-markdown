@@ -5,6 +5,29 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-08
+
+### Features
+
+- honour indentedCode in the streaming emitters (#270) (`2ebb7aa`)
+
+### Chores
+
+- Bump the npm-minor-patch group with 3 updates (#269) (`4794b15`)
+- Bump source-map-js in /bench/competitors (#272) (`05e81a8`)
+- Bump source-map-js from 1.2.1 to 1.2.2 (#273) (`6561d46`)
+
+### Other Changes
+
+- Add optional isolated Mermaid execution adapter (#277) (`7d6e272`)
+- Pin Copse reviewer to its merged source commit (#278) (`cfb9035`)
+- Restore automatic same-repository Copse reviews (#276) (`aefcab8`)
+- Pin Copse reviewer to merged manual-review workflow (#274) (`86fcdea`)
+- Use manual Copse reviews with description summaries (#271) (`cfa0b8a`)
+- Adopt the reusable Copse Reviewer on GitHub Actions (#268) (`051a8c5`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.2.1...v1.3.0
+
 ## [1.2.1] - 2026-10-03
 
 ### Chores
