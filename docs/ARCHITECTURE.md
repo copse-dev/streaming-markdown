@@ -272,13 +272,15 @@ When extending the renderer or its CSS, preserve these rules:
   (`render-blocks.ts`), which strips the opening 4-column indent (`stripFourColumnIndent`,
   `block-patterns.ts`) and keeps content verbatim. This is deliberately **on by default**: LLM
   output favours fenced code, but as a general-purpose CommonMark library, silently dropping
-  indented code would surprise consumers — so it stays supported. `renderMarkdown` exposes an
-  opt-out `{ indentedCode: false }` (`RenderMarkdownOptions`, `renderer.ts`) for hosts that want
-  the divergence: with it, a top-level `indented_code` block renders as a prose paragraph instead
-  of `<pre><code>`. The option is threaded through `RenderBlocksOptions.indentedCode`
-  (default `true`) and applies at the **top level** only — recursive list/blockquote content keeps
-  CommonMark indented-code semantics, and the default path (and the conformance baseline) is
-  unchanged.
+  indented code would surprise consumers — so it stays supported. `MarkdownConfig` exposes an
+  opt-out `{ indentedCode: false }` (`config.ts`) for hosts that want the divergence: with it, a
+  top-level `indented_code` block renders as a prose paragraph instead of `<pre><code>`. Being a
+  config field, it applies to `renderMarkdown` and both streaming emitters alike — the streaming
+  frozen/tail path reads it through `topLevelRenderOpts()` (`renderer.ts`), the same helper the
+  at-rest render uses, so the two cannot drift. It is threaded through
+  `RenderBlocksOptions.indentedCode` (default `true`) and applies at the **top level** only —
+  recursive list/blockquote content keeps CommonMark indented-code semantics, and the default path
+  (and the conformance baseline) is unchanged.
 
   **Tab expansion.** Leading tabs expand to a 4-column stop for indented code, tab as
   the ATX-heading separator, and tab-indented continuation lines (see the `renderMarkdown tab

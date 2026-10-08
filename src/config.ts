@@ -118,6 +118,16 @@ export interface MarkdownConfig {
    */
   linkReferences?: boolean
   /**
+   * CommonMark indented code blocks — 4-column-indented lines rendered as
+   * `<pre><code>` — on by default (#9). `false` renders a top-level indented
+   * block as a prose paragraph instead: an intentional divergence for hosts whose
+   * authors indent prose they never meant as code (LLMs fence the code they do
+   * mean). Honoured by `renderMarkdown` and both streaming emitters alike;
+   * recursive list/blockquote content keeps indented-code semantics. See
+   * render-blocks.ts and docs/ARCHITECTURE.md "Indented code blocks".
+   */
+  indentedCode?: boolean
+  /**
    * Exclude characters from the emphasis flanking *punctuation* class — the seam
    * markdown-cjk-friendly uses to pair emphasis around full-width punctuation.
    * For the CJK preset, spread `cjkFriendlyConfig` from

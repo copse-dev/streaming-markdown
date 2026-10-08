@@ -76,7 +76,7 @@ import { getHtmlPolicy } from './html-policy.ts'
 import { normalizeReferenceLabel, type LinkReferenceMap } from './link-references.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml, setSanitizedHtml } from './html-sink.ts'
-import { renderMarkdownUnsafe, TOP_LEVEL_RENDER_OPTS } from './renderer.ts'
+import { renderMarkdownUnsafe, topLevelRenderOpts } from './renderer.ts'
 import {
   morphElementChildrenFrom,
   morphInnerHtml,
@@ -85,10 +85,6 @@ import {
   syncAttributes,
 } from './streaming-dom-morph.ts'
 
-// Shared with renderMarkdown (the full-morph fallback) so a frozen/tail slice
-// renders byte-identically to the whole-string render — the two must not drift
-// (gap A: top-level indented raw HTML follows the raw-HTML policy, not <pre>).
-const RENDER_OPTS = TOP_LEVEL_RENDER_OPTS
 
 // Minimum items in an open trailing list before intra-list freezing engages
 // (#29). Below this the generic whole-group tail is cheap and avoids per-item
@@ -842,7 +838,7 @@ export class FrozenTailRenderer {
       const to = lowerBound(tokens, part.end)
       const rendered = renderBlocksToParts(complete, tokens.slice(from, to), {
         linkRefs,
-        ...RENDER_OPTS,
+        ...topLevelRenderOpts(),
       })
       // The span covers exactly one top-level group by construction; anything
       // else means the record is stale — fall back.
@@ -1194,7 +1190,10 @@ export class FrozenTailRenderer {
       // frame's still-forming tail, and settling it requires at least a
       // trailing separator token after it — renderBlocksToParts over
       // separators is a cheap no-op returning [].)
-      const tailParts = renderBlocksToParts(complete, tailTokens, { linkRefs, ...RENDER_OPTS })
+      const tailParts = renderBlocksToParts(complete, tailTokens, {
+        linkRefs,
+        ...topLevelRenderOpts(),
+      })
       const tailHtml = tailParts.map((p) => p.html).join('\n')
       this.renderedChars += tailHtml.length
       // Advance the frozen boundary over the memoized nodes; the memoized
@@ -1220,10 +1219,10 @@ export class FrozenTailRenderer {
       // renderBlocksToParts contract), so every guard below sees exactly what it
       // always saw.
       const deltaParts = deltaTokens.length
-        ? renderBlocksToParts(complete, deltaTokens, { linkRefs, ...RENDER_OPTS })
+        ? renderBlocksToParts(complete, deltaTokens, { linkRefs, ...topLevelRenderOpts() })
         : []
       const tailParts = tailTokens.length
-        ? renderBlocksToParts(complete, tailTokens, { linkRefs, ...RENDER_OPTS })
+        ? renderBlocksToParts(complete, tailTokens, { linkRefs, ...topLevelRenderOpts() })
         : []
       const deltaHtml = deltaParts.map((p) => p.html).join('\n')
       const tailHtml = tailParts.map((p) => p.html).join('\n')
@@ -1819,7 +1818,7 @@ export class FrozenTailRenderer {
     try {
       // Body first (advances first-use numbering in document order), then the
       // section (reads ctx.order) — exactly renderMarkdownCore's sequence.
-      const parts = renderBlocksToParts(complete, tokens, { linkRefs, ...RENDER_OPTS })
+      const parts = renderBlocksToParts(complete, tokens, { linkRefs, ...topLevelRenderOpts() })
       const items = renderFootnoteSectionItems(ctx, linkRefs)
       return { parts, items, ctx }
     } finally {
@@ -2026,7 +2025,10 @@ export class FrozenTailRenderer {
         const cached = this.fnBodyParts[i]
         if (!labels || !cached || !labels.some((label) => newSet.has(label))) continue
         const partTokens = tokens.filter((t) => t.start >= cached.start && t.end <= cached.end)
-        const html = renderBlocksToParts(complete, partTokens, { linkRefs, ...RENDER_OPTS })
+        const html = renderBlocksToParts(complete, partTokens, {
+          linkRefs,
+          ...topLevelRenderOpts(),
+        })
           .map((p) => p.html)
           .join('\n')
         if (html !== '' && hasUnfreezableRawHtml(html)) return 'rebuild'
