@@ -224,3 +224,10 @@ npm run build       # emit dist/ (ESM JS + .d.ts)
 npm run test:e2e    # Trusted Types enforcement e2e in real Chromium (skips without a browser)
 npm run bench:browser  # sink-path throughput in real Chromium, incl. a TT-enforced page
 ```
+
+### Isolated Mermaid rendering
+
+For an opaque execution frame with hash-pinned CSP, use the optional
+[`diagrams/mermaid/isolated` adapter](docs/ISOLATED-MERMAID.md). It runs Mermaid
+entirely outside the parent document. Hosts supply the bundled frame asset and
+retain navigation/native API enforcement. The existing in-document adapter is unchanged.
