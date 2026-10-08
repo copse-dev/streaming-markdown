@@ -110,3 +110,9 @@ insertion into an opaque frame with a fixed CSP. It is opt-in and is distinct fr
 the legacy `DiagramRenderer` SVG-insertion path. Read the host responsibilities
 before treating it as a containment boundary: CSP alone does not prevent frame
 self-navigation or establish comprehensive network isolation.
+
+Per-render presentation (theme, font family, font bytes) crosses into the frame with the source
+and is validated there (`parseRenderRequest`): only Mermaid's named themes, font-family lists
+without characters that could end a CSS declaration or open a `url()`, and bounded `ArrayBuffer`
+font bytes installed through `FontFace` (not a fetch, so `font-src 'none'` is unchanged). Invalid
+fields are dropped, never forwarded to Mermaid's configuration.

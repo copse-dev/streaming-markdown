@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import { createServer, type Server } from 'node:http'
 import { build } from 'esbuild'
 import { chromium, type Browser, type Page } from 'playwright-core'
+import { readFileSync } from 'node:fs'
 import { buildMermaidFrameHtml } from '../src/mermaid-frame-document.ts'
+import { buildPrebuiltMermaidFrame } from '../scripts/build-mermaid-frame.mts'
 import { findChromium } from './tt-browser-harness.ts'
 import type * as Isolated from '../src/mermaid-isolated.ts'
 
@@ -41,8 +43,12 @@ describe(
         format: 'iife',
       })
       const frameHtml = buildMermaidFrameHtml(child.outputFiles![0]!.text)
+      const prebuiltHtml = (await buildPrebuiltMermaidFrame()).html
       server = createServer((req, res) => {
-        if (req.url === '/frame.html') {
+        if (req.url === '/prebuilt.html') {
+          res.setHeader('Content-Type', 'text/html')
+          res.end(prebuiltHtml)
+        } else if (req.url === '/frame.html') {
           res.setHeader('Content-Type', 'text/html')
           res.end(frameHtml)
         } else if (req.url === '/') {
@@ -148,6 +154,38 @@ describe(
         requests.filter((path) => path.startsWith('/probe')),
         [],
       )
+    })
+
+    it('serves the prebuilt document with per-render theme, title and font bytes', async () => {
+      requests.length = 0
+      const font = [...readFileSync('node_modules/katex/dist/fonts/KaTeX_Main-Regular.woff2')]
+      const title = await page.evaluate(async (bytes) => {
+        const frame = Adapter.createMermaidFrame('graph LR; A[Start] --> B[Finish]', {
+          url: '/prebuilt.html',
+          layoutWidth: 500,
+          theme: 'dark',
+          title: 'Diagramme : Start puis Finish',
+          fontFamily: 'Probe Sans, sans-serif',
+          font: { family: 'Probe Sans', data: new Uint8Array(bytes) },
+        })
+        document.body.append(frame.element)
+        await frame.ready
+        Reflect.set(window, 'prebuiltHandle', frame)
+        return frame.element.title
+      }, font)
+      assert.equal(title, 'Diagramme : Start puis Finish')
+      const frame = page.frames().find((frame) => frame.url().endsWith('/prebuilt.html'))!
+      const inside = await frame.evaluate(() => ({
+        svg: !!document.querySelector('svg'),
+        fontLoaded: document.fonts.check('16px "Probe Sans"'),
+        nodeFill: getComputedStyle(document.querySelector('.node rect, .node polygon')!).fill,
+      }))
+      assert.equal(inside.svg, true)
+      assert.equal(inside.fontLoaded, true)
+      // Mermaid's dark theme fills nodes with #1f2020; its default theme with #ECECFF.
+      assert.equal(inside.nodeFill, 'rgb(31, 32, 32)')
+      assert.deepEqual(requests, [])
+      await page.evaluate(() => (Reflect.get(window, 'prebuiltHandle') as Isolated.DiagramFrame).dispose())
     })
 
     it('cancels pending work on disposal, removal and abort; rejects oversized source before loading', async () => {

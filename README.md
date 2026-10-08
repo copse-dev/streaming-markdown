@@ -229,5 +229,7 @@ npm run bench:browser  # sink-path throughput in real Chromium, incl. a TT-enfor
 
 For an opaque execution frame with hash-pinned CSP, use the optional
 [`diagrams/mermaid/isolated` adapter](docs/ISOLATED-MERMAID.md). It runs Mermaid
-entirely outside the parent document. Hosts supply the bundled frame asset and
-retain navigation/native API enforcement. The existing in-document adapter is unchanged.
+entirely outside the parent document. Serve the prebuilt frame document
+(`diagrams/mermaid/frame.html`) or build your own; theme, label font and the frame's
+accessible name are per-render options. Hosts retain navigation/native API enforcement.
+The existing in-document adapter is unchanged.
