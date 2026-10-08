@@ -62,6 +62,11 @@ export function createMermaidFrame(source: string, options: MermaidFrameOptions)
   const element = document.createElement('iframe')
   element.className = 'mermaid-frame'
   element.title = options.title ?? 'Mermaid diagram'
+  // The frame document declares no color-scheme, so it renders light. In a dark page the iframe's
+  // used scheme is dark (`normal` resolves to the page's scheme), and a mismatch makes the browser
+  // paint an opaque backdrop behind the frame: a white box around every diagram. Matching it keeps
+  // the frame transparent, so the diagram sits on whatever the host paints behind it.
+  element.style.colorScheme = 'light'
   element.setAttribute('sandbox', 'allow-scripts')
   element.setAttribute('referrerpolicy', 'no-referrer')
   element.setAttribute('tabindex', '-1')
@@ -152,13 +157,30 @@ export function createMermaidFrame(source: string, options: MermaidFrameOptions)
   return { element, ready, dispose }
 }
 
-/** Attribute recording a diagram's isolated state: `pending`, `rendered` or `failed`. */
+/** Attribute recording a diagram's isolated state: `deferred`, `pending`, `rendered` or `failed`. */
 export const ISOLATED_DIAGRAM_ATTRIBUTE = 'data-isolated-diagram'
 
 /** Class a diagram carries once its frame has rendered (its source `<pre>` is gone). */
 export const ISOLATED_DIAGRAM_CLASS = 'mermaid-diagram--isolated'
 
+/** Deferred mounting: when a closed fence gets its frame. Defaults mirror Streamdown's. */
+export interface LazyDiagramsOptions {
+  /** How close to the viewport a diagram must come, as an IntersectionObserver margin (`300px`). */
+  rootMargin?: string
+  /** How long it must stay that close before mounting, in ms (300), so a fast scroll mounts nothing. */
+  debounce?: number
+  /** Upper bound on waiting for an idle moment once due, in ms (500). */
+  idleTimeout?: number
+}
+
 export interface IsolatedDiagramsOptions extends Omit<MermaidFrameOptions, 'layoutWidth' | 'signal'> {
+  /**
+   * Mount a diagram's frame only once it nears the viewport, then at an idle moment. Each frame
+   * starts its own Mermaid, so a long thread with many diagrams otherwise pays for all of them up
+   * front. A deferred diagram shows its source and has state `deferred`. Off by default; `true`
+   * uses the defaults of {@link LazyDiagramsOptions}. Ignored where IntersectionObserver is missing.
+   */
+  lazy?: boolean | LazyDiagramsOptions
   /**
    * Called once per diagram when its frame has rendered or failed, e.g. to add host controls. A
    * failed diagram keeps its escaped source as the inert fallback.
@@ -186,35 +208,83 @@ const MOUNTABLE_SELECTOR =
  * the same scaffolding.
  */
 export function mountIsolatedDiagrams(root: ParentNode, options: IsolatedDiagramsOptions): void {
-  const { onSettled, ...frameOptions } = options
+  const { lazy, ...rest } = options
+  const deferral =
+    lazy && typeof IntersectionObserver === 'function'
+      ? { rootMargin: '300px', debounce: 300, idleTimeout: 500, ...(lazy === true ? {} : lazy) }
+      : null
   for (const diagram of Array.from(root.querySelectorAll<HTMLElement>(MOUNTABLE_SELECTOR))) {
     if (diagram.closest('.stream-forming, .stream-pending')) continue
     const pre = diagram.querySelector<HTMLElement>(':scope > pre.mermaid')
     if (!pre) continue
-    diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'pending')
-    const frame = createMermaidFrame(pre.textContent ?? '', {
-      ...frameOptions,
-      ...(diagram.clientWidth > 0 ? { layoutWidth: diagram.clientWidth } : {}),
-    })
-    // Out of layout until it has a size; the source stays on screen meanwhile.
-    frame.element.style.position = 'absolute'
-    frame.element.style.visibility = 'hidden'
-    diagram.append(frame.element)
-    frame.ready.then(
-      () => {
-        pre.remove()
-        frame.element.style.removeProperty('position')
-        frame.element.style.removeProperty('visibility')
-        diagram.classList.remove('mermaid-diagram--pending')
-        diagram.classList.add(ISOLATED_DIAGRAM_CLASS)
-        diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'rendered')
-        onSettled?.(diagram, 'rendered', frame)
-      },
-      () => {
-        frame.dispose()
-        diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'failed')
-        onSettled?.(diagram, 'failed', frame)
-      },
-    )
+    if (deferral) deferMount(diagram, pre, rest, deferral)
+    else mountFrame(diagram, pre, rest)
   }
+}
+
+const requestIdle = (callback: () => void, timeout: number): void => {
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(callback, { timeout })
+  else setTimeout(callback, 1)
+}
+
+function deferMount(
+  diagram: HTMLElement,
+  pre: HTMLElement,
+  options: Omit<IsolatedDiagramsOptions, 'lazy'>,
+  { rootMargin, debounce, idleTimeout }: Required<LazyDiagramsOptions>,
+): void {
+  diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'deferred')
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (!entries.at(-1)?.isIntersecting) {
+        clearTimeout(timer)
+        return
+      }
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        observer.disconnect()
+        requestIdle(() => {
+          // The renderer may have rebuilt the message meanwhile; the new copy mounts on its own.
+          if (diagram.isConnected && diagram.getAttribute(ISOLATED_DIAGRAM_ATTRIBUTE) === 'deferred')
+            mountFrame(diagram, pre, options)
+        }, idleTimeout)
+      }, debounce)
+    },
+    { rootMargin, threshold: 0 },
+  )
+  observer.observe(diagram)
+}
+
+function mountFrame(
+  diagram: HTMLElement,
+  pre: HTMLElement,
+  options: Omit<IsolatedDiagramsOptions, 'lazy'>,
+): void {
+  const { onSettled, ...frameOptions } = options
+  diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'pending')
+  const frame = createMermaidFrame(pre.textContent ?? '', {
+    ...frameOptions,
+    ...(diagram.clientWidth > 0 ? { layoutWidth: diagram.clientWidth } : {}),
+  })
+  // Out of layout until it has a size; the source stays on screen meanwhile.
+  frame.element.style.position = 'absolute'
+  frame.element.style.visibility = 'hidden'
+  diagram.append(frame.element)
+  frame.ready.then(
+    () => {
+      pre.remove()
+      frame.element.style.removeProperty('position')
+      frame.element.style.removeProperty('visibility')
+      diagram.classList.remove('mermaid-diagram--pending')
+      diagram.classList.add(ISOLATED_DIAGRAM_CLASS)
+      diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'rendered')
+      onSettled?.(diagram, 'rendered', frame)
+    },
+    () => {
+      frame.dispose()
+      diagram.setAttribute(ISOLATED_DIAGRAM_ATTRIBUTE, 'failed')
+      onSettled?.(diagram, 'failed', frame)
+    },
+  )
 }

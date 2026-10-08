@@ -54,7 +54,18 @@ function answer(frame: HTMLIFrameElement, reply: unknown): void {
   channels.at(-1)!.port2.postMessage(reply)
 }
 
-const settledOnce = () => new Promise((resolve) => setTimeout(resolve, 10))
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/** Poll for `check`: fixed sleeps flake when the suite runs in parallel or under coverage. */
+async function until(check: () => boolean, ms = 2000): Promise<void> {
+  const start = Date.now()
+  while (!check()) {
+    if (Date.now() - start > ms) throw new Error('timed out waiting')
+    await wait(5)
+  }
+}
+/** Wait until the frame's reply has settled a diagram (its state leaves `pending`). */
+const untilSettled = (diagram: Element) =>
+  until(() => diagram.getAttribute(ISOLATED_DIAGRAM_ATTRIBUTE) !== 'pending')
 
 describe('mountIsolatedDiagrams over a streaming renderer', () => {
   it('mounts a closed fence once, never the forming one, and the frame survives later updates', async () => {
@@ -82,7 +93,7 @@ describe('mountIsolatedDiagrams over a streaming renderer', () => {
           assert.ok(host.querySelector('.mermaid-diagram > pre.mermaid'))
           assert.equal(frame.style.visibility, 'hidden')
           answer(frame, { type: 'rendered', width: 320, height: 120 })
-          await settledOnce()
+          await untilSettled(frame.closest('.mermaid-diagram')!)
         }
       }
     }
@@ -111,7 +122,7 @@ describe('mountIsolatedDiagrams over a streaming renderer', () => {
       },
     })
     answer(host.querySelector('iframe')!, { type: 'rendered', width: Infinity, height: 1 })
-    await settledOnce()
+    await untilSettled(host.querySelector('.mermaid-diagram')!)
     assert.ok(failedDiagram)
     const diagram = host.querySelector<HTMLElement>('.mermaid-diagram')!
     assert.equal(diagram.getAttribute(ISOLATED_DIAGRAM_ATTRIBUTE), 'failed')
@@ -134,5 +145,102 @@ describe('mountIsolatedDiagrams over a streaming renderer', () => {
     assert.equal(host.querySelectorAll('iframe').length, 2)
     assert.equal(channels.length, 2)
     host.remove()
+  })
+})
+
+describe('mountIsolatedDiagrams lazy mounting', () => {
+  type Observed = { callback: IntersectionObserverCallback; disconnected: boolean; options?: IntersectionObserverInit }
+  const observers: Observed[] = []
+  const savedIO = Object.getOwnPropertyDescriptor(globalThis, 'IntersectionObserver')
+  const savedIdle = Object.getOwnPropertyDescriptor(globalThis, 'requestIdleCallback')
+
+  beforeEach(() => {
+    observers.length = 0
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      configurable: true,
+      value: class {
+        record: Observed
+        constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+          this.record = { callback, disconnected: false, ...(options ? { options } : {}) }
+          observers.push(this.record)
+        }
+        observe() {}
+        disconnect() {
+          this.record.disconnected = true
+        }
+      },
+    })
+    Object.defineProperty(globalThis, 'requestIdleCallback', {
+      configurable: true,
+      value: (callback: () => void) => setTimeout(callback, 0),
+    })
+  })
+
+  afterEach(() => {
+    for (const [key, saved] of [
+      ['IntersectionObserver', savedIO],
+      ['requestIdleCallback', savedIdle],
+    ] as const)
+      if (saved) Object.defineProperty(globalThis, key, saved)
+      else Reflect.deleteProperty(globalThis, key)
+  })
+
+  const intersect = (observer: Observed, isIntersecting: boolean) =>
+    observer.callback([{ isIntersecting } as IntersectionObserverEntry], {} as IntersectionObserver)
+
+  function renderedHost(): HTMLElement {
+    const host = document.createElement('div')
+    host.innerHTML = String(renderMarkdown('```mermaid\ngraph LR; A-->B\n```\n'))
+    document.body.append(host)
+    return host
+  }
+
+  it('defers the frame until the diagram has stayed near the viewport, then mounts at idle', async () => {
+    const host = renderedHost()
+    mountIsolatedDiagrams(host, { url: '/frame.html', lazy: { debounce: 20, rootMargin: '100px' } })
+    mountIsolatedDiagrams(host, { url: '/frame.html', lazy: true })
+    const diagram = host.querySelector<HTMLElement>('.mermaid-diagram')!
+    assert.equal(diagram.getAttribute(ISOLATED_DIAGRAM_ATTRIBUTE), 'deferred')
+    assert.equal(observers.length, 1, 'idempotent while deferred')
+    assert.equal(observers[0]!.options?.rootMargin, '100px')
+    assert.equal(host.querySelector('iframe'), null)
+
+    // Scrolled past before the debounce: nothing mounts.
+    intersect(observers[0]!, true)
+    intersect(observers[0]!, false)
+    await wait(40)
+    assert.equal(host.querySelector('iframe'), null)
+
+    intersect(observers[0]!, true)
+    await until(() => !!host.querySelector('iframe'))
+    assert.ok(observers[0]!.disconnected)
+    assert.equal(diagram.getAttribute(ISOLATED_DIAGRAM_ATTRIBUTE), 'pending')
+    assert.equal(diagram.querySelector('pre.mermaid')?.textContent, 'graph LR; A-->B')
+    host.remove()
+  })
+
+  it('skips a deferred diagram removed before it became due, and mounts at once without IntersectionObserver', async () => {
+    const host = renderedHost()
+    mountIsolatedDiagrams(host, { url: '/frame.html', lazy: { debounce: 0 } })
+    intersect(observers[0]!, true)
+    host.remove()
+    await wait(20)
+    assert.equal(host.querySelector('iframe'), null)
+    const mountedBeforeRemoval = channels.length
+    assert.equal(mountedBeforeRemoval, 0)
+
+    // Without requestIdleCallback (Safari) the due mount falls back to a timer.
+    Reflect.deleteProperty(globalThis, 'requestIdleCallback')
+    const late = renderedHost()
+    mountIsolatedDiagrams(late, { url: '/frame.html', lazy: { debounce: 0 } })
+    intersect(observers.at(-1)!, true)
+    await until(() => !!late.querySelector('iframe'))
+    late.remove()
+
+    Reflect.deleteProperty(globalThis, 'IntersectionObserver')
+    const eager = renderedHost()
+    mountIsolatedDiagrams(eager, { url: '/frame.html', lazy: true })
+    assert.ok(eager.querySelector('iframe'))
+    eager.remove()
   })
 })
