@@ -79,7 +79,8 @@ function StreamedMessage({ stream }: { stream: AsyncIterable<string> }) {
 ```
 
 To hydrate lazy math/diagram backends as the stream lands them, use the
-`onUpdate` prop — it fires after each `update()` with the live renderer:
+`onUpdate` prop — it fires after each `update()` with the live renderer and its
+(attached) host element:
 
 ```tsx
 <StreamingMarkdown
@@ -99,7 +100,8 @@ Both components accept, in addition to standard container attributes
 | `markdown`| `string`                                      | The source text. On `<StreamingMarkdown>` it grows as tokens arrive. `<Markdown>` also accepts a single string child instead. |
 | `config`  | `MarkdownConfig`                              | Per-instance settings — `htmlPolicy`, scheme allowlist, `linkDecorator`, `fenceHandlers`, `codeHighlighter`, `mathSyntax`, CJK, `trustedTypesPolicy`, `sanitizerBackend`, … Two components with different `config` coexist without interfering. |
 | `as`      | `ElementType`                                 | Container element/component. Defaults to `'div'`. |
-| `onUpdate`| `(renderer: StreamingMarkdownRenderer) => void`| `<StreamingMarkdown>` only. Called after each `update()`. |
+| `onUpdate`| `(renderer: StreamingMarkdownRenderer, host: HTMLElement) => void`| `<StreamingMarkdown>` only. Called after each `update()`, from the component's own layout effect, so `host` is attached. |
+| `onRender`| `(host: HTMLElement) => void`                 | `<Markdown>` only. Called after each render is written to the host, e.g. to mount isolated diagrams. |
 
 `config` is captured when the underlying renderer is constructed, so
 `<StreamingMarkdown>` **re-creates** its renderer when the `config` prop identity
