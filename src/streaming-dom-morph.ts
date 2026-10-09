@@ -13,6 +13,7 @@
 // is structurally interchangeable with its counterpart, which keeps the
 // serialization byte-for-byte identical to a fresh parse.
 
+import { FORMING_FENCE_PRE_CLASS } from './fence-handlers.ts'
 import { setPresanitizedHtml } from './html-sink.ts'
 import type { SanitizedHtml } from './sanitize.ts'
 
@@ -34,16 +35,39 @@ function attributesEqual(a: Element, b: Element): boolean {
 }
 
 /**
+ * `next` is `node` with {@link FORMING_FENCE_PRE_CLASS} dropped from its class
+ * list and every other attribute unchanged: a forming fence (or math block)
+ * nested in a committed list item / blockquote whose closing line just
+ * committed. The motion contract makes that promotion class-only, so the element
+ * keeps its identity and only its class attribute is synced.
+ */
+function isFormingPromotion(node: Element, next: Element): boolean {
+  const cls = node.getAttribute('class')
+  if (!cls) return false
+  const rest = ` ${cls} `.replace(` ${FORMING_FENCE_PRE_CLASS} `, ' ').trim()
+  if (rest === cls || next.getAttribute('class') !== (rest || null)) return false
+  // Same attribute count (`class` dropped entirely when nothing is left) and
+  // every other attribute unchanged.
+  if (node.attributes.length !== next.attributes.length + (rest ? 0 : 1)) return false
+  for (const attr of Array.from(next.attributes)) {
+    if (attr.name !== 'class' && node.getAttribute(attr.name) !== attr.value) return false
+  }
+  return true
+}
+
+/**
  * Reusable iff the node can stand in for `next` without changing serialization:
  * same node type, and for elements the same tag and identical attribute list
- * (names, values, and order). Children are reconciled separately.
+ * (names, values, and order) — or a forming promotion ({@link isFormingPromotion}),
+ * whose attributes the caller syncs. Children are reconciled separately.
  */
 function canReuse(node: Node, next: Node): boolean {
   if (node.nodeType !== next.nodeType) return false
   if (node.nodeType === ELEMENT_NODE) {
     return (
       (node as Element).tagName === (next as Element).tagName &&
-      attributesEqual(node as Element, next as Element)
+      (attributesEqual(node as Element, next as Element) ||
+        isFormingPromotion(node as Element, next as Element))
     )
   }
   if (node.nodeType === TEXT_NODE) return true
@@ -73,6 +97,8 @@ function morphChildren(parent: Node, template: Node, offset = 0, trimTrailing = 
     }
     if (canReuse(current, next)) {
       if (current.nodeType === ELEMENT_NODE) {
+        // A no-op unless canReuse accepted a forming promotion.
+        syncAttributes(current as Element, next as Element)
         morphChildren(current, next)
       } else if (current.nodeType === TEXT_NODE || current.nodeType === COMMENT_NODE) {
         if ((current as CharacterData).data !== (next as CharacterData).data) {

@@ -41,8 +41,11 @@ When extending the renderer or its CSS, preserve these rules:
   sanitizer backend. With no highlighter configured, `highlightFenceCode`
   returns escaped plain text; a later render with a `codeHighlighter` set upgrades fence
   interiors to token spans while `fenceCodeClass` keeps the element's class stable across
-  the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the backend
-  registers. `highlight.js` must not be imported outside `highlight-hljs.ts`, or it
+  the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the hljs backend
+  registers; a backend with more grammars claims them through the optional
+  `CodeHighlighter.supports(id)`, consulted after pure synonyms (`ts`) are folded and
+  before approximations (`tsx` → `typescript`) apply — its answers must not change
+  while it loads, or the class would churn. `highlight.js` must not be imported outside `highlight-hljs.ts`, or it
   re-enters the default bundle. See [`LAZY-LOADING.md`](LAZY-LOADING.md).
 - **Pluggable fence handlers (#53).** Which HTML a fenced code block emits is a map
   keyed by the fence's info-string language (`fence-handlers.ts`, the `fenceHandlers`
@@ -58,7 +61,12 @@ When extending the renderer or its CSS, preserve these rules:
   rich output is injected post-sanitization by a hydration step (`hydratePendingDiagrams`
   for mermaid, host-owned for others). Forming markup should carry
   `FORMING_FENCE_PRE_CLASS` on its root so promotion stays a class-only change (see the
-  motion contract below).
+  motion contract below). The forming shape also applies to a fence **nested** in a list item
+  or blockquote: such a fence commits line by line with its container, so it never reaches
+  `.stream-forming`; instead the committed render emits `forming.html` for it while it is still
+  open (`RenderBlocksOptions.formingTail`, below). `forming.sync` is only used by the top-level
+  forming host. A handler without `forming` renders its at-rest `render` output while nested,
+  with no marker.
 - **Pluggable diagram renderer.** Mermaid is never bundled — the generator emits inert
   `mermaid-diagram--pending` scaffolding and `mermaid-source.ts` is pure string prep.
   `mermaid.ts` adds the async renderer seam (the `diagramRenderer` config field,
@@ -276,11 +284,11 @@ When extending the renderer or its CSS, preserve these rules:
   opt-out `{ indentedCode: false }` (`config.ts`) for hosts that want the divergence: with it, a
   top-level `indented_code` block renders as a prose paragraph instead of `<pre><code>`. Being a
   config field, it applies to `renderMarkdown` and both streaming emitters alike — the streaming
-  frozen/tail path reads it through `topLevelRenderOpts()` (`renderer.ts`), the same helper the
-  at-rest render uses, so the two cannot drift. It is threaded through
-  `RenderBlocksOptions.indentedCode` (default `true`) and applies at the **top level** only —
-  recursive list/blockquote content keeps CommonMark indented-code semantics, and the default path
-  (and the conformance baseline) is unchanged.
+  frozen/tail path reads it through `committedRenderOpts()` (`renderer.ts`), which extends
+  `topLevelRenderOpts()`, the same helper the at-rest render uses, so the two cannot drift. It
+  is threaded through `RenderBlocksOptions.indentedCode` (default `true`) and applies at the
+  **top level** only — recursive list/blockquote content keeps CommonMark indented-code
+  semantics, and the default path (and the conformance baseline) is unchanged.
 
   **Tab expansion.** Leading tabs expand to a 4-column stop for indented code, tab as
   the ATX-heading separator, and tab-indented continuation lines (see the `renderMarkdown tab
@@ -310,6 +318,25 @@ When extending the renderer or its CSS, preserve these rules:
   plain text in the inline pending tail until their line ends. Open fenced code blocks
   forward-pass into `.stream-forming` as `<pre class="stream-fence-forming">` with highlight.js on
   the body so far (mermaid fences show a pending source placeholder until complete).
+  **Nested open fences** (in a list item or blockquote, at any depth) commit with their container
+  line by line, so they render inside `.stream-complete` rather than `.stream-forming`; while one
+  is still open it gets the same forming shape (`pre.stream-fence-forming`, or the handler's
+  `forming.html`, or `.math-block--pending.stream-fence-forming` for `$$`), so hosts can tell it
+  is incomplete (e.g. disable Copy) and `mountIsolatedDiagrams` leaves a nested forming diagram
+  alone. Both emitters render committed source through `committedRenderOpts(formingTail)` /
+  `renderCommittedMarkdownUnsafe` (`renderer.ts`); `formingTail` is
+  `committedTailContinues(complete, blocks)` (`streaming-split.ts`): true while the block the
+  committed prefix ends in still continues into the held tail. Within the render, a fence (or
+  `$$` block) is forming only when it is still open and only whitespace follows it, and the flag
+  passes into a list item or blockquote only when that container also runs to the end, so the
+  tokenizer's container rules decide what closes it: the closer must sit in the same container,
+  at most 3 columns past the item's content column; a dedented line, a new sibling item or a
+  column-0 fence ends the container and with it the fence. The DOM emitter re-runs its commit
+  when `formingTail` flips while `complete` is unchanged (a held column-0 fence), and the
+  frozen tail never adopts a memoized tail render (or takes the footnote fast path over a
+  trailing part) that holds a forming shape once more content follows it. At rest (`renderMarkdown`) no fence is ever marked. Like a
+  top-level forming fence, a nested one stays marked if the stream ends with it unclosed until
+  the host switches to an at-rest render.
   Forming GFM tables forward-pass into `.stream-forming` (`<table class="stream-table-forming">`) as header/separator/body
   cells arrive; committed tables append body rows via `tr.stream-pending-row` with
   inline cell updates. Pending **list** lines hide the `-`/`*`/`1.` marker and show
@@ -357,6 +384,7 @@ When extending the renderer or its CSS, preserve these rules:
   | Forming `\| H \|` table | `.stream-forming` + `<th>`                                       | pipes = cell boundaries | per cell           |
   | Pending table body row  | `tr.stream-pending-row` + `<td>`                                 | pipes = cell boundaries | per cell           |
   | Open fenced code        | `.stream-forming pre.stream-fence-forming`                       | yes                     | highlighted        |
+  | Open fence in `li` / `>` | `.stream-complete li pre.stream-fence-forming` (or `blockquote …`) | yes                   | highlighted        |
   | Open `$$` / `\[` math   | `.stream-forming .math-block--pending.stream-fence-forming`      | yes                     | no (verbatim TeX)  |
   | Half-open `$x+` inline  | held via `pendingHoldIndex` (nothing shown past the `$`)         | yes                     | n/a                |
   | Forming `<div class="`  | held via `pendingHoldIndex` (`rawHtmlTagHoldStart`); reveals as a real element on `>` | yes (passthrough) | n/a       |
@@ -386,7 +414,7 @@ Per jank scenario:
 | Long-paragraph soft breaks      | A later line of an open paragraph is a *lazy continuation* (the tokenizer kept it in the paragraph because it can't interrupt one), so it renders as `\n` + `span.stream-pending-paragraph-continuation` **inside** the trailing committed `<p>` — never as a separate block that would visibly merge upward on commit. The soft-break `\n` sits outside the span, as paragraph text, so it displays exactly as the committed soft break will under the host's `white-space`. |
 | List marker reveal              | Pending items are real `<li>` in a real `<ul>/<ol>` from the first frame, so the marker column is already reserved; style with background/marker color only.         |
 | Table row commit                | Rows stream as real `<tr class="stream-pending-row">` cells; commit removes the class in place — color-only.                                                         |
-| Fence close + hljs              | The forming fence is a real `<pre><code>` with highlight.js already applied, so closing only swaps `stream-fence-forming` off. Don't re-declare font metrics on the forming class (they'd compound with `pre code` rules). Highlight classes appearing is color-only — **instant is OK**. |
+| Fence close + hljs              | The forming fence is a real `<pre><code>` with highlight.js already applied, so closing only swaps `stream-fence-forming` off. A fence nested in a list item / blockquote keeps its node: the morph accepts a forming→closed class drop as a reuse and syncs the class in place (`isFormingPromotion`, `streaming-dom-morph.ts`). Don't re-declare font metrics on the forming class (they'd compound with `pre code` rules). Highlight classes appearing is color-only — **instant is OK**. |
 | Table column re-measure         | **Instant is OK** — `table-layout: auto` re-negotiates column widths as cell text streams. Pinning it (`fixed`) would change how committed tables render arbitrary content, a worse trade. |
 | Subtle motion                   | Because committed nodes keep identity, a theme can animate *new* nodes only: `default.css` ships an opacity-only, `prefers-reduced-motion`-guarded settle fade scoped to `.stream-complete` (never the string emitter, which recreates all nodes per token). |
 

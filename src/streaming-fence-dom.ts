@@ -2,23 +2,15 @@ import { parseOpenFenceContent } from './block-patterns.ts'
 import { FORMING_FENCE_PRE_CLASS, getFenceHandler } from './fence-handlers.ts'
 import { firstDirectChild } from './dom-scan.ts'
 import { fenceCodeClass, highlightFenceCode } from './highlight.ts'
+import { renderFencedBlock } from './render-blocks.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { setSanitizedHtml } from './html-sink.ts'
-
-function renderFormingFenceInner(lang: string, code: string): string {
-  const handler = getFenceHandler(lang)
-  if (handler) {
-    return handler.forming ? handler.forming.html(code, lang) : handler.render(code, lang)
-  }
-  const body = highlightFenceCode(code, lang)
-  return `<pre class="${FORMING_FENCE_PRE_CLASS}"><code class="${fenceCodeClass(lang)}">${body}</code></pre>`
-}
 
 /** Build forming-fence HTML for the string streaming API. */
 export function buildFormingFenceHtml(source: string): string {
   const parsed = parseOpenFenceContent(source)
   if (!parsed) return ''
-  return sanitizeRenderedMarkdown(renderFormingFenceInner(parsed.lang, parsed.code))
+  return sanitizeRenderedMarkdown(renderFencedBlock(parsed.lang, parsed.code, true))
 }
 
 /** Forward-pass DOM updates for a fenced code block still streaming. */
@@ -38,7 +30,7 @@ export function syncFormingFenceDom(container: HTMLElement, source: string): voi
     }
     // No incremental sync from the handler: fall back to replacing the
     // container's HTML with the (sanitized) forming markup each update.
-    setSanitizedHtml(container, renderFormingFenceInner(lang, code))
+    setSanitizedHtml(container, renderFencedBlock(lang, code, true))
     return
   }
 

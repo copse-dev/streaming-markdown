@@ -24,7 +24,7 @@ import {
   unorderedListMarkerChar,
 } from './block-tokenizer.ts'
 import { escapeHtml } from './escape.ts'
-import { getFenceHandler } from './fence-handlers.ts'
+import { FORMING_FENCE_PRE_CLASS, getFenceHandler } from './fence-handlers.ts'
 import { type FootnoteContext } from './footnotes.ts'
 import { fenceCodeClass, highlightFenceCode } from './highlight.ts'
 import { dedentBlock, isIndentedHtmlBlock } from './indented-html.ts'
@@ -50,6 +50,19 @@ export interface RenderBlocksOptions {
    * list/blockquote rendering, which keeps indented code semantics.
    */
   indentedCode?: boolean
+  /**
+   * `source` is a streaming prefix whose trailing block still continues: a fence
+   * (or display-math block) left open at the very end of it — nested in a list
+   * item or blockquote that also runs to the end — renders in its forming shape,
+   * the same markup the streaming emitters give a top-level open fence. A nested
+   * fence commits line by line with its container, so it never reaches the
+   * `.stream-forming` host; without this it would render as an ordinary closed
+   * block while still open. Only the streaming emitters set it (via
+   * `committedRenderOpts`); an at-rest render never marks a fence. Each level of
+   * recursion re-derives it, so a fence closed by its container ending (a later
+   * item, a dedented line) is never marked.
+   */
+  formingTail?: boolean
 }
 
 /**
@@ -67,11 +80,36 @@ export interface RenderBlocksOptions {
 const MAX_BLOCK_NESTING_DEPTH = 100
 let blockNestingDepth = 0
 
-function renderFencedBlock(lang: string, code: string): string {
+/**
+ * A fenced block's HTML. `forming` gives a still-open fence's forming markup,
+ * shared by the top-level forming host (`streaming-fence-dom.ts`) and nested
+ * forming fences ({@link RenderBlocksOptions.formingTail}): the default shape
+ * plus {@link FORMING_FENCE_PRE_CLASS}, so closing the fence is a class-only
+ * change (motion contract), or the handler's `forming.html` (its at-rest
+ * `render` when it has no forming shape).
+ */
+export function renderFencedBlock(lang: string, code: string, forming = false): string {
   const handler = getFenceHandler(lang)
-  if (handler) return handler.render(code, lang)
+  if (handler) {
+    return forming && handler.forming ? handler.forming.html(code, lang) : handler.render(code, lang)
+  }
   const body = highlightFenceCode(code, lang)
-  return `<pre><code class="${fenceCodeClass(lang)}">${body}</code></pre>`
+  const cls = forming ? ` class="${FORMING_FENCE_PRE_CLASS}"` : ''
+  return `<pre${cls}><code class="${fenceCodeClass(lang)}">${body}</code></pre>`
+}
+
+/**
+ * Whether only whitespace follows `from` in `source`, i.e. a block ending at
+ * `from` is still the last thing in a streaming prefix (blank lines can't close a
+ * fence, or end a list item / quote whose fence is open). Stops at the first
+ * non-whitespace character, so it is O(1) for any block that isn't trailing.
+ */
+function onlyWhitespaceAfter(source: string, from: number): boolean {
+  for (let i = from; i < source.length; i++) {
+    const c = source.charCodeAt(i)
+    if (c !== 0x20 && c !== 0x0a && c !== 0x09 && c !== 0x0d) return false
+  }
+  return true
 }
 
 function renderIndentedCode(slice: string): string {
@@ -180,6 +218,7 @@ function renderListItemContent(
   slice: string,
   listLoose: boolean,
   linkRefs: LinkReferenceMap,
+  formingTail = false,
 ): RenderedListItem {
   let inner = dedentListItemContent(slice)
   if (inner.trim() === '') return { html: '', task: null, suppressed: false }
@@ -192,6 +231,7 @@ function renderListItemContent(
   const html = renderBlocks(inner, tokenizeBlocks(inner), {
     linkRefs,
     tightParagraphs: !listLoose,
+    formingTail,
   })
   // A non-task item whose only content was HTML comments renders to nothing;
   // drop it rather than emit a blank bullet. A task item keeps its checkbox.
@@ -369,7 +409,7 @@ function stripAlertMarker(innerSource: string): string {
   return rest === '' ? afterMarker : `${afterMarker}\n${rest}`
 }
 
-function renderBlockquote(slice: string, linkRefs: LinkReferenceMap): string {
+function renderBlockquote(slice: string, linkRefs: LinkReferenceMap, formingTail = false): string {
   // GitHub alerts (#72): a quote whose first SOURCE line is exactly `[!NOTE]`
   // (or tip/important/warning/caution) renders with alert classes and a title
   // paragraph; the marker line itself never renders as content.
@@ -379,12 +419,13 @@ function renderBlockquote(slice: string, linkRefs: LinkReferenceMap): string {
   if (alertType) {
     const body = stripAlertMarker(innerSource)
     const title = `<p class="markdown-alert-title">${alertTitle(alertType)}</p>`
-    const content = body.trim() === '' ? '' : `\n${renderBlocksFromSource(body, linkRefs)}`
+    const content =
+      body.trim() === '' ? '' : `\n${renderBlocksFromSource(body, linkRefs, formingTail)}`
     return `<blockquote class="${alertBlockquoteClass(alertType)}">${title}${content}</blockquote>`
   }
   // A quote with no content still renders (`>` alone, spec 239/240).
   if (innerSource.trim() === '') return '<blockquote></blockquote>'
-  return `<blockquote>${renderBlocksFromSource(innerSource, linkRefs)}</blockquote>`
+  return `<blockquote>${renderBlocksFromSource(innerSource, linkRefs, formingTail)}</blockquote>`
 }
 
 function isOrderedListSlice(slice: string): boolean {
@@ -541,9 +582,17 @@ export function renderListItemsSlice(
   itemTokens: BlockToken[],
   loose: boolean,
   linkRefs: LinkReferenceMap,
+  formingTail = false,
 ): RenderedListSlice {
+  // Only the item that runs to the end of a streaming prefix can still hold an
+  // open fence; an earlier item was ended (and its fence closed) by what follows.
   const items = itemTokens.map((t) =>
-    renderListItemContent(source.slice(t.start, t.end), loose, linkRefs),
+    renderListItemContent(
+      source.slice(t.start, t.end),
+      loose,
+      linkRefs,
+      formingTail && onlyWhitespaceAfter(source, t.end),
+    ),
   )
   return {
     itemsHtml: items.map(renderListItem).join(''),
@@ -569,9 +618,16 @@ function collectListGroup(
   tokens: BlockToken[],
   start: number,
   linkRefs: LinkReferenceMap,
+  formingTail: boolean,
 ): { html: string; next: number } {
   const scan = scanListGroup(source, tokens, start)
-  const { itemsHtml, anyTask } = renderListItemsSlice(source, scan.itemTokens, scan.loose, linkRefs)
+  const { itemsHtml, anyTask } = renderListItemsSlice(
+    source,
+    scan.itemTokens,
+    scan.loose,
+    linkRefs,
+    formingTail,
+  )
   return {
     html: `${listGroupOpenTag(scan.sig, anyTask)}${itemsHtml}${listGroupCloseTag(scan.sig)}`,
     next: scan.next,
@@ -583,13 +639,18 @@ function collectBlockquoteGroup(
   tokens: BlockToken[],
   start: number,
   linkRefs: LinkReferenceMap,
+  formingTail: boolean,
 ): { html: string; next: number } {
   // A blank line ends a blockquote (spec 242/252), and the tokenizer never
   // emits two directly-adjacent blockquote tokens, so a group is one token.
   const token = tokens[start]
   if (!token || token.kind !== 'blockquote') return { html: '', next: start + 1 }
   return {
-    html: renderBlockquote(source.slice(token.start, token.end), linkRefs),
+    html: renderBlockquote(
+      source.slice(token.start, token.end),
+      linkRefs,
+      formingTail && onlyWhitespaceAfter(source, token.end),
+    ),
     next: start + 1,
   }
 }
@@ -601,8 +662,12 @@ function renderSingleBlock(
   tightParagraphs: boolean,
   htmlFromIndent: boolean,
   indentedCode: boolean,
+  formingTail: boolean,
 ): string {
   const slice = source.slice(token.start, token.end)
+  // Still open at the end of a streaming prefix (RenderBlocksOptions.formingTail).
+  const forming =
+    formingTail && token.status !== 'complete' && onlyWhitespaceAfter(source, token.end)
   switch (token.kind) {
     case 'indented_code':
       // Opt-out (#9): render indented lines as prose instead of a code block.
@@ -617,13 +682,15 @@ function renderSingleBlock(
       return renderIndentedCode(slice)
     case 'fence': {
       const { lang, code } = parseFenceSlice(slice)
-      return renderFencedBlock(lang, code)
+      return renderFencedBlock(lang, code, forming)
     }
     // Display math (#70): `$$ … $$` / `\[ … \]` emits the same inert pending
     // scaffolding as a ```math fence; `hydratePendingMath` upgrades it after
     // the sink sanitizer (the mermaid two-phase shape).
-    case 'math_block':
-      return mathBlockHtml(parseMathBlockSlice(slice).trim())
+    case 'math_block': {
+      // The forming body is the at-rest body, so closing is class-only.
+      return mathBlockHtml(parseMathBlockSlice(slice).trim(), forming ? FORMING_FENCE_PRE_CLASS : '')
+    }
     case 'atx_heading':
       return renderAtxHeading(slice, linkRefs)
     case 'setext_heading':
@@ -683,6 +750,7 @@ export function renderBlocksToParts(
   const tightParagraphs = options.tightParagraphs ?? false
   const htmlFromIndent = options.htmlFromIndent ?? false
   const indentedCode = options.indentedCode ?? true
+  const formingTail = options.formingTail ?? false
   if (blockNestingDepth >= MAX_BLOCK_NESTING_DEPTH) {
     // Too deeply nested (untrusted input, #136): stop recursing and emit the
     // remaining source as a single literal escaped paragraph.
@@ -702,6 +770,7 @@ export function renderBlocksToParts(
       tightParagraphs,
       htmlFromIndent,
       indentedCode,
+      formingTail,
     )
   } finally {
     blockNestingDepth--
@@ -715,6 +784,7 @@ function renderBlockParts(
   tightParagraphs: boolean,
   htmlFromIndent: boolean,
   indentedCode: boolean,
+  formingTail: boolean,
 ): RenderedPart[] {
   const parts: RenderedPart[] = []
   let i = 0
@@ -728,14 +798,14 @@ function renderBlockParts(
       continue
     }
     if (token.kind === 'list_item') {
-      const group = collectListGroup(source, tokens, i, linkRefs)
+      const group = collectListGroup(source, tokens, i, linkRefs, formingTail)
       const end = tokens[group.next - 1]?.end ?? token.end
       if (group.html) parts.push({ start: token.start, end, html: group.html })
       i = group.next
       continue
     }
     if (token.kind === 'blockquote') {
-      const group = collectBlockquoteGroup(source, tokens, i, linkRefs)
+      const group = collectBlockquoteGroup(source, tokens, i, linkRefs, formingTail)
       const end = tokens[group.next - 1]?.end ?? token.end
       if (group.html) parts.push({ start: token.start, end, html: group.html })
       i = group.next
@@ -771,6 +841,7 @@ function renderBlockParts(
       tightParagraphs,
       htmlFromIndent,
       indentedCode,
+      formingTail,
     )
     if (html) parts.push({ start: token.start, end: token.end, html })
     i++
@@ -794,8 +865,9 @@ export function renderBlocks(
 export function renderBlocksFromSource(
   source: string,
   linkRefs: LinkReferenceMap = new Map(),
+  formingTail = false,
 ): string {
-  return renderBlocks(source, tokenizeBlocks(source), { linkRefs })
+  return renderBlocks(source, tokenizeBlocks(source), { linkRefs, formingTail })
 }
 
 /** Splice the backref link into a definition's last paragraph (GitHub shape). */

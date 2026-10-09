@@ -111,8 +111,9 @@ sink.querySelectorAll('pre:not(.stream-fence-forming) > code.hljs')
 
 - Excludes indented code (`<pre><code>` with no class — add `pre > code:only-child`
   to include it), mermaid (`pre.mermaid`), and math (`pre.math`).
-- `stream-fence-forming` marks a still-streaming fence; the class is swapped off in
-  place on commit, so a block starts matching the moment it completes.
+- `stream-fence-forming` marks a still-streaming fence, top-level or nested in a list
+  item or blockquote; the class is swapped off on commit, so a block starts matching
+  the moment it completes.
 
 **Copy source, not markup.** After highlighting, the `<code>` interior is
 `<span class="hljs-…">` tokens. `code.textContent` flattens them back to the exact
