@@ -28,6 +28,22 @@ export function topLevelRenderOpts(): { htmlFromIndent: true; indentedCode: bool
   return { htmlFromIndent: true, indentedCode: activeConfig().indentedCode !== false }
 }
 
+/**
+ * {@link topLevelRenderOpts} for a streaming emitter's committed prefix. With
+ * `formingTail` (the trailing block still continues into the held tail,
+ * `committedTailContinues`), a fence still open at the end of the prefix (nested
+ * in a list item or blockquote; top-level open fences never commit) renders in
+ * its forming shape (`RenderBlocksOptions.formingTail`). Every streaming render
+ * of committed source goes through this, so both emitters mark the same fences.
+ */
+export function committedRenderOpts(formingTail: boolean): {
+  htmlFromIndent: true
+  indentedCode: boolean
+  formingTail: boolean
+} {
+  return { ...topLevelRenderOpts(), formingTail }
+}
+
 export interface RenderMarkdownOptions extends MarkdownConfig {
   /**
    * Pre-computed `tokenizeBlocks(raw)` result. Supplying it lets the streaming
@@ -87,10 +103,28 @@ export function renderMarkdownUnsafe(raw: string, options: RenderMarkdownOptions
   return withConfig(scopedConfig(options), () => renderMarkdownCore(raw, options))
 }
 
-function renderMarkdownCore(raw: string, options: RenderMarkdownOptions): string {
+/**
+ * {@link renderMarkdownUnsafe} for a streaming emitter's committed prefix
+ * ({@link committedRenderOpts}). Runs in the caller's config scope: the emitters
+ * already wrap each update in `withConfig`.
+ * @internal Not exported from the package entry.
+ */
+export function renderCommittedMarkdownUnsafe(
+  raw: string,
+  tokens: BlockToken[],
+  formingTail: boolean,
+): string {
+  return renderMarkdownCore(raw, { tokens }, formingTail)
+}
+
+function renderMarkdownCore(
+  raw: string,
+  options: RenderMarkdownOptions,
+  formingTail = false,
+): string {
   const tokens = options.tokens ?? tokenizeBlocks(raw)
   const linkRefs = collectLinkReferenceDefinitions(raw, tokens)
-  const renderOpts = { linkRefs, ...topLevelRenderOpts() }
+  const renderOpts = { linkRefs, ...committedRenderOpts(formingTail) }
   // GFM footnotes (#72): with definitions present, install a document-scoped
   // context so inline `[^label]` references resolve (numbered in first-use
   // order) and append the trailing footnotes section for the referenced ones.

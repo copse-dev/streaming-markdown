@@ -9,9 +9,10 @@ import '../tests/setup-dom-jsdom.ts'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { loadBaselinePassingExamples } from '../tests/commonmark/baseline-examples.ts'
-import { renderMarkdownUnsafe } from './renderer.ts'
+import { renderCommittedMarkdownUnsafe, renderMarkdownUnsafe } from './renderer.ts'
 import { sanitizeRenderedMarkdown } from './sanitize.ts'
 import { StreamingMarkdownRenderer, splitForStreaming } from './streaming.ts'
+import { committedTailContinues } from './streaming-split.ts'
 import { tokenizeBlocks } from './block-tokenizer.ts'
 import { FrozenTailRenderer, settledTailStart } from './streaming-frozen-tail.ts'
 
@@ -28,6 +29,8 @@ describe('frozen-tail full streaming history parity', () => {
     // stream-complete holds only committed frozen+tail nodes), the committed
     // subtree must be byte-identical to a fresh whole-string render — this is
     // the frozen-accumulation invariant across an arbitrarily long history.
+    // The fresh render is the committed-prefix one, so a fence still open inside
+    // a trailing list item / quote carries its forming marker on both sides.
     for (const ex of loadBaselinePassingExamples()) {
       const md = ex.markdown
       const host = document.createElement('div')
@@ -39,7 +42,13 @@ describe('frozen-tail full streaming history parity', () => {
         if (split.pending !== '') continue
         assert.equal(
           completeEl(host).innerHTML,
-          sanitizeRenderedMarkdown(renderMarkdownUnsafe(split.complete)),
+          sanitizeRenderedMarkdown(
+            renderCommittedMarkdownUnsafe(
+              split.complete,
+              tokenizeBlocks(split.complete),
+              committedTailContinues(split.complete, split.blocks),
+            ),
+          ),
           `example #${String(ex.example)} (${ex.section}) cut=${String(cut)}`,
         )
       }

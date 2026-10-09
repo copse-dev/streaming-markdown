@@ -28,10 +28,17 @@ export interface FenceHandlerForming {
    * paint). Should carry {@link FORMING_FENCE_PRE_CLASS} on its root element so
    * the pending→committed promotion is a class-only change (see the motion
    * contract in docs/ARCHITECTURE.md). `code` is the body streamed so far.
+   *
+   * Also used, inside the committed render, for a still-open fence nested in a
+   * list item or blockquote (it commits line by line with its container and
+   * never reaches the top-level forming host); there `code` holds whole
+   * committed lines, and closing it must be a class-only change too (drop
+   * {@link FORMING_FENCE_PRE_CLASS}, keep the structure).
    */
   html(code: string, lang: string): string
   /**
-   * Incremental DOM update as more of the body arrives. Must tolerate the
+   * Incremental DOM update as more of the body arrives (top-level forming
+   * fences only; nested ones re-render with their container). Must tolerate the
    * container holding foreign content (the fence may have been reclassified
    * from another language mid-stream) — recreate its own scaffolding when its
    * root selector is missing. When omitted, the emitter falls back to

@@ -271,7 +271,8 @@ renderMarkdown(md, {
       // `sanitizeExtension`).
       render: (code) =>
         `<div class="dot-graph dot-graph--pending"><pre class="dot">${escapeHtml(code.trimEnd())}</pre></div>`,
-      // Optional: what the fence shows while still streaming (both emitters).
+      // Optional: what the fence shows while still streaming (both emitters),
+      // including a fence nested in a list item or blockquote.
       forming: {
         html: (code) =>
           `<div class="dot-graph dot-graph--pending ${FORMING_FENCE_PRE_CLASS}"><pre class="dot">${escapeHtml(code)}</pre></div>`,
