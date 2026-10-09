@@ -178,6 +178,40 @@ Initial zoom and reset use 100% clamped to those bounds; reset also clears panni
 bounds throw a `RangeError` before the viewer changes the diagram.
 Pass `controls: false` to drive the returned handle (`zoomBy`, `panBy`, `reset`) from your own UI.
 
+### Host toolbars
+
+The view also changes from wheel, drag and keyboard input, so a host toolbar needs to hear about
+it. `onChange` is called after every change, whatever caused it, and the same snapshot is the
+`detail` of a bubbling `mermaid-viewer-change` event (`DIAGRAM_VIEWER_CHANGE_EVENT`) on the
+diagram, for code that only has the element (a delegated listener on a transcript, or a toolbar
+written in another framework):
+
+```ts
+const viewer = attachDiagramViewer(diagram, {
+  controls: false,
+  onChange: (view) => toolbar.update(view),
+})
+toolbar.update(viewer.view) // initial state: onChange is not called on attach
+
+// view: { scale, x, y, minScale, maxScale, atInitial }
+// zoom in enabled:  view.scale < view.maxScale
+// zoom out enabled: view.scale > view.minScale
+// reset enabled:    !view.atInitial
+```
+
+It is not called when a request leaves the view as it was (zoom in at the maximum, a drag that has
+not moved yet), and not after `dispose()`, after which the handle's methods do nothing. It runs on
+every pointer move of a drag, so keep it cheap.
+
+A host toolbar can sit inside the diagram element. A press or wheel on an interactive element there
+(a button, link, form field, `label`, `summary`, editable content, or `role` `button`, `link`,
+`checkbox`, `switch`, `slider`, `tab`, `menuitem` or `toolbar`) is left to that element instead of
+starting a drag or zooming, so its click is not lost to pointer capture; keys already act only when
+the diagram itself has focus. This is checked on the event's composed path, so it holds inside open
+shadow roots. Mark anything else, such as a whole toolbar container or the host of a closed shadow
+root, with `data-viewer-ignore`. Ancestors of the diagram are not checked, so a diagram inside an
+editor or a clickable card stays draggable.
+
 ## Host responsibilities and limits
 
 **CSP is resource-load enforcement, not a complete network or navigation firewall.**
