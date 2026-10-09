@@ -111,9 +111,13 @@ Until either runs, code fences render as safe, escaped plain text with the corre
 `@copse/streaming-markdown/highlighters/shiki` is a second highlighter backend
 for the same `codeHighlighter` config slot. It sits between the two patterns
 above: like mermaid, `shiki` is an **optional peer dependency** reached only
-through variable-specifier dynamic imports (the package builds without it, and
-zero shiki bytes can land in the main entry — or in the subpath chunk itself);
-like highlight.js, the backend highlights synchronously once ready.
+through dynamic imports (zero shiki bytes can land in the main entry); like
+highlight.js, the backend highlights synchronously once ready. The dynamic
+imports use **literal** specifiers — `import('shiki/core')`, and grammars and
+themes through shiki's own lazy `bundledLanguages` / `bundledThemes` maps rather
+than a template literal — so a host bundler (webpack included, which cannot
+resolve a non-literal `import(x)`) resolves the peer and code-splits it into
+lazy chunks, fetching only the configured grammars and themes.
 
 Because shiki can only initialize asynchronously, `loadShiki()` is the load
 seam: it awaits shiki's fine-grained core (`shiki/core` +
@@ -194,8 +198,9 @@ that never opt in pay nothing at all:
   `katexMathRenderer` and `loadKatex()` (which returns the renderer value — pass it
   via `MarkdownConfig.mathRenderer`, with `mathSyntax: true` for the prose grammar,
   or the hydrate `renderer` option). `katex` is an **optional peer dependency**,
-  imported through a variable-specifier dynamic import so the package builds and
-  type-checks without it.
+  imported through a literal `import('katex')` so every bundler resolves it and
+  splits it into its own lazy chunk; no katex type reaches the published
+  `.d.ts`, so consumers that never import this subpath don't need it.
 
 ```ts
 import { hydratePendingMath } from '@copse/streaming-markdown'

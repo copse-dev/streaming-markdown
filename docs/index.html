@@ -15,9 +15,12 @@
   <!-- Every heavy backend here is an OPTIONAL PEER of the package — never
        bundled. The lazy backends resolve their library via this import map at
        first use; it is the demo's stand-in for `npm install mermaid katex shiki`
-       in a real host. katex and each theme/lang grammar are self-contained ESM
-       files (jsdelivr serves them verbatim); shiki's core + engine pull a small
-       dependency graph, so those two specifiers use esm.sh, which flattens it. -->
+       in a real host (the demo bundle marks these peers external, so their
+       literal import specifiers are left for this map). katex is a
+       self-contained ESM file (jsdelivr serves it verbatim); shiki's core,
+       engine and lazy grammar/theme maps pull a small dependency graph, so
+       those specifiers use esm.sh, which flattens it and serves each grammar
+       and theme the maps reference as its own module. -->
   <script type="importmap">
   {
     "imports": {
@@ -25,8 +28,8 @@
       "katex": "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.mjs",
       "shiki/core": "https://esm.sh/shiki@4.3.1/core",
       "shiki/engine/javascript": "https://esm.sh/shiki@4.3.1/engine/javascript",
-      "shiki/themes/": "https://cdn.jsdelivr.net/npm/@shikijs/themes@4.3.1/dist/",
-      "shiki/langs/": "https://cdn.jsdelivr.net/npm/@shikijs/langs@4.3.1/dist/"
+      "shiki/langs": "https://esm.sh/shiki@4.3.1/langs",
+      "shiki/themes": "https://esm.sh/shiki@4.3.1/themes"
     }
   }
   </script>
