@@ -340,3 +340,59 @@ describe('loadShiki light/dark themes', () => {
     assert.doesNotMatch(shikiHighlighter.highlight('const x = 1 // hi', 'typescript'), /shiki-dark-/)
   })
 })
+
+describe('shikiHighlighter.supports (languages beyond KNOWN_LANGUAGES)', () => {
+  before(() => {
+    __resetShikiForTests()
+  })
+
+  it('claims nothing before any load call', () => {
+    assert.equal(shikiHighlighter.supports?.('tsx'), false)
+    assert.equal(shikiHighlighter.supports?.('typescript'), false)
+  })
+
+  it('keeps lang-tsx stable across the plain → highlighted upgrade', async () => {
+    const md = '```tsx\nconst a = <A />\n```'
+    // installShiki records the requested grammars synchronously, so the class
+    // is already final while the grammars are still loading…
+    const backend = installShiki({ langs: ['typescript', 'tsx', 'java', 'kotlin'], ...NO_TIME_LIMIT })
+    assert.equal(shikiHighlighter.supports?.('tsx'), true)
+    const before = renderMarkdownUnsafe(md, { codeHighlighter: backend })
+    assert.match(before, /<code class="hljs lang-tsx">const a = &lt;A \/&gt;/)
+    assert.doesNotMatch(before, /<span/)
+
+    // …and identical after: only the interior upgrades.
+    await loadShiki()
+    const after = renderMarkdownUnsafe(md, { codeHighlighter: backend })
+    assert.match(after, /<code class="hljs lang-tsx"><span/)
+  })
+
+  it('highlights grammars the core does not know, under their own id', async () => {
+    const backend = await loadShiki()
+    const java = renderMarkdownUnsafe('```java\nclass A {}\n```', { codeHighlighter: backend })
+    assert.match(java, /<code class="hljs lang-java"><span class="shiki-/)
+    // A shiki alias registered with a loaded grammar is claimed after load
+    // (`kt` → kotlin); its class is `lang-kt` before and after, since `kt` is
+    // not an id the core approximates.
+    const kt = renderMarkdownUnsafe('```kt\nval a = 1\n```', { codeHighlighter: backend })
+    assert.match(kt, /<code class="hljs lang-kt"><span class="shiki-/)
+    // Unrequested grammars are still not claimed.
+    assert.match(
+      renderMarkdownUnsafe('```swift\nlet a = 1\n```', { codeHighlighter: backend }),
+      /<code class="hljs lang-swift">let a = 1/,
+    )
+    // Synonyms are folded by the core first: `ts` stays lang-typescript.
+    assert.match(renderMarkdownUnsafe('```ts\nconst a = 1\n```', { codeHighlighter: backend }), /lang-typescript"/)
+  })
+
+  it('no shiki alias is an id the core approximates (the class-stability premise)', async () => {
+    // supports() may grow after load by the aliases shiki registers. That can
+    // only change a fence's class for the ids the core would otherwise map to
+    // a KNOWN_LANGUAGES approximation, so none of those may be an alias.
+    const { bundledLanguagesInfo } = await import('shiki/langs')
+    const aliases = new Set(bundledLanguagesInfo.flatMap((info) => info.aliases ?? []))
+    for (const id of ['tsx', 'jsx', 'html', 'htm']) {
+      assert.ok(!aliases.has(id), `${id} must not be a shiki alias`)
+    }
+  })
+})

@@ -163,6 +163,34 @@ const codeHighlighter = await loadHighlightjs()
 See [`LAZY-LOADING.md`](LAZY-LOADING.md) for the bundle-size rationale and how the
 same shape applies to Mermaid.
 
+### Languages and the `lang-*` label
+
+The fence's `<code>` gets `class="hljs lang-<id>"`, which hosts commonly show as
+the code block's language label. The core resolves `<id>` from the info string's
+first word, lowercased:
+
+1. **Synonyms fold first**, whatever the backend: `ts`→`typescript`,
+   `js`/`mjs`/`cjs`→`javascript`, `sh`/`zsh`→`bash`, `py`→`python`,
+   `yml`→`yaml`, `md`→`markdown`, `rs`→`rust`. `text`/`plaintext` mean no
+   language.
+2. **The highlighter may claim the id.** A `CodeHighlighter` can implement the
+   optional `supports(id): boolean`; when it returns `true` the id is kept as
+   written — the backend's `highlight` receives it and the class is
+   `lang-<id>` (```` ```tsx ```` → `lang-tsx`, ```` ```java ```` → `lang-java`).
+3. **Otherwise the built-in set applies.** Approximations map `tsx`→`typescript`,
+   `jsx`→`javascript`, `html`/`htm`→`xml`, and only ids in `KNOWN_LANGUAGES` are
+   highlighted. Anything else renders plain, labelled with its own id
+   (`lang-java`), and an empty info string is `lang-text`.
+
+So the label is the fence's own id except where step 1 folds a synonym, or step
+3 approximates an id the backend doesn't claim. A backend's `supports` answer
+feeds the class, so it must be stable while the backend is configured — answer
+from what you've been *asked* to load, not what has finished loading — or a
+streaming re-render will churn the element's class. The highlight.js backend
+doesn't implement `supports`: its grammars are exactly `KNOWN_LANGUAGES`, and
+claiming hljs's own aliases would change today's classes (`lang-tsx` instead of
+`lang-typescript`) for existing users. Shiki implements it (below).
+
 ### Shiki
 
 A second bundled backend uses [Shiki](https://shiki.style/) (an optional peer
@@ -206,6 +234,16 @@ aliases (keys of `bundledLanguages`). An unknown name rejects the load. Two
 behavioural mismatches with the hljs backend: shiki has no auto-detection, so
 fences with an *empty* info string stay plain text, and grammars you drop from
 `langs` fall back to plain text even though the core still resolves their ids.
+
+**Languages beyond the core set.** Every name in `langs` is claimed through
+`supports` the moment `loadShiki`/`installShiki` is called, so
+`langs: ['tsx', 'java', 'kotlin', 'swift', 'c', 'cpp']` highlights those
+fences and keeps their own ids as classes (`lang-tsx`, not `lang-typescript`);
+once loaded, shiki's aliases for those grammars (`kt`, `c++`) are claimed too.
+The class is final from the first render — only the interior upgrades when the
+grammar arrives. Call `installShiki()`/`loadShiki()` before rendering with
+`shikiHighlighter`: used before any load call, it claims nothing, so a
+```` ```tsx ```` fence would be labelled `lang-typescript` until then.
 
 **Tokenizing budget.** shiki stops tokenizing a line after 500ms and emits the
 rest of it as one token. A grammar's first highlight also pays the JavaScript

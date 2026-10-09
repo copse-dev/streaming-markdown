@@ -41,8 +41,11 @@ When extending the renderer or its CSS, preserve these rules:
   sanitizer backend. With no highlighter configured, `highlightFenceCode`
   returns escaped plain text; a later render with a `codeHighlighter` set upgrades fence
   interiors to token spans while `fenceCodeClass` keeps the element's class stable across
-  the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the backend
-  registers. `highlight.js` must not be imported outside `highlight-hljs.ts`, or it
+  the swap. `KNOWN_LANGUAGES` must stay in sync with the grammars the hljs backend
+  registers; a backend with more grammars claims them through the optional
+  `CodeHighlighter.supports(id)`, consulted after pure synonyms (`ts`) are folded and
+  before approximations (`tsx` → `typescript`) apply — its answers must not change
+  while it loads, or the class would churn. `highlight.js` must not be imported outside `highlight-hljs.ts`, or it
   re-enters the default bundle. See [`LAZY-LOADING.md`](LAZY-LOADING.md).
 - **Pluggable fence handlers (#53).** Which HTML a fenced code block emits is a map
   keyed by the fence's info-string language (`fence-handlers.ts`, the `fenceHandlers`
