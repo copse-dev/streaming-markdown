@@ -72,11 +72,12 @@ import {
   reseatFootnoteContext,
   setActiveFootnoteContext,
 } from './footnotes.ts'
+import { FORMING_FENCE_PRE_CLASS } from './fence-handlers.ts'
 import { getHtmlPolicy } from './html-policy.ts'
 import { normalizeReferenceLabel, type LinkReferenceMap } from './link-references.ts'
 import { asSanitizedHtml, sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml, setSanitizedHtml } from './html-sink.ts'
-import { renderMarkdownUnsafe, topLevelRenderOpts } from './renderer.ts'
+import { committedRenderOpts, renderCommittedMarkdownUnsafe } from './renderer.ts'
 import {
   morphElementChildrenFrom,
   morphInnerHtml,
@@ -99,6 +100,11 @@ const INTRA_LIST_MIN_ITEMS = 4
 // sanitize wins on per-call overhead. Purely a cost trade — both paths are
 // byte-identical.
 const MAX_LINK_REF_PATCH_PARTS = 8
+
+// A fence or display-math opener somewhere in a source slice: the cheap,
+// conservative test for whether a `formingTail` flip can change how the slice
+// renders (a nested forming fence needs one of these).
+const MAY_HOLD_FENCE_RE = /```|~~~|\$\$|\\\[/
 
 /**
  * How a block kind behaves at the settled/tail boundary:
@@ -649,6 +655,10 @@ export class FrozenTailRenderer {
    * advance zeroes it, so direct callers keep today's full check.
    */
   private prefixVerifiedUpTo = 0
+  /** This commit's `formingTail` (see {@link update}); every render here uses it. */
+  private formingTail = false
+  /** Whether {@link formingTail} differs from the previous commit's. */
+  private formingTailChanged = false
 
   /**
    * Drop the DOM-trust memo after out-of-band mutation of committed nodes —
@@ -838,7 +848,7 @@ export class FrozenTailRenderer {
       const to = lowerBound(tokens, part.end)
       const rendered = renderBlocksToParts(complete, tokens.slice(from, to), {
         linkRefs,
-        ...topLevelRenderOpts(),
+        ...committedRenderOpts(this.formingTail),
       })
       // The span covers exactly one top-level group by construction; anything
       // else means the record is stale — fall back.
@@ -983,8 +993,8 @@ export class FrozenTailRenderer {
 
   /**
    * Reconcile `completedEl` so it serializes byte-identically to
-   * `sanitizeRenderedMarkdown(renderMarkdownUnsafe(complete))`, freezing the settled
-   * prefix and re-rendering only the tail group. `tokens` must be
+   * `sanitizeRenderedMarkdown(renderCommittedMarkdownUnsafe(complete, tokens, formingTail))`,
+   * freezing the settled prefix and re-rendering only the tail group. `tokens` must be
    * `tokenizeBlocks(complete)` (threaded from the caller, Layer 1), and
    * `providedLinkRefs` / `providedFootnoteDefs`, when given, must equal
    * `collectLinkReferenceDefinitions(complete)` /
@@ -999,6 +1009,10 @@ export class FrozenTailRenderer {
    * event stream carries the append-only proof, so the per-update prefix
    * decision degrades to a fallback trigger (ADR 0004 Phase 2). Without it
    * (direct callers, tests) every commit keeps today's full check.
+   *
+   * `formingTail` is the caller's `committedTailContinues(complete, blocks)`:
+   * when set, a fence still open at the end of `complete` (nested in the
+   * trailing list item / blockquote) renders in its forming shape.
    */
   update(
     completedEl: HTMLElement,
@@ -1007,7 +1021,10 @@ export class FrozenTailRenderer {
     providedLinkRefs?: LinkReferenceMap,
     providedFootnoteDefs?: FootnoteDefinitionMap,
     advance?: ScanAdvance,
+    formingTail = false,
   ): void {
+    this.formingTailChanged = formingTail !== this.formingTail
+    this.formingTail = formingTail
     if (complete === '') {
       if (completedEl.childNodes.length > 0) completedEl.replaceChildren()
       this.reset()
@@ -1184,7 +1201,13 @@ export class FrozenTailRenderer {
       memo.linkRefKey === linkRefKey &&
       sameRenderTokens(memo.renderTokens, deltaRenderTokens) &&
       complete.startsWith(memo.srcText, memo.srcStart) &&
-      !hasUnfreezableRawHtml(memo.rawHtml)
+      !hasUnfreezableRawHtml(memo.rawHtml) &&
+      // A nested fence that was still forming at the last commit rendered its
+      // forming shape; now that later content follows, the same tokens over the
+      // same bytes render it closed (by its container), so the memoized render
+      // is not what a fresh render would produce. (A literal class name in code
+      // text only declines the adoption: slower, never different.)
+      !memo.rawHtml.includes(FORMING_FENCE_PRE_CLASS)
     ) {
       // (The tail here is never token-empty: an adopted delta was last
       // frame's still-forming tail, and settling it requires at least a
@@ -1192,7 +1215,7 @@ export class FrozenTailRenderer {
       // separators is a cheap no-op returning [].)
       const tailParts = renderBlocksToParts(complete, tailTokens, {
         linkRefs,
-        ...topLevelRenderOpts(),
+        ...committedRenderOpts(this.formingTail),
       })
       const tailHtml = tailParts.map((p) => p.html).join('\n')
       this.renderedChars += tailHtml.length
@@ -1219,10 +1242,16 @@ export class FrozenTailRenderer {
       // renderBlocksToParts contract), so every guard below sees exactly what it
       // always saw.
       const deltaParts = deltaTokens.length
-        ? renderBlocksToParts(complete, deltaTokens, { linkRefs, ...topLevelRenderOpts() })
+        ? renderBlocksToParts(complete, deltaTokens, {
+            linkRefs,
+            ...committedRenderOpts(this.formingTail),
+          })
         : []
       const tailParts = tailTokens.length
-        ? renderBlocksToParts(complete, tailTokens, { linkRefs, ...topLevelRenderOpts() })
+        ? renderBlocksToParts(complete, tailTokens, {
+            linkRefs,
+            ...committedRenderOpts(this.formingTail),
+          })
         : []
       const deltaHtml = deltaParts.map((p) => p.html).join('\n')
       const tailHtml = tailParts.map((p) => p.html).join('\n')
@@ -1701,11 +1730,23 @@ export class FrozenTailRenderer {
     const deltaItems = unfrozenItems.slice(0, freezeCount)
     const tailItems = unfrozenItems.slice(freezeCount)
 
-    const delta = renderListItemsSlice(complete, deltaItems, this.listLoose, linkRefs)
+    const delta = renderListItemsSlice(
+      complete,
+      deltaItems,
+      this.listLoose,
+      linkRefs,
+      this.formingTail,
+    )
     // Same hazard as the top-level delta (gap F): never freeze an item slice
     // whose raw tags (benign inline, or any element under passthrough) are unbalanced.
     if (delta.itemsHtml !== '' && hasUnfreezableRawHtml(delta.itemsHtml)) return 'fallback'
-    const tail = renderListItemsSlice(complete, tailItems, this.listLoose, linkRefs)
+    const tail = renderListItemsSlice(
+      complete,
+      tailItems,
+      this.listLoose,
+      linkRefs,
+      this.formingTail,
+    )
     this.renderedChars += delta.itemsHtml.length + tail.itemsHtml.length
 
     const hasTask = this.listHasTask || delta.anyTask || tail.anyTask
@@ -1818,7 +1859,10 @@ export class FrozenTailRenderer {
     try {
       // Body first (advances first-use numbering in document order), then the
       // section (reads ctx.order) — exactly renderMarkdownCore's sequence.
-      const parts = renderBlocksToParts(complete, tokens, { linkRefs, ...topLevelRenderOpts() })
+      const parts = renderBlocksToParts(complete, tokens, {
+        linkRefs,
+        ...committedRenderOpts(this.formingTail),
+      })
       const items = renderFootnoteSectionItems(ctx, linkRefs)
       return { parts, items, ctx }
     } finally {
@@ -1980,6 +2024,22 @@ export class FrozenTailRenderer {
   ): 'done' | 'skip' | 'rebuild' {
     const persisted = this.fnCtx
     if (!persisted) return 'skip'
+    // The trailing body part holding a forming nested fence depends on staying
+    // the streaming tail: a definition line at column 0 ends its list item /
+    // quote (closing the fence) without adding a body block, which this path
+    // would not re-render. A `formingTail` flip changes that part the same way,
+    // but only if it can hold a fence at all (`formingTail` flips at most twice
+    // per committed block, so keep the fast path for the common fence-free
+    // part). The full incremental path re-renders and diffs every part. Only
+    // the last part can be forming, so this stays O(last part).
+    const last = this.fnBodyParts.at(-1)
+    if (
+      last &&
+      (last.html.includes(FORMING_FENCE_PRE_CLASS) ||
+        (this.formingTailChanged && MAY_HOLD_FENCE_RE.test(complete.slice(last.start, last.end))))
+    ) {
+      return 'skip'
+    }
 
     // (1) Body unchanged: everything committed past the body is a definition,
     // blank, or link-ref line (no new body block appeared).
@@ -2027,7 +2087,7 @@ export class FrozenTailRenderer {
         const partTokens = tokens.filter((t) => t.start >= cached.start && t.end <= cached.end)
         const html = renderBlocksToParts(complete, partTokens, {
           linkRefs,
-          ...topLevelRenderOpts(),
+          ...committedRenderOpts(this.formingTail),
         })
           .map((p) => p.html)
           .join('\n')
@@ -2111,7 +2171,7 @@ export class FrozenTailRenderer {
     linkRefKey: string,
     linkRefs: LinkReferenceMap,
   ): void {
-    const rawHtml = renderMarkdownUnsafe(complete, { tokens })
+    const rawHtml = renderCommittedMarkdownUnsafe(complete, tokens, this.formingTail)
     // A still-forming `<details>` reaches here every commit (its unbalanced tag
     // trips the freeze guard); flag it off the unsanitized render, before the
     // sink balances the tree.

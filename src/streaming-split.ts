@@ -229,3 +229,36 @@ function splitForStreamingCore(content: string, blocks: BlockToken[]): Streaming
     pending: content.slice(holdStart),
   }
 }
+
+/**
+ * Whether the block the committed prefix ends in still continues into the rest
+ * of the content, so a fence left open at the end of `complete` (nested in that
+ * trailing list item or blockquote) is still open in the stream and renders in
+ * its forming shape (`RenderBlocksOptions.formingTail`).
+ *
+ * `complete` alone can't tell: the held tail may already have ended the
+ * container (a column-0 ```` ``` ```` that opens a top-level fence, a new
+ * sibling item, a paragraph). The content tokenization can: the first non-blank
+ * `content` token past the boundary either started inside `complete` (the
+ * trailing block continues) or starts at or after it (a new block, so the
+ * trailing container, and any fence open in it, has ended). Blank lines decide
+ * nothing (an open fence keeps them). It is decided per frame from `blocks`
+ * (`tokenizeBlocks(content)`), so both emitters agree even while `complete` is
+ * unchanged; a partial line that will end only an INNER container settles when
+ * it commits. O(tokens in the held tail).
+ */
+export function committedTailContinues(complete: string, blocks: BlockToken[]): boolean {
+  const len = complete.length
+  if (len === 0) return false
+  // Walk back over the tokens past the boundary (only the held tail's, a few):
+  // one straddling the boundary means the trailing block continues; otherwise
+  // any non-blank one is a new block.
+  let continues = true
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const token = blocks[i]
+    if (!token || token.end <= len) break
+    if (token.start < len) return true
+    if (token.kind !== 'blank') continues = false
+  }
+  return continues
+}

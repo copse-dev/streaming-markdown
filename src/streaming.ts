@@ -1,4 +1,4 @@
-import { renderMarkdownUnsafe } from './renderer.ts'
+import { renderCommittedMarkdownUnsafe } from './renderer.ts'
 import { alertBlockquoteClass, pendingBlockquoteAlertType } from './alerts.ts'
 import {
   getIncompleteFenceSource,
@@ -23,7 +23,12 @@ import {
 } from './render-pending-line.ts'
 import { pendingHoldIndex } from './inline-emphasis.ts'
 import { getInlinePasses } from './inline-passes.ts'
-import { splitForStreaming, splitForStreamingFrom, type StreamingSplit } from './streaming-split.ts'
+import {
+  committedTailContinues,
+  splitForStreaming,
+  splitForStreamingFrom,
+  type StreamingSplit,
+} from './streaming-split.ts'
 import { IncrementalSourceScanner } from './incremental-scan.ts'
 import { findDescendantByClass, firstDirectChild, lastDirectChild } from './dom-scan.ts'
 export type { StreamingSplitWithTokens } from './streaming-split.ts'
@@ -898,7 +903,16 @@ function renderStreamingMarkdownCore(content: string): string {
   let completeTokensCache: BlockToken[] | null = null
   const completeTokens = (): BlockToken[] => (completeTokensCache ??= tokenizeBlocks(complete))
   const completeTokensForPending = pending.includes('|') ? completeTokens() : undefined
-  const renderedRaw = complete ? renderMarkdownUnsafe(complete, { tokens: completeTokens() }) : ''
+  // A fence still open inside the trailing list item / quote renders in its
+  // forming shape while that container continues (the DOM emitter's frozen tail
+  // makes the same call from the same tokens).
+  const renderedRaw = complete
+    ? renderCommittedMarkdownUnsafe(
+        complete,
+        completeTokens(),
+        committedTailContinues(complete, blocks),
+      )
+    : ''
   const rendered = renderedRaw ? sanitizeRenderedMarkdown(renderedRaw) : ''
   // Inside a still-forming `<details>` the committed children render inside the
   // (collapsed) element; a pending sibling would flash the collapsed body, so
@@ -976,6 +990,12 @@ export class StreamingMarkdownRenderer {
   private lastComplete = ''
   /** The text of the last `update()`/`finish()` — what a bare `finish()` finalizes. */
   private lastContent = ''
+  /**
+   * `committedTailContinues` at the last commit. It can flip while `complete`
+   * stays put (the held tail ends the trailing container), which changes how a
+   * nested open fence renders, so a flip re-runs the commit path.
+   */
+  private lastFormingTail = false
   /** `tokenizeBlocks(lastComplete)` — cached so pending-only frames stay O(tail). */
   private committedTokens: BlockToken[] = []
   /** Whether `lastComplete` contains `|` — cached for the same reason. */
@@ -1139,7 +1159,13 @@ export class StreamingMarkdownRenderer {
     const { complete, pending, openListItemFirstLine, blocks } = split
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
 
-    if (complete !== this.lastComplete) this.commit(completedEl, complete)
+    // A nested open fence renders as forming only while its container runs to
+    // the end of the content; that can flip while `complete` stays put (the held
+    // tail ends the container), so a flip re-runs the commit too.
+    const formingTail = committedTailContinues(complete, blocks)
+    if (complete !== this.lastComplete || formingTail !== this.lastFormingTail) {
+      this.commit(completedEl, complete, formingTail)
+    }
 
     // Inside a still-forming `<details>`: its committed children already render
     // inside the (collapsed) element, and a pending sibling here would flash the
@@ -1261,8 +1287,10 @@ export class StreamingMarkdownRenderer {
   private finishWithPolicy(content: string): void {
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
     const complete = content === '' || content.endsWith('\n') ? content : `${content}\n`
-    if (complete !== this.lastComplete) {
-      this.commit(completedEl, complete)
+    // At end of stream nothing is forming, so a nested fence the answer never
+    // closed settles to its at-rest shape like a top-level one.
+    if (complete !== this.lastComplete || this.lastFormingTail) {
+      this.commit(completedEl, complete, false)
     } else {
       // Nothing new to commit, so the last frame had no pending text — sweep
       // anyway: O(tail), and it leaves the committed subtree exactly as the
@@ -1280,7 +1308,7 @@ export class StreamingMarkdownRenderer {
    * reconcile `completedEl` to the full render of `complete` through the
    * frozen-tail renderer.
    */
-  private commit(completedEl: HTMLElement, complete: string): void {
+  private commit(completedEl: HTMLElement, complete: string, formingTail: boolean): void {
     this.sweepPendingTail(completedEl)
     // Tokenize `complete` once per COMMIT — incrementally (#30), consuming
     // the full ScanAdvance (ADR 0004 Phase 2): the sealed-event stream's
@@ -1302,8 +1330,10 @@ export class StreamingMarkdownRenderer {
       this.completeScanner.linkRefs(complete),
       this.completeScanner.footnoteDefs(complete),
       advance,
+      formingTail,
     )
     this.lastComplete = complete
+    this.lastFormingTail = formingTail
     // A commit restructures the committed subtree, so the fast-path node
     // bookkeeping (and its "no prior decision can change" premise) is void.
     this.pendingFast = null
@@ -1405,6 +1435,7 @@ export class StreamingMarkdownRenderer {
     this.formingEl = formingEl
     this.pendingEl = pendingEl
     this.lastComplete = ''
+    this.lastFormingTail = false
     this.committedTokens = []
     this.committedHasPipe = false
     this.pendingFast = null

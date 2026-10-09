@@ -87,7 +87,8 @@ front. Pass `lazy: true` to mount a frame only once its diagram comes near the v
 later); each value can be overridden with `lazy: { rootMargin, debounce, idleTimeout }`. A deferred
 diagram shows its source and has state `deferred`. Without IntersectionObserver it mounts at once.
 
-Only closed fences get a frame: the forming fence and the streaming tail are skipped because the
+Only closed fences get a frame: the forming fence (top-level, or nested in a list item or
+blockquote, which carries `stream-fence-forming` too) and the streaming tail are skipped because the
 renderer still reconciles them, while a closed fence is frozen, so its frame survives later
 updates. While a frame renders, the escaped source stays on screen and the frame is held out of
 layout; once ready the source is removed and the diagram gets `mermaid-diagram--isolated`. On
