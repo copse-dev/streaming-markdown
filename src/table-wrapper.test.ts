@@ -121,7 +121,22 @@ describe('tableWrapper: sink sanitizer', () => {
         '<div class="table-wrapper" role="button" tabindex="-1"><table><tr><td>c</td></tr></table></div>\n',
         cfg(),
       )
-      assert.match(html, /<div class="table-wrapper" role="region" tabindex="0"><table>/)
+      const open = /<div class="table-wrapper"[^>]*><table>/.exec(html)?.[0] ?? ''
+      assert.match(open, / role="region"/)
+      assert.match(open, / aria-label="Table"/)
+      assert.match(open, / tabindex="0"/)
+      assert.doesNotMatch(open, /button|-1/)
+    })
+
+    it(`${name}: the wrapper shape always carries the configured label, not the author's or none`, () => {
+      for (const raw of [
+        '<div class="table-wrapper"><table><tr><td>c</td></tr></table></div>\n',
+        '<div class="table-wrapper" aria-label="Author name"><table><tr><td>c</td></tr></table></div>\n',
+      ]) {
+        const html = renderMarkdown(raw, cfg({ tableWrapper: { label: 'Localized table' } }))
+        assert.match(html, /<div class="table-wrapper"[^>]* aria-label="Localized table"/, raw)
+        assert.doesNotMatch(html, /Author name/, raw)
+      }
     })
 
     it(`${name}: a host extension that allowlists role keeps it off the wrapper shape`, () => {

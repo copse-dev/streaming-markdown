@@ -92,8 +92,9 @@ export function createTableWrapperElement(wrapper: ResolvedTableWrapper): HTMLDi
  *
  * - On a wrapper-shaped element — a `<div>` whose `class` is exactly the
  *   configured value and whose only element child is a `<table>` — it *sets*
- *   `role="region"` and `tabindex="0"`, overwriting any other value, so the
- *   shape can only ever mean "this table scrolls".
+ *   `role="region"`, the configured `aria-label` and `tabindex="0"`,
+ *   overwriting any other value, so the shape can only ever mean "this table
+ *   scrolls", under the host's own name for it.
  * - On every other element it removes them — the names the host's own
  *   `sanitizeExtension.allowedAttr` did not already admit, so a host that allows
  *   `role` for its own markup keeps it.
@@ -126,6 +127,7 @@ export function withTableWrapperGate(
         node.firstElementChild?.tagName === 'TABLE'
       ) {
         node.setAttribute('role', 'region')
+        node.setAttribute('aria-label', wrapper.label)
         node.setAttribute('tabindex', '0')
       } else {
         // Optional call: the DOMPurify hook also fires for text/comment nodes.
