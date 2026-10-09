@@ -1,6 +1,7 @@
 import { activeConfig } from './config.ts'
 import { applyLinkImagePolicy } from './link-image-policy.ts'
 import { browserSanitizerBackend, isBrowserSanitizerSupported } from './sanitize-browser.ts'
+import { withTableWrapperGate } from './table-wrapper.ts'
 
 // Defense-in-depth over the hand-assembled HTML that `renderMarkdown()` emits.
 // The renderer already escapes prose and validates link hrefs, but it builds
@@ -300,7 +301,12 @@ function buildSanitizerConfig(): SanitizerConfig {
   const allowedAttr = extension?.allowedAttr
     ? [...ALLOWED_ATTR, ...extension.allowedAttr]
     : ALLOWED_ATTR
-  return { allowedTags, allowedAttr, onElement: gateElement }
+  // Opt-in `tableWrapper`: admits the wrapper's `role`/`tabindex` on the
+  // wrapper alone (a no-op with the option off). See table-wrapper.ts.
+  return withTableWrapperGate(
+    { allowedTags, allowedAttr, onElement: gateElement },
+    extension?.allowedAttr,
+  )
 }
 
 declare const SANITIZED_HTML_BRAND: unique symbol

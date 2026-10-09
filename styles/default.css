@@ -254,6 +254,12 @@
     overflow-x: auto;
     overflow-y: hidden;
   }
+  /* The wrapper is a focus stop (`tabindex="0"`) so keyboard users can scroll a
+     wide table; show where focus is, for keyboard focus only. */
+  & .table-wrapper:focus-visible {
+    outline: 2px solid var(--sm-accent, #007acc);
+    outline-offset: 2px;
+  }
   & th,
   & td {
     border-right: 1px solid var(--sm-border, #3c3c3c);

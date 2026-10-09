@@ -31,6 +31,7 @@ import { dedentBlock, isIndentedHtmlBlock } from './indented-html.ts'
 import { type LinkReferenceMap } from './link-references.ts'
 import { mathBlockHtml, parseMathBlockSlice } from './math-block.ts'
 import { renderProseBlock, stripHtmlComments } from './render-prose-inline.ts'
+import { wrapTableHtml } from './table-wrapper.ts'
 
 export interface RenderBlocksOptions {
   linkRefs?: LinkReferenceMap
@@ -291,6 +292,14 @@ function alignAttr(align: TableAlign): string {
 }
 
 function renderTable(slice: string, linkRefs: LinkReferenceMap): string {
+  const table = renderTableElement(slice, linkRefs)
+  // Opt-in scroll region (`tableWrapper`): the wrapper is part of the block's
+  // own markup so every path that renders a table — and the streaming morph —
+  // sees one stable element around it. See table-wrapper.ts.
+  return table && wrapTableHtml(table)
+}
+
+function renderTableElement(slice: string, linkRefs: LinkReferenceMap): string {
   const lines = dropTrailingNewline(slice)
     .split('\n')
     .filter((l) => l.trim() !== '')

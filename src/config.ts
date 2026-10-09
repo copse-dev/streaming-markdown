@@ -30,6 +30,7 @@ import type { InlinePass } from './inline-passes.ts'
 import type { EntityDecoder } from './entity-decoder.ts'
 import type { MathRenderer } from './math.ts'
 import type { DiagramRenderer } from './mermaid.ts'
+import type { TableWrapperOptions } from './table-wrapper.ts'
 
 /**
  * The full per-render configuration for a document or a streaming renderer.
@@ -127,6 +128,18 @@ export interface MarkdownConfig {
    * render-blocks.ts and docs/ARCHITECTURE.md "Indented code blocks".
    */
   indentedCode?: boolean
+  /**
+   * Wrap every GFM table in a horizontally scrollable, keyboard-focusable region:
+   * `<div class="table-wrapper" role="region" aria-label="Table" tabindex="0">`.
+   * Off by default (`false`/`null`/omitted), which keeps output byte-identical.
+   * `true` uses the defaults; an object overrides the `className` and the
+   * localized `label` (the region's `aria-label`). Applies to `renderMarkdown`
+   * and both streaming emitters alike, including the forming table while it
+   * streams, so the table never re-parents. The sink admits the wrapper's
+   * `role`/`tabindex` only on the wrapper itself; raw HTML elsewhere still loses
+   * them. Pair with the wrapper rule in `styles/core.css`. See table-wrapper.ts.
+   */
+  tableWrapper?: boolean | TableWrapperOptions | null
   /**
    * Exclude characters from the emphasis flanking *punctuation* class — the seam
    * markdown-cjk-friendly uses to pair emphasis around full-width punctuation.

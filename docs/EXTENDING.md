@@ -35,6 +35,7 @@ different config coexist with no process-wide state to reset.
 | Link scheme allowlist | `safeHrefSchemes` | — |
 | Link/image origin policy | `linkImagePolicy` | — |
 | Trusted Types policy | `trustedTypesPolicy` | — |
+| Scrollable table wrapper | `tableWrapper` | — |
 | Full HTML5 entity decoder | `entityDecoder` | `…/entities/full` |
 | Extra named entities | `namedEntities` | — |
 
@@ -604,6 +605,47 @@ renderMarkdown(md, { namedEntities: { checkmark: '✓', myco: '🌱' } }) // bar
 `namedEntities` supplies the user layer for that render (its entries win over the
 252 built-ins on collision). It affects the built-in decoder only — an
 `entityDecoder` you pass owns its own set.
+
+## Scrollable tables (`tableWrapper`)
+
+A bare `<table>` gives a wide table — many columns, or one unbreakable token
+such as a URL in a cell — nothing to scroll in, so it overflows the message
+column. Wrapping it yourself after the render does not work with the streaming
+emitter: it owns that DOM and morphs it on every `update()`, so a `<table>` you
+move into your own container fights the morph. Turn on `tableWrapper` and the
+renderer emits the container itself:
+
+```ts
+renderMarkdown(md, { tableWrapper: true })
+new StreamingMarkdownRenderer(el, { tableWrapper: { label: t('Table'), className: styles.tableWrapper } })
+```
+
+```html
+<div class="table-wrapper" role="region" aria-label="Table" tabindex="0"><table>…</table></div>
+```
+
+`role="region"` + an accessible name + `tabindex="0"` is the accessible pattern
+for a keyboard-scrollable region (WCAG 2.1.1; axe `scrollable-region-focusable`).
+`className` (default `table-wrapper`) and `label` (the `aria-label`, default
+`Table` — pass your localized string) are both attribute-escaped; the class is
+matched exactly, so a multi-token value works. Every table is wrapped —
+`renderMarkdown`, `renderMarkdownUnsafe`, and both streaming emitters, including
+the forming table while its header and separator stream, so the wrapper is there
+from the first paint and the table is never re-parented inside the committed
+output (the one hop is the forming→committed boundary, which recreates the bare
+table today too). Off by default; with it off, output is byte-identical.
+
+`styles/core.css` scrolls `.table-wrapper` (`overflow-x: auto`, `max-width:
+100%`) and `styles/default.css` adds a `:focus-visible` outline. With a custom
+`className`, carry those rules over to your class.
+
+**Sanitizer.** `role` and `tabindex` are not on the core sink allowlist, and the
+option does not open them up to raw HTML: while it is on, the sink admits both
+names but a gate keeps them only on a `<div>` with exactly the wrapper's class
+whose only element child is a `<table>` — where it forces `role="region"` /
+`tabindex="0"` — and strips them from every other element. Raw HTML that copies
+that exact shape around a raw `<table>` gets the same scroll region, nothing
+more. See [`SECURITY.md`](SECURITY.md#threat-model).
 
 ## Widening the sanitizer allowlist
 
