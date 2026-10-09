@@ -82,7 +82,8 @@ When the stream ends, set `final`. The component then calls
 `renderer.finish(markdown)` instead of `update()`: whatever the renderer was
 still holding back for a later newline (a trailing `~~run`, the last table row,
 list item or paragraph line) is released and an unclosed code fence becomes a
-finished code block, so the DOM matches an at-rest render of the same text —
+finished code block, so the DOM matches an at-rest render of the same text
+(with its last line ended; see `finish()` in the README) —
 without swapping components or guessing at a trailing `\n`. Clearing `final`
 (or a new `markdown` while it is unset) resumes streaming.
 

@@ -406,8 +406,13 @@ End of stream: `StreamingMarkdownRenderer.finish(content?)` commits the whole
 text (line-terminated — the committed path and the frozen tail only ever see
 line-ending `complete` strings) through the ordinary commit, then empties and
 hides the forming and pending elements, so `.stream-complete` equals the
-at-rest render. There is no string-emitter counterpart: its final frame is
-`renderMarkdown(content)`. An `update()` after `finish()` is an ordinary update
+at-rest render of the line-terminated text. That is `renderMarkdown(content)`
+except in three shapes where `renderMarkdown` parses an unterminated last line
+provisionally (a setext underline after a multi-line paragraph, a delimiter row
+whose column count doesn't match its header, an invalid link reference
+definition); the terminated render is the CommonMark one. There is no
+string-emitter counterpart: its final frame is `renderMarkdown` of the
+line-terminated text. An `update()` after `finish()` is an ordinary update
 (a rewrite when it retreats `complete`), so no extra state survives a finish.
 
 Shared helpers (`renderStreamingTableCell`, `insertBeforeTrailingListClose`,

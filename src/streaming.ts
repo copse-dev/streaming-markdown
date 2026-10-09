@@ -1070,10 +1070,18 @@ export class StreamingMarkdownRenderer {
    * could still change — a trailing `~~old` / `**bold` run, the last table row,
    * list item or paragraph line — and shows an unclosed fence, `$$` block or
    * table as forming scaffolding. At end of stream nothing more can arrive, so
-   * `finish()` commits the whole text: afterwards `.stream-complete` holds what
-   * `renderMarkdown` renders for `content` (an unclosed fence becomes a
-   * finished code block, held text is released), and the forming and pending
-   * elements are empty and hidden.
+   * `finish()` commits the whole text: afterwards `.stream-complete` holds the
+   * at-rest render of `content` as a complete document — what `renderMarkdown`
+   * renders for `content` with its last line ended (an unclosed fence becomes
+   * a finished code block, held text is released) — and the forming and
+   * pending elements are empty and hidden.
+   *
+   * "With its last line ended": `renderMarkdown(content)` itself parses an
+   * unterminated last line provisionally in three shapes — a setext underline
+   * after a multi-line paragraph (`a\nb\n=`), a delimiter row whose column
+   * count doesn't match its header, and an invalid link reference definition —
+   * where the terminated render is the CommonMark one. For any `content` ending
+   * in a newline, and for every other shape, the two are identical.
    *
    * Calling {@link update} afterwards resumes streaming from whatever text it
    * is given, exactly like any other update (including one that rewrites the
