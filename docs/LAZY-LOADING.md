@@ -259,7 +259,7 @@ const smoother = createInputSmoother({
 })
 
 for await (const fullTextSoFar of stream) smoother.push(fullTextSoFar)
-smoother.finish(() => showFinalRender()) // stream end: drain the rest, then settle
+smoother.finish(() => renderer.finish()) // stream end: drain the rest, then settle
 smoother.dispose()                       // tear down (cancels any pending frame)
 ```
 
@@ -291,7 +291,7 @@ nearly every frame, 4–5 characters at a time.
 
 - **`finish(onSettled?)`** reveals whatever is still pending over a short drain
   (~60ms of lag, whatever the cadence), then calls `onSettled` once — the place
-  to swap in a final, at-rest render. It settles synchronously when nothing is
+  to call `renderer.finish()`, which settles the DOM to the at-rest render. It settles synchronously when nothing is
   pending, smoothing is off, or the page is hidden. A `push` after `finish`
   means the stream resumed and drops the pending callback.
 - **`flush()`** releases everything immediately (and settles a pending

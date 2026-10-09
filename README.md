@@ -45,7 +45,14 @@ for await (const chunk of stream) {
   accumulated += chunk
   renderer.update(accumulated) // incremental DOM patch, pending blocks styled while they form
 }
+renderer.finish() // end of stream: release held text, close an unclosed fence, render at rest
 ```
+
+Mid-stream the renderer holds back what the next character could still change
+(a trailing `~~run`, the last table row or list item). `finish()` tells it
+nothing more is coming: `.stream-complete` then matches `renderMarkdown` of the
+same text. A later `update()` resumes streaming. With the string emitter, the
+end-of-stream frame is simply `renderMarkdown(accumulated)`.
 
 ## Highlights
 

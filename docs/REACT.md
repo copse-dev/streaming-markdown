@@ -78,6 +78,18 @@ function StreamedMessage({ stream }: { stream: AsyncIterable<string> }) {
 }
 ```
 
+When the stream ends, set `final`. The component then calls
+`renderer.finish(markdown)` instead of `update()`: whatever the renderer was
+still holding back for a later newline (a trailing `~~run`, the last table row,
+list item or paragraph line) is released and an unclosed code fence becomes a
+finished code block, so the DOM matches an at-rest render of the same text —
+without swapping components or guessing at a trailing `\n`. Clearing `final`
+(or a new `markdown` while it is unset) resumes streaming.
+
+```tsx
+<StreamingMarkdown markdown={text} final={!isStreaming} />
+```
+
 To hydrate lazy math/diagram backends as the stream lands them, use the
 `onUpdate` prop — it fires after each `update()` with the live renderer and its
 (attached) host element:
@@ -100,7 +112,8 @@ Both components accept, in addition to standard container attributes
 | `markdown`| `string`                                      | The source text. On `<StreamingMarkdown>` it grows as tokens arrive. `<Markdown>` also accepts a single string child instead. |
 | `config`  | `MarkdownConfig`                              | Per-instance settings — `htmlPolicy`, scheme allowlist, `linkDecorator`, `fenceHandlers`, `codeHighlighter`, `mathSyntax`, CJK, `trustedTypesPolicy`, `sanitizerBackend`, … Two components with different `config` coexist without interfering. |
 | `as`      | `ElementType`                                 | Container element/component. Defaults to `'div'`. |
-| `onUpdate`| `(renderer: StreamingMarkdownRenderer, host: HTMLElement) => void`| `<StreamingMarkdown>` only. Called after each `update()`, from the component's own layout effect, so `host` is attached. |
+| `final`   | `boolean`                                     | `<StreamingMarkdown>` only. `markdown` is the complete text: call `renderer.finish()` instead of `update()`. Defaults to `false`. |
+| `onUpdate`| `(renderer: StreamingMarkdownRenderer, host: HTMLElement) => void`| `<StreamingMarkdown>` only. Called after each `update()` / `finish()`, from the component's own layout effect, so `host` is attached. |
 | `onRender`| `(host: HTMLElement) => void`                 | `<Markdown>` only. Called after each render is written to the host, e.g. to mount isolated diagrams. |
 
 `config` is captured when the underlying renderer is constructed, so
