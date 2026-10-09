@@ -1,7 +1,9 @@
 import '../tests/setup-dom-jsdom.ts'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { renderStreamingMarkdown, StreamingMarkdownRenderer } from './streaming.ts'
 import {
+  appendPendingTableRowHtml,
   buildFormingTableHtml,
   clearFormingTableDom,
   removePendingTableRow,
@@ -138,5 +140,38 @@ describe('clearFormingTableDom', () => {
     el.innerHTML = '<table class="stream-table-forming"></table>'
     clearFormingTableDom(el)
     assert.equal(el.childNodes.length, 0)
+  })
+})
+
+// The string emitter's pending-row splice targets the TRAILING table — the only
+// one `pendingLineBelongsInTable` lets a pending row join. It used to anchor on
+// the last `</tbody>`, which a header-only trailing table does not have yet.
+describe('appendPendingTableRowHtml: the pending row joins the trailing table', () => {
+  it('lands in a new <tbody> inside the table, matching the DOM emitter', () => {
+    const md = '| a | b |\n| --- | --- |\n| 1 |'
+    assert.equal(
+      renderStreamingMarkdown(md),
+      '<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody>' +
+        '<tr class="stream-pending-row"><td>1</td><td></td></tr></tbody></table>',
+    )
+    const host = document.createElement('div')
+    new StreamingMarkdownRenderer(host).update(md)
+    assert.equal(host.querySelector('.stream-complete')?.innerHTML, renderStreamingMarkdown(md))
+  })
+
+  it('never lands in an earlier table that does have a <tbody>', () => {
+    const md = '| x |\n| - |\n| 0 |\n\n| a | b |\n| --- | --- |\n| 1 |'
+    const d = document.createElement('div')
+    d.innerHTML = renderStreamingMarkdown(md)
+    const [first, second] = d.querySelectorAll('table')
+    assert.equal(first?.querySelector('.stream-pending-row'), null)
+    assert.ok(second?.querySelector('tbody > tr.stream-pending-row'))
+  })
+
+  it('appends after rendered output with no table at all (defensive)', () => {
+    assert.equal(
+      appendPendingTableRowHtml('<p>x</p>', '| 1 |'),
+      '<p>x</p><tr class="stream-pending-row"><td>1</td></tr>',
+    )
   })
 })

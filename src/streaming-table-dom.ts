@@ -159,10 +159,18 @@ export function appendPendingTableRowHtml(rendered: string, pendingRow: string):
   }).join('')
   const pendingRowHtml = `<tr class="${PENDING_ROW_CLASS}">${rowHtml}</tr>`
 
-  const closeTbody = '</tbody>'
-  const closeIndex = rendered.lastIndexOf(closeTbody)
+  // The row belongs to the TRAILING table (`pendingLineBelongsInTable` gates on
+  // it), so anchor on the last `</table>` rather than the last `</tbody>`: a
+  // header-only trailing table has no `<tbody>` yet (spec 205), and the last
+  // `</tbody>` would then be an EARLIER table's. That case gets the `<tbody>`
+  // the DOM emitter's `syncPendingTableRowDom` creates, instead of a stray `<tr>`
+  // after the table.
+  const closeIndex = rendered.lastIndexOf('</table>')
   if (closeIndex === -1) return `${rendered}${pendingRowHtml}`
-  return `${rendered.slice(0, closeIndex)}${pendingRowHtml}${rendered.slice(closeIndex)}`
+  const before = rendered.slice(0, closeIndex)
+  // Reopen the trailing `</tbody>` (8 chars), or open one for a header-only table.
+  const head = before.endsWith('</tbody>') ? before.slice(0, -8) : `${before}<tbody>`
+  return `${head}${pendingRowHtml}</tbody>${rendered.slice(closeIndex)}`
 }
 
 export function buildFormingTableHtml(source: string): string {
