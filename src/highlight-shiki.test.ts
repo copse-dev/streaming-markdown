@@ -17,6 +17,13 @@ import { sanitizeRenderedMarkdown } from './sanitize.ts'
 // setup above is imported only for the sanitizer; it also installs the hljs
 // backend as the process default, so each phase below supplies the shiki
 // highlighter through per-render config instead.
+//
+// Every load passes NO_TIME_LIMIT. shiki cuts a line short once tokenizing it
+// takes over 500ms, and a grammar's first highlight includes the JavaScript
+// regex engine compiling its patterns — which on a busy machine overruns the
+// budget and returns the whole line as one token, failing assertions about
+// token boundaries for reasons unrelated to this backend.
+const NO_TIME_LIMIT = { tokenizeTimeLimit: 0 } as const
 
 describe('lazy highlighting via the shiki backend', () => {
   before(() => {
@@ -39,7 +46,7 @@ describe('lazy highlighting via the shiki backend', () => {
   })
 
   it('upgrades to color-class token spans after loadShiki resolves', async () => {
-    const backend = await loadShiki()
+    const backend = await loadShiki(NO_TIME_LIMIT)
     assert.equal(backend, shikiHighlighter)
 
     const html = renderMarkdownUnsafe('```ts\nconst x = 1 < 2\n```', { codeHighlighter: backend })
@@ -137,7 +144,7 @@ describe('installShiki (sync facade, background load)', () => {
   })
 
   it('returns the facade immediately and upgrades once loading completes', async () => {
-    const backend = installShiki()
+    const backend = installShiki(NO_TIME_LIMIT)
     assert.equal(backend, shikiHighlighter)
     // Synchronously after install the library isn't loaded yet: plain text.
     assert.equal(shikiHighlighter.highlight('const x = 1', 'typescript'), 'const x = 1')
@@ -169,7 +176,7 @@ describe('loadShiki options (custom theme and grammar set)', () => {
   })
 
   it('loads a theme registration object and a narrowed grammar list', async () => {
-    await loadShiki({ theme: testTheme, langs: ['typescript'] })
+    await loadShiki({ theme: testTheme, langs: ['typescript'], ...NO_TIME_LIMIT })
 
     // Keyword color from the custom theme (`=` is keyword.operator in the TS
     // grammar), lowercased into the class name.
@@ -187,5 +194,149 @@ describe('loadShiki options (custom theme and grammar set)', () => {
     assert.match(css, /^\.shiki-112233 \{ color: #112233 \}$/m)
     assert.doesNotMatch(css, /aabbcc/, 'no rule for the default foreground')
     assert.match(css, /^\.shiki-underline \{ text-decoration: underline \}$/m)
+  })
+})
+
+describe('loadShiki option validation and lookup', () => {
+  before(() => {
+    __resetShikiForTests()
+  })
+
+  it('rejects `theme` and `themes` together', async () => {
+    // The type forbids it; a JS caller (or a cast) gets a clear rejection
+    // instead of one option silently winning.
+    const options = { theme: 'github-dark', themes: { light: 'github-light', dark: 'github-dark' } }
+    await assert.rejects(loadShiki(options as never), /either `theme` or `themes`/)
+    __resetShikiForTests()
+  })
+
+  it('rejects an unknown grammar or theme name from the lazy maps', async () => {
+    await assert.rejects(loadShiki({ langs: ['not-a-grammar'] }), /unknown shiki language "not-a-grammar"/)
+    __resetShikiForTests()
+    await assert.rejects(loadShiki({ theme: 'not-a-theme' }), /unknown shiki theme "not-a-theme"/)
+    __resetShikiForTests()
+    // Own keys only: a prototype property is not a grammar.
+    await assert.rejects(loadShiki({ langs: ['constructor'] }), /unknown shiki language "constructor"/)
+    __resetShikiForTests()
+  })
+})
+
+describe('loadShiki light/dark themes', () => {
+  // Two minimal custom themes so the class names are known: each has its own
+  // default foreground, keyword color and comment style. The dark theme's
+  // keyword color is its default foreground, so `=` carries a LIGHT class only
+  // — the case a scoped stylesheet must handle without leaking light colors
+  // into dark mode.
+  const lightTheme = {
+    name: 'smd-test-light',
+    type: 'light',
+    colors: {},
+    settings: [
+      { settings: { foreground: '#101010' } },
+      { scope: 'comment', settings: { foreground: '#00aa00', fontStyle: 'italic' } },
+      { scope: 'keyword', settings: { foreground: '#112233' } },
+    ],
+  }
+  const darkTheme = {
+    name: 'smd-test-dark',
+    type: 'dark',
+    colors: {},
+    settings: [
+      { settings: { foreground: '#eeeeee' } },
+      { scope: 'comment', settings: { foreground: '#88ff88', fontStyle: 'bold' } },
+      { scope: 'keyword', settings: { foreground: '#eeeeee' } },
+      { scope: 'constant.numeric', settings: { foreground: '#ffaa00' } },
+    ],
+  }
+
+  before(async () => {
+    __resetShikiForTests()
+    await loadShiki({ themes: { light: lightTheme, dark: darkTheme }, langs: ['typescript'], ...NO_TIME_LIMIT })
+  })
+
+  it('emits classes for both themes on each token, from one markup', () => {
+    const html = shikiHighlighter.highlight('const x = 1 // hi', 'typescript')
+    // Keyword: light color only (the dark color is the dark default foreground).
+    assert.match(html, /<span class="shiki-112233">=<\/span>/)
+    // Numeric: dark color only (light has no rule for it → its default fg).
+    assert.match(html, /<span class="shiki-dark-ffaa00">1<\/span>/)
+    // Comment: both colors and each theme's own font style.
+    assert.match(html, /<span class="shiki-00aa00 shiki-italic shiki-dark-88ff88 shiki-dark-bold">\/\/ hi<\/span>/)
+    // Default in both themes: bare text.
+    assert.match(html, /^const x <span/)
+    assert.doesNotMatch(html, /style=/)
+    // Verbatim text across lines.
+    const code = 'const a = 1\n\n  // c'
+    assert.equal(shikiHighlighter.highlight(code, 'typescript').replace(/<span[^>]*>|<\/span>/g, ''), code)
+  })
+
+  it('output passes the sink sanitizer unmangled', () => {
+    const html = renderMarkdownUnsafe('```ts\nconst n = 1 // note\n```', { codeHighlighter: shikiHighlighter })
+    assert.equal(sanitizeRenderedMarkdown(html), html)
+    assert.match(html, /shiki-dark-/)
+  })
+
+  it('shikiThemeCss scopes each theme by prefers-color-scheme by default', () => {
+    assert.equal(
+      shikiThemeCss(),
+      [
+        '@media (prefers-color-scheme: light) {',
+        '  .shiki-00aa00 { color: #00aa00 }',
+        '  .shiki-112233 { color: #112233 }',
+        '  .shiki-italic { font-style: italic }',
+        '  .shiki-bold { font-weight: bold }',
+        '  .shiki-underline { text-decoration: underline }',
+        '  .shiki-strikethrough { text-decoration: line-through }',
+        '}',
+        '@media (prefers-color-scheme: dark) {',
+        '  .shiki-dark-88ff88 { color: #88ff88 }',
+        '  .shiki-dark-ffaa00 { color: #ffaa00 }',
+        '  .shiki-dark-italic { font-style: italic }',
+        '  .shiki-dark-bold { font-weight: bold }',
+        '  .shiki-dark-underline { text-decoration: underline }',
+        '  .shiki-dark-strikethrough { text-decoration: line-through }',
+        '}',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('shikiThemeCss scopes dark under a host selector when given one', () => {
+    const css = shikiThemeCss({ darkSelector: '[data-theme="dark"], .dark' })
+    assert.match(
+      css,
+      /^\.shiki-112233:where\(:not\(:is\(\[data-theme="dark"\], \.dark\) \*\)\) \{ color: #112233 \}$/m,
+    )
+    assert.match(css, /^:where\(\[data-theme="dark"\], \.dark\) \.shiki-dark-ffaa00 \{ color: #ffaa00 \}$/m)
+    assert.match(css, /^:where\(\[data-theme="dark"\], \.dark\) \.shiki-dark-bold \{ font-weight: bold \}$/m)
+    assert.doesNotMatch(css, /@media/)
+  })
+
+  it('the selector-scoped rules pick exactly one theme per subtree in a real DOM', () => {
+    // jsdom implements selector matching (not the cascade), which is enough to
+    // check the scoping: each class matches its rule only in its own mode.
+    const css = shikiThemeCss({ darkSelector: '[data-theme="dark"]' })
+    const selectors = css
+      .trim()
+      .split('\n')
+      .map((rule) => rule.slice(0, rule.indexOf(' {')))
+    const root = document.createElement('div')
+    root.innerHTML =
+      '<div><span class="shiki-112233 shiki-dark-ffaa00"></span></div>' +
+      '<div data-theme="dark"><span class="shiki-112233 shiki-dark-ffaa00"></span></div>'
+    document.body.append(root)
+    const matching = (span: Element) => selectors.filter((selector) => span.matches(selector))
+    const [lightSpan, darkSpan] = root.querySelectorAll('span')
+    assert.deepEqual(matching(lightSpan!), ['.shiki-112233:where(:not(:is([data-theme="dark"]) *))'])
+    assert.deepEqual(matching(darkSpan!), [':where([data-theme="dark"]) .shiki-dark-ffaa00'])
+    root.remove()
+  })
+
+  it('a single theme ignores darkSelector (unscoped rules, as before)', async () => {
+    __resetShikiForTests()
+    await loadShiki({ theme: lightTheme, langs: ['typescript'], ...NO_TIME_LIMIT })
+    assert.equal(shikiThemeCss({ darkSelector: '.dark' }), shikiThemeCss())
+    assert.match(shikiThemeCss(), /^\.shiki-112233 \{ color: #112233 \}$/m)
+    assert.doesNotMatch(shikiHighlighter.highlight('const x = 1 // hi', 'typescript'), /shiki-dark-/)
   })
 })

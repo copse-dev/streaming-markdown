@@ -200,11 +200,56 @@ and `shell` ids). The first `loadShiki`/`installShiki` call can override both:
 await loadShiki({ theme: 'vitesse-light', langs: ['typescript', 'python'] })
 ```
 
-`theme` is a bundled shiki theme name or a pre-resolved theme registration
-object; `langs` are shiki grammar names. Two behavioural mismatches with the
-hljs backend: shiki has no auto-detection, so fences with an *empty* info string
-stay plain text, and grammars you drop from `langs` fall back to plain text even
-though the core still resolves their ids.
+`theme` is a bundled shiki theme name (a key of shiki's `bundledThemes`) or a
+pre-resolved theme registration object; `langs` are shiki grammar names or
+aliases (keys of `bundledLanguages`). An unknown name rejects the load. Two
+behavioural mismatches with the hljs backend: shiki has no auto-detection, so
+fences with an *empty* info string stay plain text, and grammars you drop from
+`langs` fall back to plain text even though the core still resolves their ids.
+
+**Tokenizing budget.** shiki stops tokenizing a line after 500ms and emits the
+rest of it as one token. A grammar's first highlight also pays the JavaScript
+regex engine's lazy compilation of its patterns, so on a slow or busy device the
+first fence after loading can come out mostly one color until it re-renders.
+`loadShiki({ tokenizeTimeLimit })` passes a different budget through; `0`
+disables it.
+
+**Light and dark.** Pass `themes: { light, dark }` instead of `theme` (the two
+are mutually exclusive) to highlight for both at once. Every token then carries
+the light theme's classes (`shiki-<hex>`, `shiki-italic`, … — the same names as
+a single theme) *and* the dark theme's (`shiki-dark-<hex>`,
+`shiki-dark-italic`, …), so one rendered message serves both modes and
+switching never re-renders. `shikiThemeCss()` scopes the two sets so exactly one
+applies:
+
+```ts
+await loadShiki({ themes: { light: 'github-light', dark: 'github-dark' } })
+
+// Follow the OS: light rules in @media (prefers-color-scheme: light), dark in (… dark).
+injectCss(shikiThemeCss())
+
+// Or let the app decide: dark under a matching ANCESTOR, light everywhere else
+// (the OS preference is then ignored — set the attribute from matchMedia if you
+// want "system" as one of your choices).
+injectCss(shikiThemeCss({ darkSelector: '[data-theme="dark"]' }))
+```
+
+`darkSelector` may be a selector list (`'.dark, [data-theme="dark"]'`). Every
+generated rule keeps the specificity of a single class, as in single-theme mode,
+so your overrides behave the same. Tokens in a theme's default foreground carry
+no class for that theme, so set your code block's text color per mode too (to
+each theme's default foreground). With a single `theme`, `darkSelector` is
+ignored and the stylesheet is unscoped, as before. Markup stays classes only —
+no inline `style` — so the sanitizer contract is unchanged.
+
+**Bundlers.** Every shiki import in the backend is a string literal —
+`shiki/core`, `shiki/engine/javascript`, and grammars/themes through shiki's own
+lazy maps (`shiki/langs`, `shiki/themes`) — so webpack, Vite/Rollup and esbuild
+resolve the peer and split it into lazy chunks: one per grammar and theme, of
+which only the ones named in the options are fetched (the bundler still *emits*
+a file for each map entry). The KaTeX backend's `import('katex')` is a literal
+too. No shiki or katex type appears in the published `.d.ts`, so a TypeScript
+consumer that never imports these subpaths doesn't need either peer installed.
 
 ## Custom fenced blocks (fence handlers)
 

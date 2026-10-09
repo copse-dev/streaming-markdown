@@ -24,12 +24,21 @@ interface KatexLike {
 
 let katexLib: KatexLike | null = null
 
-// The specifier is held in a const so the compiler treats it as a runtime-only
-// dynamic import — the package builds and type-checks without the optional
-// `katex` peer installed, and bundlers still code-split it into its own chunk.
-const KATEX_SPECIFIER = 'katex'
+// A LITERAL dynamic import, so every bundler (webpack, Vite/Rollup, esbuild)
+// can resolve the peer and split it into its own lazy chunk. A non-literal
+// specifier (an earlier version held it in a const) is unresolvable statically:
+// webpack warns "Critical dependency: the request of a dependency is an
+// expression" and the import then fails at runtime in the host's bundle.
+//
+// The literal costs nothing on the package side: `katex` is a devDependency, so
+// it is always present when this package type-checks and builds, and nothing
+// from it reaches the emitted `.d.ts` — the importer is typed
+// `() => Promise<unknown>` and narrowed to the structural {@link KatexLike}
+// below — so a consumer who never imports this subpath needs neither the peer
+// nor its types.
 type KatexImporter = () => Promise<unknown>
-let importKatex: KatexImporter = () => import(KATEX_SPECIFIER)
+const importKatexPeer: KatexImporter = () => import('katex')
+let importKatex: KatexImporter = importKatexPeer
 
 /**
  * @internal Test seam. The suite injects a fake module here to exercise the
@@ -37,7 +46,7 @@ let importKatex: KatexImporter = () => import(KATEX_SPECIFIER)
  * Passing `null` restores the real importer.
  */
 export function __setKatexImporterForTests(fn: KatexImporter | null): void {
-  importKatex = fn ?? (() => import(KATEX_SPECIFIER))
+  importKatex = fn ?? importKatexPeer
   katexLib = null
 }
 
