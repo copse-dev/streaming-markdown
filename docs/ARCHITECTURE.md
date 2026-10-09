@@ -446,6 +446,15 @@ list-style-position: outside`). Bullets should sit clearly inset from headings, 
   Before render, `prepareMermaidSource` / `mermaidSourceCandidates` decode entities and quote brittle
   `[labels]`. We call `mermaid.run` directly (no pre-parse gate — parse rejects some diagrams that
   still render). On failure after an aggressive retry, show the inline source fallback.
+- **Table wrapper (opt-in).** `tableWrapper` wraps every table in
+  `div.table-wrapper[role=region][aria-label][tabindex=0]` (`table-wrapper.ts`). It is
+  part of the block markup on all three paths — `renderTable`, the string emitter's
+  `buildFormingTableHtml`, and the DOM emitter's `syncFormingTableDom` (which reuses the
+  forming wrapper across updates) — so the morph keeps one wrapper/table pair from commit
+  to settle. The pending-row string splice (`appendPendingTableRowHtml`) anchors on the
+  trailing `</table>`, so the wrapper's `</div>` never displaces it. The sink admits
+  `role`/`tabindex` only while the option is on and gates them to the wrapper shape
+  (`withTableWrapperGate`); see SECURITY.md.
 - **Table layout.** Agent tables are unschema'd GFM — do not hardcode rem/% column widths for
   specific fixtures. Use shrink-to-fit edge columns (`width: 1%` + `nowrap`), `min-width: 0` on
   cells, and wrapping lone `<code>` slugs. Full rules live in the consuming app's UI docs.

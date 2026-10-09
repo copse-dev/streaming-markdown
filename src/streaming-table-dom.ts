@@ -5,6 +5,7 @@ import { escapeHtml } from './escape.ts'
 import { renderStreamingInlinePending } from './render-pending-line.ts'
 import { sanitizeRenderedMarkdown, type SanitizedHtml } from './sanitize.ts'
 import { setPresanitizedHtml } from './html-sink.ts'
+import { createTableWrapperElement, resolveTableWrapper, wrapTableHtml } from './table-wrapper.ts'
 
 const FORMING_TABLE_CLASS = 'stream-table-forming'
 const PENDING_ROW_CLASS = 'stream-pending-row'
@@ -53,18 +54,23 @@ export function syncFormingTableDom(container: HTMLElement, source: string): voi
     return
   }
 
+  // With `tableWrapper` on, the forming table lives inside the scroll region
+  // from its first paint (the committed render wraps it the same way), so the
+  // region never appears around an already-visible table mid-stream.
+  const parent = formingTableParent(container)
+
   // The forming table is only ever created as a direct child — direct scan,
   // no selector engine (this path runs per update while a table streams).
-  const existing = firstDirectChild(container, 'TABLE', FORMING_TABLE_CLASS)
+  const existing = firstDirectChild(parent, 'TABLE', FORMING_TABLE_CLASS)
   let table: HTMLTableElement
   if (existing instanceof Element && existing.tagName === 'TABLE') {
     table = existing as HTMLTableElement
   } else {
-    container.replaceChildren()
+    parent.replaceChildren()
     table = document.createElement('table')
     table.className = FORMING_TABLE_CLASS
     table.append(document.createElement('thead'), document.createElement('tbody'))
-    container.appendChild(table)
+    parent.appendChild(table)
   }
 
   const thead = table.tHead ?? table.createTHead()
@@ -99,6 +105,24 @@ export function syncFormingTableDom(container: HTMLElement, source: string): voi
     }
     syncRowCells(row, splitTableRow(line), 'td')
   }
+}
+
+/**
+ * Where the forming table goes: the container itself, or — with `tableWrapper`
+ * on — the wrapper `<div>` that is its first child, reused across updates (and
+ * created, replacing whatever the container held, on the first one).
+ */
+function formingTableParent(container: HTMLElement): HTMLElement {
+  const wrapper = resolveTableWrapper()
+  if (!wrapper) return container
+  // Exact `class` equality (not `classList.contains`) — the sink gate's test
+  // too — so a multi-token `className` matches and nothing can throw. Only the
+  // forming sync writes this container, so the class alone identifies it.
+  const first = container.firstElementChild
+  if (first?.getAttribute('class') === wrapper.className) return first as HTMLElement
+  const div = createTableWrapperElement(wrapper)
+  container.replaceChildren(div)
+  return div
 }
 
 /** Update the in-progress body row on a committed table (forward-pass cells). */
@@ -159,10 +183,19 @@ export function appendPendingTableRowHtml(rendered: string, pendingRow: string):
   }).join('')
   const pendingRowHtml = `<tr class="${PENDING_ROW_CLASS}">${rowHtml}</tr>`
 
-  const closeTbody = '</tbody>'
-  const closeIndex = rendered.lastIndexOf(closeTbody)
+  // The row belongs to the TRAILING table (`pendingLineBelongsInTable` gates on
+  // it), so anchor on the last `</table>` rather than the last `</tbody>`: a
+  // header-only trailing table has no `<tbody>` yet (spec 205), and the last
+  // `</tbody>` would then be an EARLIER table's. That case gets the `<tbody>`
+  // the DOM emitter's `syncPendingTableRowDom` creates, instead of a stray `<tr>`
+  // after the table. Anchoring on `</table>` is also what keeps the splice
+  // inside the table when `tableWrapper` adds a trailing `</div>`.
+  const closeIndex = rendered.lastIndexOf('</table>')
   if (closeIndex === -1) return `${rendered}${pendingRowHtml}`
-  return `${rendered.slice(0, closeIndex)}${pendingRowHtml}${rendered.slice(closeIndex)}`
+  const before = rendered.slice(0, closeIndex)
+  // Reopen the trailing `</tbody>` (8 chars), or open one for a header-only table.
+  const head = before.endsWith('</tbody>') ? before.slice(0, -8) : `${before}<tbody>`
+  return `${head}${pendingRowHtml}</tbody>${rendered.slice(closeIndex)}`
 }
 
 export function buildFormingTableHtml(source: string): string {
@@ -196,5 +229,5 @@ export function buildFormingTableHtml(source: string): string {
   }
 
   parts.push('</tbody></table>')
-  return parts.join('')
+  return wrapTableHtml(parts.join(''))
 }
