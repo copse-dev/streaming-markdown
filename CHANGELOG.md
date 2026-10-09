@@ -5,6 +5,89 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-10-09
+
+### Features
+
+- lazy isolated diagrams; transparent frames in dark pages (#283) (`59872ed`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.4.0...v1.5.0
+
+## [1.4.0] - 2026-10-08
+
+### Features
+
+- optional diagram viewer with zoom, pan, reset and full screen (#282) (`471e82f`)
+- mountIsolatedDiagrams mounts frames for closed fences; host element in React callbacks (#281) (`79c42ca`)
+- prebuilt isolated frame document; per-render theme, font and title (#280) (`c2c9e5b`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.3.0...v1.4.0
+
+## [1.3.0] - 2026-10-08
+
+### Features
+
+- honour indentedCode in the streaming emitters (#270) (`2ebb7aa`)
+
+### Chores
+
+- Bump the npm-minor-patch group with 3 updates (#269) (`4794b15`)
+- Bump source-map-js in /bench/competitors (#272) (`05e81a8`)
+- Bump source-map-js from 1.2.1 to 1.2.2 (#273) (`6561d46`)
+
+### Other Changes
+
+- Add optional isolated Mermaid execution adapter (#277) (`7d6e272`)
+- Pin Copse reviewer to its merged source commit (#278) (`cfb9035`)
+- Restore automatic same-repository Copse reviews (#276) (`aefcab8`)
+- Pin Copse reviewer to merged manual-review workflow (#274) (`86fcdea`)
+- Use manual Copse reviews with description summaries (#271) (`cfa0b8a`)
+- Adopt the reusable Copse Reviewer on GitHub Actions (#268) (`051a8c5`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.2.1...v1.3.0
+
+## [1.2.1] - 2026-10-03
+
+### Chores
+
+- Bump dompurify from 3.4.13 to 3.4.16 in /bench/competitors (#266) (`8e4ef3e`)
+- Bump brace-expansion from 5.0.7 to 5.0.12 (#267) (`b56d44f`)
+- Bump dompurify from 3.4.15 to 3.4.16 (#265) (`70e4d75`)
+- Bump undici from 7.29.0 to 7.30.0 in /bench/competitors (#263) (`5690a46`)
+- Bump the npm-minor-patch group with 3 updates (#262) (`f4a3709`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.2.0...v1.2.1
+
+## [1.2.0] - 2026-09-26
+
+### Features
+
+- adaptive cadence, draining finish(), syntax-aware cuts; fix pending-tail spacing (#261) (`50a8777`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.1.1...v1.2.0
+
+## [1.1.1] - 2026-09-21
+
+### Chores
+
+- Bump the npm-minor-patch group across 1 directory with 9 updates (#260) (`3f20d25`)
+- Bump the npm-minor-patch group with 2 updates (#258) (`f83aabf`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.1.0...v1.1.1
+
+## [1.1.0] - 2026-09-03
+
+### Bug Fixes
+
+- stop destroying anchors that carry data-* attributes (#257) (`cfe1660`)
+
+### Chores
+
+- Bump @types/react-dom in the npm-minor-patch group (#256) (`45764f3`)
+- Bump dompurify in the npm-minor-patch group (#254) (`fef86b5`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.0.8...v1.1.0
+
 ## [1.0.8] - 2026-08-24
 
 ### Continuous Integration

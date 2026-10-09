@@ -974,6 +974,8 @@ export class StreamingMarkdownRenderer {
   private formingEl: HTMLElement | null = null
   private pendingEl: HTMLSpanElement | null = null
   private lastComplete = ''
+  /** The text of the last `update()`/`finish()` — what a bare `finish()` finalizes. */
+  private lastContent = ''
   /** `tokenizeBlocks(lastComplete)` — cached so pending-only frames stay O(tail). */
   private committedTokens: BlockToken[] = []
   /** Whether `lastComplete` contains `|` — cached for the same reason. */
@@ -1056,8 +1058,41 @@ export class StreamingMarkdownRenderer {
 
   /** Render `content` (the full message text so far) into the host incrementally. */
   update(content: string): void {
+    this.lastContent = content
     withConfig(this.config, () => {
       this.updateWithPolicy(content)
+    })
+  }
+
+  /**
+   * End the stream: `content` (default: the text of the last {@link update}) is
+   * the final text. Mid-stream the renderer holds back what a later character
+   * could still change — a trailing `~~old` / `**bold` run, the last table row,
+   * list item or paragraph line — and shows an unclosed fence, `$$` block or
+   * table as forming scaffolding. At end of stream nothing more can arrive, so
+   * `finish()` commits the whole text: afterwards `.stream-complete` holds the
+   * at-rest render of `content` as a complete document — what `renderMarkdown`
+   * renders for `content` with its last line ended (an unclosed fence becomes
+   * a finished code block, held text is released) — and the forming and
+   * pending elements are empty and hidden.
+   *
+   * "With its last line ended": `renderMarkdown(content)` itself parses an
+   * unterminated last line provisionally in three shapes — a setext underline
+   * after a multi-line paragraph (`a\nb\n=`), a delimiter row whose column
+   * count doesn't match its header, and an invalid link reference definition —
+   * where the terminated render is the CommonMark one. For any `content` ending
+   * in a newline, and for every other shape, the two are identical.
+   *
+   * Calling {@link update} afterwards resumes streaming from whatever text it
+   * is given, exactly like any other update (including one that rewrites the
+   * content), so a host that finished too early, or reuses the renderer for a
+   * regenerated message, needs no reset. `finish()` is idempotent; call
+   * {@link hydrate} after it as after an update.
+   */
+  finish(content: string = this.lastContent): void {
+    this.lastContent = content
+    withConfig(this.config, () => {
+      this.finishWithPolicy(content)
     })
   }
 
@@ -1108,53 +1143,7 @@ export class StreamingMarkdownRenderer {
     const { complete, pending, openListItemFirstLine, blocks } = split
     const { completedEl, formingEl, pendingEl } = this.ensureNodes()
 
-    if (complete !== this.lastComplete) {
-      // Sweep the pending-tail artifacts attached since the last commit — a
-      // pending block element, a pending `<li>` (and its wrapper) inside the
-      // trailing list, a continuation span inside the trailing `<p>`/open
-      // `<li>`, the pending table row — BEFORE the commit morphs run. The
-      // morphs used to absorb them as ordinary diff noise; the frozen-tail
-      // DOM memos (ADR 0004 Phase 2) instead require the committed subtree to
-      // be exactly what the last commit left, so remove them up front (they
-      // are rebuilt from `pending` after the commit either way — at most one
-      // kind exists at a time, each sync clears the others). O(tail), and
-      // byte-equivalent to the old morph-side removal.
-      clearBlockPendingDom(completedEl, [
-        'continuation',
-        'paragraph-continuation',
-        'list-items',
-        'direct-blocks',
-      ])
-      if (this.pendingRowTable) {
-        removePendingTableRow(this.pendingRowTable)
-        this.pendingRowTable = null
-      }
-      // Tokenize `complete` once per COMMIT — incrementally (#30), consuming
-      // the full ScanAdvance (ADR 0004 Phase 2): the sealed-event stream's
-      // append-only verification (`reset`/`verifiedUpTo`) replaces the commit
-      // path's own O(prefix) byte re-check, and the sealed definition deltas
-      // already feed the cached maps below. Cache the tokens on the instance
-      // so pending-only frames (the vast majority) never re-scan at all (#21).
-      const advance = this.completeScanner.advance(complete)
-      this.committedTokens = advance.tokens
-      this.committedHasPipe = complete.includes('|')
-      // Freeze the settled prefix and re-render only the tail group (#21). Blocks
-      // that can never change again keep their node identity permanently; the
-      // fast path degrades to a full in-place morph on any uncertainty, so output
-      // is byte-identical to re-rendering the whole committed prefix.
-      this.frozenTail.update(
-        completedEl,
-        complete,
-        this.committedTokens,
-        this.completeScanner.linkRefs(complete),
-        this.completeScanner.footnoteDefs(complete),
-        advance,
-      )
-      this.lastComplete = complete
-      // A commit restructures the committed subtree, so the fast-path node
-      // bookkeeping (and its "no prior decision can change" premise) is void.
-      this.pendingFast = null
-    }
+    if (complete !== this.lastComplete) this.commit(completedEl, complete)
 
     // Inside a still-forming `<details>`: its committed children already render
     // inside the (collapsed) element, and a pending sibling here would flash the
@@ -1245,6 +1234,106 @@ export class StreamingMarkdownRenderer {
         'direct-blocks',
       ])
       syncInlinePendingDom(pendingEl, pendingInner, pendingVisible)
+    }
+  }
+
+  /**
+   * End-of-stream frame (see {@link finish}): the whole text becomes the
+   * committed prefix. "Is this construct closed?" has a definite answer once
+   * nothing more can arrive, and the committed renderer already is the at-rest
+   * renderer (the frozen tail reconciles to
+   * `sanitize(renderMarkdownUnsafe(complete))`), so no end-of-stream variant of
+   * the split or of any pending shape is needed.
+   *
+   * The commit is line-terminated: a final line without a newline gets one.
+   * Every mid-stream `complete` ends at a line boundary, and the frozen tail
+   * relies on it — it renders settled token groups separately, and an
+   * unterminated last line tokenizes provisionally (`Title\n---` as paragraph
+   * + ambiguous break; a footnote definition that a later update extends in
+   * place), which would freeze or split blocks the terminated text renders
+   * differently. End of input ends the last line in CommonMark, so this is
+   * the same document (`renderMarkdown` of an unterminated last line differs
+   * in three provisional shapes; see streaming-finish.test.ts).
+   *
+   * Going through the ordinary commit keeps the frozen-tail invariants as they
+   * are: finishing the last update's text is an append-only extension of the
+   * last commit (the scanner's `verifiedUpTo` contract holds), and a later
+   * update that retreats `complete` behind it, or rewrites it, is the same
+   * rewrite a regenerated message produces — caught by the scanner's prefix
+   * check and the frozen tail's prefix/straddle guards.
+   */
+  private finishWithPolicy(content: string): void {
+    const { completedEl, formingEl, pendingEl } = this.ensureNodes()
+    const complete = content === '' || content.endsWith('\n') ? content : `${content}\n`
+    if (complete !== this.lastComplete) {
+      this.commit(completedEl, complete)
+    } else {
+      // Nothing new to commit, so the last frame had no pending text — sweep
+      // anyway: O(tail), and it leaves the committed subtree exactly as the
+      // last commit left it whatever that frame attached.
+      this.sweepPendingTail(completedEl)
+    }
+    clearFormingDom(formingEl)
+    formingEl.hidden = true
+    syncInlinePendingDom(pendingEl, '', false)
+    this.pendingFast = null
+  }
+
+  /**
+   * Commit `complete` as the new committed prefix: sweep the pending tail, then
+   * reconcile `completedEl` to the full render of `complete` through the
+   * frozen-tail renderer.
+   */
+  private commit(completedEl: HTMLElement, complete: string): void {
+    this.sweepPendingTail(completedEl)
+    // Tokenize `complete` once per COMMIT — incrementally (#30), consuming
+    // the full ScanAdvance (ADR 0004 Phase 2): the sealed-event stream's
+    // append-only verification (`reset`/`verifiedUpTo`) replaces the commit
+    // path's own O(prefix) byte re-check, and the sealed definition deltas
+    // already feed the cached maps below. Cache the tokens on the instance
+    // so pending-only frames (the vast majority) never re-scan at all (#21).
+    const advance = this.completeScanner.advance(complete)
+    this.committedTokens = advance.tokens
+    this.committedHasPipe = complete.includes('|')
+    // Freeze the settled prefix and re-render only the tail group (#21). Blocks
+    // that can never change again keep their node identity permanently; the
+    // fast path degrades to a full in-place morph on any uncertainty, so output
+    // is byte-identical to re-rendering the whole committed prefix.
+    this.frozenTail.update(
+      completedEl,
+      complete,
+      this.committedTokens,
+      this.completeScanner.linkRefs(complete),
+      this.completeScanner.footnoteDefs(complete),
+      advance,
+    )
+    this.lastComplete = complete
+    // A commit restructures the committed subtree, so the fast-path node
+    // bookkeeping (and its "no prior decision can change" premise) is void.
+    this.pendingFast = null
+  }
+
+  /**
+   * Sweep the pending-tail artifacts attached since the last commit — a
+   * pending block element, a pending `<li>` (and its wrapper) inside the
+   * trailing list, a continuation span inside the trailing `<p>`/open `<li>`,
+   * the pending table row. The commit morphs used to absorb them as ordinary
+   * diff noise; the frozen-tail DOM memos (ADR 0004 Phase 2) instead require
+   * the committed subtree to be exactly what the last commit left, so they go
+   * before any commit (they are rebuilt from `pending` afterwards either way —
+   * at most one kind exists at a time, each sync clears the others). O(tail),
+   * and byte-equivalent to the old morph-side removal.
+   */
+  private sweepPendingTail(completedEl: HTMLElement): void {
+    clearBlockPendingDom(completedEl, [
+      'continuation',
+      'paragraph-continuation',
+      'list-items',
+      'direct-blocks',
+    ])
+    if (this.pendingRowTable) {
+      removePendingTableRow(this.pendingRowTable)
+      this.pendingRowTable = null
     }
   }
 

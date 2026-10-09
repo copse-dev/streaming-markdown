@@ -20,8 +20,24 @@ export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => HTML_ESCAPES[ch] ?? ch)
 }
 
+/**
+ * Renderer-generated tags that survive the text-escaping pass, matched by SHAPE.
+ * The `<a>` arm admits any `data-*` attribute (value optional, as in the
+ * renderer's own valueless `data-footnote-ref`) rather than a list of names:
+ * #146 evicted the host-specific `data-browser-link` / `data-workspace-link`
+ * from both allowlists but gave only the sink a replacement hook, so a host
+ * `linkDecorator` emitting them had its whole `<a …>` escaped to literal text
+ * while the matching `</a>` (a separate arm) survived, leaving a stray close
+ * tag. `isSanctionedRendererTag` re-validates content either way, and anything
+ * this misses degrades through {@link narrowAnchor} instead of being destroyed.
+ */
+// Regex *literals*, not `new RegExp` over a shared source string: this module is
+// pulled in by entries that want only `escapeHtml` (the shiki highlighter, say),
+// and a literal tree-shakes out of those bundles where a constructed one does
+// not. `data-attributes.test.ts` pins these against `DATA_ATTR_NAME_SOURCE` so
+// the duplicated `data-*` shape still cannot drift.
 const SAFE_OUTER_TAG_RE =
-  /^(?:<a(?:\s+href="[^"]*")(?:\s+(?:title|target|rel|class)="[^"]*")*\s*>|<\/(?:a|code|em|strong)>|<(?:code|em|strong)\b[^>]*>|<img\b[^>]*\bdata-md-rendered="1"[^>]*\/?>)$/i
+  /^(?:<a(?:\s+href="[^"]*")(?:\s+(?:(?:title|target|rel|class)="[^"]*"|data-[a-z0-9-]+(?:="[^"]*")?))*\s*>|<\/(?:a|code|em|strong)>|<(?:code|em|strong)\b[^>]*>|<img\b[^>]*\bdata-md-rendered="1"[^>]*\/?>)$/i
 
 /**
  * Benign raw inline HTML models emit in prose (strikethrough, sub/superscript,
@@ -81,21 +97,79 @@ function isSanctionedRendererTag(tag: string): boolean {
  */
 const PASSTHROUGH_TAG_RE = /^<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?\/?>$/
 
-function keepRawTag(part: string, policy: HtmlPolicy): boolean {
-  if (policy === 'passthrough') return PASSTHROUGH_TAG_RE.test(part)
+/** Whole-name test for the attributes {@link narrowAnchor} keeps. */
+const SAFE_ANCHOR_ATTR_NAME_RE = /^(?:href|title|target|rel|class|data-[a-z0-9-]+)$/i
+
+/** One attribute inside an open tag: a name, optionally with a quoted value. */
+const TAG_ATTR_RE = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*"([^"]*)")?/g
+
+/** An open `<a>` tag carrying at least one attribute, captured for narrowing. */
+const ANCHOR_OPEN_TAG_RE = /^<a\s+([^>]*?)\s*>$/i
+
+/** A double-quoted `href`, the shape every renderer/decorator anchor has. */
+const QUOTED_HREF_RE = /\bhref\s*=\s*"/i
+
+/**
+ * Fail-safe for an anchor {@link SAFE_OUTER_TAG_RE} does not recognise: re-emit
+ * it carrying only the allowlisted attributes instead of escaping it whole.
+ *
+ * The all-or-nothing test this backstops fails *badly*, not safely — `</a>` is a
+ * separate arm and survives on its own, so one unrecognised attribute turns a
+ * link into escaped source text followed by a stray unbalanced close tag (#146's
+ * `data-*` fallout was one instance; any attribute the core or a host adds later
+ * is the next). Degrading to a narrowed anchor keeps the markup well-formed and
+ * keeps the decision conservative: the tag is rebuilt from the allowlist, so an
+ * unknown attribute is dropped rather than passed on to the sink, and
+ * `isSanctionedRendererTag` still rejects event handlers and dangerous schemes.
+ *
+ * Requires a quoted `href` — the shape the renderer and every decorator emit,
+ * and the only one `isSanctionedRendererTag` can read a scheme out of. An
+ * unquoted `<a href=javascript:…>` therefore still escapes whole, as before.
+ */
+function narrowAnchor(tag: string): string | null {
+  const body = ANCHOR_OPEN_TAG_RE.exec(tag)?.[1]
+  if (body === undefined || !QUOTED_HREF_RE.test(body)) return null
+  if (!isSanctionedRendererTag(tag)) return null
+  const kept: string[] = []
+  let hasHref = false
+  for (const [, rawName = '', value] of body.matchAll(TAG_ATTR_RE)) {
+    const name = rawName.toLowerCase()
+    if (!SAFE_ANCHOR_ATTR_NAME_RE.test(name)) continue
+    if (name === 'href') {
+      // The guard above can be satisfied by a `href="` *inside* another
+      // attribute's value, so confirm a real one survived the scan: this
+      // salvages links, and an `<a>` with no href is not one.
+      if (value === undefined) continue
+      hasHref = true
+    }
+    // Values came out of a `<[^>]+>` split inside double quotes, so they carry
+    // no `<`, `>` or `"` and need no re-escaping to be re-emitted.
+    kept.push(value === undefined ? name : `${name}="${value}"`)
+  }
+  return hasHref ? `<a ${kept.join(' ')}>` : null
+}
+
+/** The HTML to emit for a raw tag, or `null` to escape it as literal text. */
+function safeRawTag(part: string, policy: HtmlPolicy): string | null {
+  if (policy === 'passthrough') return PASSTHROUGH_TAG_RE.test(part) ? part : null
   // Renderer-generated tags (re-validated for forged content) always survive —
-  // this escaper runs over the renderer's own output.
-  if (SAFE_OUTER_TAG_RE.test(part) && isSanctionedRendererTag(part)) return true
+  // this escaper runs over the renderer's own output. Verbatim, so output for
+  // everything this arm already matched stays byte-identical.
+  if (SAFE_OUTER_TAG_RE.test(part) && isSanctionedRendererTag(part)) return part
+  // Only then: salvage an anchor the shape test missed rather than mangle it.
+  const narrowed = narrowAnchor(part)
+  if (narrowed !== null) return narrowed
   // Escape policy keeps the benign attribute-less inline allowlist;
   // escape-all literalizes everything but the void <br>.
-  return policy === 'escape-all' ? BR_TAG_RE.test(part) : BENIGN_RAW_INLINE_TAG_RE.test(part)
+  const keep = policy === 'escape-all' ? BR_TAG_RE.test(part) : BENIGN_RAW_INLINE_TAG_RE.test(part)
+  return keep ? part : null
 }
 
 function escapeHtmlOutsideSafeTags(html: string): string {
   const policy = getHtmlPolicy()
   return html
     .split(/(<[^>]+>)/g)
-    .map((part) => (part.startsWith('<') && keepRawTag(part, policy) ? part : escapeHtml(part)))
+    .map((part) => (part.startsWith('<') ? (safeRawTag(part, policy) ?? escapeHtml(part)) : escapeHtml(part)))
     .join('')
 }
 

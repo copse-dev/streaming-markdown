@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { StreamingMarkdownRenderer } from './streaming.ts'
+import { renderMarkdown } from './renderer.ts'
 import { Markdown, StreamingMarkdown } from './react.tsx'
 
 /** Mount `element` into a fresh container and flush synchronously (effects included). */
@@ -98,6 +99,76 @@ describe('<StreamingMarkdown> (incremental)', () => {
     )
     const host = container.firstElementChild as HTMLElement
     assert.match(host.innerHTML, /target="_blank"/)
+    flushSync(() => root.unmount())
+  })
+})
+
+describe('<StreamingMarkdown final>', () => {
+  const text = 'Intro.\n\n| a | b |\n| - | - |\n| 1 | ~~old'
+  const complete = (container: HTMLElement): HTMLElement =>
+    container.querySelector('.stream-complete') as HTMLElement
+
+  it('calls finish() once final is set, releasing what streaming held back', () => {
+    const { container, root } = mount(<StreamingMarkdown markdown={text} />)
+    assert.doesNotMatch(complete(container).innerHTML, /old/, 'held while streaming')
+    const host = complete(container)
+    flushSync(() => root.render(<StreamingMarkdown markdown={text} final />))
+    assert.equal(complete(container), host, 'same renderer and host, no remount')
+    assert.equal(complete(container).innerHTML, renderMarkdown(text))
+    flushSync(() => root.unmount())
+  })
+
+  it('finishes on mount when final is set from the start', () => {
+    const { container, root } = mount(<StreamingMarkdown markdown={'```js\nconst a'} final />)
+    assert.equal(complete(container).innerHTML, renderMarkdown('```js\nconst a'))
+    assert.equal(container.querySelector('.stream-fence-forming'), null)
+    flushSync(() => root.unmount())
+  })
+
+  it('resumes streaming when final is cleared or more text arrives without it', () => {
+    const { container, root } = mount(<StreamingMarkdown markdown="The ~~old" final />)
+    assert.match(complete(container).innerHTML, /~~old/)
+    flushSync(() => root.render(<StreamingMarkdown markdown="The ~~old~~ new" />))
+    const fresh = document.createElement('div')
+    new StreamingMarkdownRenderer(fresh).update('The ~~old~~ new')
+    assert.equal(container.firstElementChild!.innerHTML, fresh.innerHTML)
+    flushSync(() => root.unmount())
+  })
+
+  it('runs onUpdate after the finishing call', () => {
+    const seen: string[] = []
+    const onUpdate = (_renderer: StreamingMarkdownRenderer, host: HTMLElement) =>
+      seen.push(host.querySelector('.stream-complete')!.innerHTML)
+    const { root } = mount(<StreamingMarkdown markdown="Last **words" onUpdate={onUpdate} />)
+    flushSync(() => root.render(<StreamingMarkdown markdown="Last **words" final onUpdate={onUpdate} />))
+    assert.equal(seen.at(-1), renderMarkdown('Last **words'))
+    flushSync(() => root.unmount())
+  })
+})
+
+describe('host callbacks (onUpdate host, onRender)', () => {
+  it('passes the attached host to onUpdate on mount and on every update', () => {
+    const calls: { renderer: StreamingMarkdownRenderer; host: HTMLElement; connected: boolean }[] = []
+    const onUpdate = (renderer: StreamingMarkdownRenderer, host: HTMLElement) =>
+      calls.push({ renderer, host, connected: host.isConnected })
+    const { container, root } = mount(<StreamingMarkdown markdown="Hello" onUpdate={onUpdate} />)
+    flushSync(() => root.render(<StreamingMarkdown markdown="Hello **world**" onUpdate={onUpdate} />))
+    // Mount runs both layout effects (construct + update), so expect at least one call each for the
+    // mount and the update; every one must see the attached host.
+    assert.ok(calls.length >= 2)
+    assert.ok(calls.every((call) => call.connected && call.host === container.firstElementChild))
+    assert.ok(calls[0]!.renderer instanceof StreamingMarkdownRenderer)
+    flushSync(() => root.unmount())
+  })
+
+  it('calls onRender with the host after each at-rest write', () => {
+    const seen: string[] = []
+    const onRender = (host: HTMLElement) => seen.push(host.innerHTML)
+    const { container, root } = mount(<Markdown markdown="**a**" onRender={onRender} />)
+    flushSync(() => root.render(<Markdown markdown="**b**" onRender={onRender} />))
+    assert.equal(seen.length, 2)
+    assert.match(seen[1]!, /<strong>b<\/strong>/)
+    assert.equal(container.firstElementChild!.innerHTML, seen[1])
     flushSync(() => root.unmount())
   })
 })

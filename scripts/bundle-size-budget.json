@@ -25,15 +25,15 @@
     },
     "./highlighters/shiki": {
       "file": "dist/highlight-shiki.js",
-      "gzipBudget": 1361
+      "gzipBudget": 1780
     },
     "./smoothing": {
       "file": "dist/smoothing.js",
-      "gzipBudget": 680
+      "gzipBudget": 1130
     },
     "./sanitizers/browser": {
       "file": "dist/sanitize-browser.js",
-      "gzipBudget": 590
+      "gzipBudget": 640
     },
     "./diagrams/mermaid": {
       "file": "dist/mermaid-mermaidjs.js",
@@ -63,6 +63,10 @@
         "./html-sink.js",
         "./streaming.js"
       ]
+    },
+    "./diagrams/mermaid/viewer": {
+      "file": "dist/mermaid-viewer.js",
+      "gzipBudget": 1970
     }
   }
 }

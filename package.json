@@ -1,6 +1,6 @@
 {
   "name": "@copse/streaming-markdown",
-  "version": "1.0.8",
+  "version": "1.5.0",
   "description": "Streaming-capable CommonMark markdown renderer (string HTML + incremental DOM emitters)",
   "license": "Apache-2.0",
   "type": "module",
@@ -85,7 +85,30 @@
     },
     "./styles/core.css": "./styles/core.css",
     "./styles/default.css": "./styles/default.css",
-    "./styles/cjk.css": "./styles/cjk.css"
+    "./styles/cjk.css": "./styles/cjk.css",
+    "./styles/diagram-viewer.css": "./styles/diagram-viewer.css",
+    "./diagrams/mermaid/isolated": {
+      "types": "./dist/mermaid-isolated.d.ts",
+      "import": "./dist/mermaid-isolated.js",
+      "default": "./dist/mermaid-isolated.js"
+    },
+    "./diagrams/mermaid/viewer": {
+      "types": "./dist/mermaid-viewer.d.ts",
+      "import": "./dist/mermaid-viewer.js",
+      "default": "./dist/mermaid-viewer.js"
+    },
+    "./diagrams/mermaid/frame": {
+      "types": "./dist/mermaid-frame-runtime.d.ts",
+      "import": "./dist/mermaid-frame-runtime.js",
+      "default": "./dist/mermaid-frame-runtime.js"
+    },
+    "./diagrams/mermaid/build": {
+      "types": "./dist/mermaid-frame-document.d.ts",
+      "import": "./dist/mermaid-frame-document.js",
+      "default": "./dist/mermaid-frame-document.js"
+    },
+    "./diagrams/mermaid/frame.html": "./dist/mermaid-frame.html",
+    "./diagrams/mermaid/frame.json": "./dist/mermaid-frame.json"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -102,11 +125,11 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc -p tsconfig.build.json",
-    "build:demo": "npm run build && rm -f docs/streaming-markdown.*.mjs && esbuild docs/browser-entry.mjs --bundle --splitting --format=esm --platform=browser --outdir=docs --out-extension:.js=.mjs --entry-names=streaming-markdown.browser --chunk-names=streaming-markdown.[name]-[hash]",
+    "build": "npm run clean && tsc -p tsconfig.build.json && tsx scripts/build-mermaid-frame.mts",
+    "build:demo": "npm run build && rm -f docs/streaming-markdown.*.mjs && esbuild docs/browser-entry.mjs --bundle --splitting --external:katex --external:shiki --external:mermaid --format=esm --platform=browser --outdir=docs --out-extension:.js=.mjs --entry-names=streaming-markdown.browser --chunk-names=streaming-markdown.[name]-[hash]",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
-    "test:e2e": "node --import tsx --test tests/trusted-types.e2e.test.ts",
+    "test:e2e": "node --import tsx --test tests/trusted-types.e2e.test.ts tests/mermaid-isolated.e2e.test.ts tests/mermaid-viewer.e2e.test.ts",
     "coverage": "c8 npm test",
     "coverage:check": "node --import tsx scripts/coverage-gate.mts",
     "coverage:update": "node --import tsx scripts/coverage-gate.mts --update",
@@ -180,6 +203,7 @@
     "highlight.js": "^11.11.1",
     "jsdom": "^30.0.1",
     "katex": "^0.18.1",
+    "mermaid": "^11.17.2",
     "playwright-core": "^1.61.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

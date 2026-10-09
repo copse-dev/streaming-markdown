@@ -1,0 +1,64 @@
+/*
+ * @copse/streaming-markdown — optional diagram viewer styles
+ *
+ * Cosmetic layer for `attachDiagramViewer` (diagrams/mermaid/viewer). The viewer sets the
+ * functional styles itself (clipping, transform, pointer handling) through the CSSOM; this sheet
+ * only places and styles the controls. Restyle by overriding the class hooks or these properties:
+ *
+ *   --sm-viewer-bg        toolbar background            (rgba(127,127,127,.15))
+ *   --sm-viewer-fg        button glyph colour           (currentColor)
+ *   --sm-radius           corner radius                 (4px)
+ */
+.mermaid-viewer {
+  position: relative;
+}
+
+.mermaid-viewer:focus-visible {
+  outline: 2px solid var(--sm-accent, #007acc);
+  outline-offset: 2px;
+}
+
+.mermaid-viewer__toolbar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--sm-radius, 4px);
+  background: var(--sm-viewer-bg, rgba(127, 127, 127, 0.15));
+  cursor: default;
+}
+
+.mermaid-viewer__button {
+  min-width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--sm-radius, 4px);
+  background: transparent;
+  color: var(--sm-viewer-fg, currentColor);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mermaid-viewer__button:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.2);
+}
+
+.mermaid-viewer__button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mermaid-viewer[data-viewer-panning] {
+  user-select: none;
+}
+
+.mermaid-viewer:fullscreen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sm-viewer-fullscreen-bg, Canvas);
+}

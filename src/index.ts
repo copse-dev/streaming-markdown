@@ -37,6 +37,9 @@ export { type MarkdownConfig, setDefaultConfig } from './config.ts'
 // `renderMarkdown`/streaming `htmlPolicy`. See
 // docs/decisions/0002-raw-html-passthrough-default.md.
 export { type HtmlPolicy } from './html-policy.ts'
+// Opt-in scroll region around every GFM table — `MarkdownConfig.tableWrapper`.
+// Off by default (byte-identical output). See docs/EXTENDING.md.
+export { type TableWrapperOptions } from './table-wrapper.ts'
 export {
   renderStreamingMarkdown,
   StreamingMarkdownRenderer,

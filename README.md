@@ -45,7 +45,17 @@ for await (const chunk of stream) {
   accumulated += chunk
   renderer.update(accumulated) // incremental DOM patch, pending blocks styled while they form
 }
+renderer.finish() // end of stream: release held text, close an unclosed fence, render at rest
 ```
+
+Mid-stream the renderer holds back what the next character could still change
+(a trailing `~~run`, the last table row or list item). `finish()` tells it
+nothing more is coming: `.stream-complete` then matches `renderMarkdown` of the
+same text with its last line ended (identical to `renderMarkdown(text)` except
+in three shapes it parses provisionally without the newline; see `finish()`). A
+later `update()` resumes streaming. With the string emitter, render the
+end-of-stream frame the same way: `renderMarkdown(accumulated)`, with a final
+`\n` appended if it lacks one.
 
 ## Highlights
 
@@ -92,8 +102,11 @@ for await (const chunk of stream) {
 - **Optional reveal smoothing.** An opt-in helper
   (`@copse/streaming-markdown/smoothing`) steadies chunky token arrival into a
   smooth character-cadence reveal by throttling the *input* fed to
-  `renderer.update()`. Off by default and zero bytes unless imported; honours
-  `prefers-reduced-motion` and flushes immediately on stream end. See
+  `renderer.update()` — at a fixed rate, or adaptively following the stream's
+  own rate — and never stops a frame on half-arrived markdown syntax. Off by
+  default and zero bytes unless imported; honours `prefers-reduced-motion`,
+  and at stream end either drains briefly (`finish`) or releases at once
+  (`flush`). See
   [Input smoothing in `docs/LAZY-LOADING.md`](docs/LAZY-LOADING.md#input-smoothing--an-opt-in-reveal-cadence-84).
 
 ## Extending
@@ -210,6 +223,9 @@ transient DOM is not.
 
 ## Development
 
+Pull requests can receive advisory [Copse reviews](docs/COPSE-REVIEWER.md), running
+entirely in this repository's GitHub Actions alongside normal CI.
+
 ```bash
 npm install
 npm run typecheck   # tsc (strict, exactOptionalPropertyTypes)
@@ -218,3 +234,14 @@ npm run build       # emit dist/ (ESM JS + .d.ts)
 npm run test:e2e    # Trusted Types enforcement e2e in real Chromium (skips without a browser)
 npm run bench:browser  # sink-path throughput in real Chromium, incl. a TT-enforced page
 ```
+
+### Isolated Mermaid rendering
+
+For an opaque execution frame with hash-pinned CSP, use the optional
+[`diagrams/mermaid/isolated` adapter](docs/ISOLATED-MERMAID.md). It runs Mermaid
+entirely outside the parent document. Serve the prebuilt frame document
+(`diagrams/mermaid/frame.html`) or build your own; theme, label font and the frame's
+accessible name are per-render options. Hosts retain navigation/native API enforcement.
+The existing in-document adapter is unchanged.
+For zoom, pan, reset and full screen on a rendered diagram, the optional
+`diagrams/mermaid/viewer` adds plain-DOM controls (`styles/diagram-viewer.css` styles them).

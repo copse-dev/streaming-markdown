@@ -96,6 +96,17 @@
   & table {
     max-width: 100%;
   }
+  /* Opt-in `tableWrapper` scroll region (default class): a table wider than the
+     column — many columns, or an unbreakable URL in a cell — scrolls inside it
+     instead of overflowing the message. The table's min-content width still
+     wins over its own max-width, so the wrapper is what actually contains it.
+     overflow-y explicit for the same reason as `pre` above. A custom
+     `tableWrapper.className` needs this rule under that class. */
+  & .table-wrapper {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
   & .mermaid-diagram svg {
     display: block;
     max-width: 100%;

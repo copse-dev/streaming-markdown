@@ -6,8 +6,9 @@
  *   - {@link Markdown}          — at-rest render of a complete document
  *                                 (`renderMarkdown`), SSR-safe.
  *   - {@link StreamingMarkdown} — the incremental DOM path
- *                                 (`StreamingMarkdownRenderer.update()`), driving
- *                                 the emitter directly rather than re-rendering
+ *                                 (`StreamingMarkdownRenderer.update()`, then
+ *                                 `finish()` once `final` is set), driving the
+ *                                 emitter directly rather than re-rendering
  *                                 React per streamed token.
  *
  * React is a **peer** dependency: this module is the only one that imports it, it
@@ -56,6 +57,12 @@ export interface MarkdownContainerProps
  */
 export type MarkdownProps = MarkdownContainerProps & {
   config?: MarkdownConfig
+  /**
+   * Called after each render has been written to the host element, e.g. to hydrate math or
+   * `mountIsolatedDiagrams(host, …)`. Every source or config change rewrites the host, so work done
+   * here is redone for the new content. Optional.
+   */
+  onRender?: (host: HTMLElement) => void
 } & ({ markdown: string; children?: never } | { markdown?: never; children: string })
 
 /**
@@ -73,10 +80,11 @@ export type MarkdownProps = MarkdownContainerProps & {
  * `setDefaultConfig({ sanitizerBackend })` (or passes `config.sanitizerBackend`).
  */
 export function Markdown(props: MarkdownProps): ReactElement {
-  const { markdown, children, config, as, ...rest } = props as MarkdownContainerProps & {
+  const { markdown, children, config, as, onRender, ...rest } = props as MarkdownContainerProps & {
     markdown?: string
     children?: string
     config?: MarkdownConfig
+    onRender?: (host: HTMLElement) => void
   }
   const source = markdown ?? children ?? ''
   const ref = useRef<HTMLElement | null>(null)
@@ -90,9 +98,14 @@ export function Markdown(props: MarkdownProps): ReactElement {
     initialHtml.current = renderMarkdown(source, config)
   }
 
+  const onRenderRef = useRef(onRender)
+  onRenderRef.current = onRender
+
   useIsomorphicLayoutEffect(() => {
     const el = ref.current
-    if (el) setSanitizedHtml(el, renderMarkdown(source, config))
+    if (!el) return
+    setSanitizedHtml(el, renderMarkdown(source, config))
+    onRenderRef.current?.(el)
   }, [source, config])
 
   const Tag = as ?? 'div'
@@ -113,10 +126,20 @@ export type StreamingMarkdownProps = MarkdownContainerProps & {
   /** Per-instance config, captured when the underlying renderer is constructed. */
   config?: MarkdownConfig
   /**
-   * Called after each `update()` with the renderer, so a host can drive
-   * `renderer.hydrate()` (math/diagram backends) on its own schedule. Optional.
+   * Set once `markdown` is the complete text (the stream has ended). The
+   * component then calls `renderer.finish(markdown)` instead of `update()`, so
+   * whatever the renderer was still holding back — a trailing `~~run`, the
+   * last table row or list item, an unclosed code fence — renders as the
+   * at-rest document would. Setting it back to `false` (or changing `markdown`
+   * while it is `false`) resumes streaming. Defaults to `false`.
    */
-  onUpdate?: (renderer: StreamingMarkdownRenderer) => void
+  final?: boolean
+  /**
+   * Called after each `update()` / `finish()` with the renderer and its host element, so a host
+   * can drive `renderer.hydrate()` (math/diagram backends) or `mountIsolatedDiagrams(host, …)` on its own
+   * schedule. Runs in the component's own layout effect, so `host` is always attached. Optional.
+   */
+  onUpdate?: (renderer: StreamingMarkdownRenderer, host: HTMLElement) => void
 }
 
 /**
@@ -124,8 +147,9 @@ export type StreamingMarkdownProps = MarkdownContainerProps & {
  *
  * Owns a single {@link StreamingMarkdownRenderer} bound to the host element across
  * renders and calls `renderer.update(markdown)` whenever the `markdown` prop
- * changes — the incremental DOM emitter converges the existing subtree, so this
- * is NOT a re-render-per-token. Because `StreamingMarkdownRenderer` captures its
+ * changes (`renderer.finish(markdown)` once the `final` prop is set) — the
+ * incremental DOM emitter converges the existing subtree, so this is NOT a
+ * re-render-per-token. Because `StreamingMarkdownRenderer` captures its
  * config at construction, the renderer is re-created when the `config` prop
  * identity changes (pass a stable object to avoid churn).
  *
@@ -134,7 +158,7 @@ export type StreamingMarkdownProps = MarkdownContainerProps & {
  * server/client hydration mismatch (an empty `<div>` on both sides).
  */
 export function StreamingMarkdown(props: StreamingMarkdownProps): ReactElement {
-  const { markdown, config, as, onUpdate, ...rest } = props
+  const { markdown, config, final = false, as, onUpdate, ...rest } = props
   const hostRef = useRef<HTMLElement | null>(null)
   const rendererRef = useRef<StreamingMarkdownRenderer | null>(null)
   // Keep the latest `onUpdate` reachable from the config effect without making it
@@ -152,8 +176,9 @@ export function StreamingMarkdown(props: StreamingMarkdownProps): ReactElement {
     if (!host) return
     const renderer = new StreamingMarkdownRenderer(host, config)
     rendererRef.current = renderer
-    renderer.update(markdown)
-    onUpdateRef.current?.(renderer)
+    if (final) renderer.finish(markdown)
+    else renderer.update(markdown)
+    onUpdateRef.current?.(renderer, host)
     return () => {
       rendererRef.current = null
       host.replaceChildren()
@@ -164,10 +189,12 @@ export function StreamingMarkdown(props: StreamingMarkdownProps): ReactElement {
   // Drive incremental updates as the streamed text grows/changes.
   useIsomorphicLayoutEffect(() => {
     const renderer = rendererRef.current
-    if (!renderer) return
-    renderer.update(markdown)
-    onUpdateRef.current?.(renderer)
-  }, [markdown])
+    const host = hostRef.current
+    if (!renderer || !host) return
+    if (final) renderer.finish(markdown)
+    else renderer.update(markdown)
+    onUpdateRef.current?.(renderer, host)
+  }, [markdown, final])
 
   const Tag = as ?? 'div'
   return <Tag ref={hostRef as Ref<HTMLElement>} {...rest} />

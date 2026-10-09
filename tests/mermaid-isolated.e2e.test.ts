@@ -1,0 +1,263 @@
+import { after, before, describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { createServer, type Server } from 'node:http'
+import { inflateSync } from 'node:zlib'
+import { build } from 'esbuild'
+import { chromium, type Browser, type Page } from 'playwright-core'
+import { readFileSync } from 'node:fs'
+import { buildMermaidFrameHtml } from '../src/mermaid-frame-document.ts'
+import { buildPrebuiltMermaidFrame } from '../scripts/build-mermaid-frame.mts'
+import { findChromium } from './tt-browser-harness.ts'
+import type * as Isolated from '../src/mermaid-isolated.ts'
+
+declare const Adapter: typeof Isolated
+declare const frameHandle: Isolated.DiagramFrame
+const executablePath = findChromium()
+if (!executablePath && process.env['E2E_REQUIRE_BROWSER'])
+  throw new Error('Mermaid e2e requires Chromium')
+
+describe(
+  'isolated Mermaid in Chromium',
+  { skip: executablePath ? false : 'No Chromium installed' },
+  () => {
+    let browser: Browser
+    let page: Page
+    let server: Server
+    let origin: string
+    const requests: string[] = []
+    before(async () => {
+      const parent = await build({
+        entryPoints: ['src/mermaid-isolated.ts'],
+        bundle: true,
+        write: false,
+        format: 'iife',
+        globalName: 'Adapter',
+      })
+      const child = await build({
+        stdin: {
+          contents:
+            "import mermaid from 'mermaid'; import { startMermaidFrame } from './src/mermaid-frame-runtime.ts'; startMermaidFrame({ mermaid });",
+          resolveDir: process.cwd(),
+        },
+        bundle: true,
+        write: false,
+        format: 'iife',
+      })
+      const frameHtml = buildMermaidFrameHtml(child.outputFiles![0]!.text)
+      const prebuiltHtml = (await buildPrebuiltMermaidFrame()).html
+      server = createServer((req, res) => {
+        if (req.url === '/prebuilt.html') {
+          res.setHeader('Content-Type', 'text/html')
+          res.end(prebuiltHtml)
+        } else if (req.url === '/frame.html') {
+          res.setHeader('Content-Type', 'text/html')
+          res.end(frameHtml)
+        } else if (req.url === '/dark') {
+          res.setHeader('Content-Type', 'text/html')
+          res.end(
+            `<meta name="color-scheme" content="dark"><style>html,body{margin:0;background:#123456}</style><script>globalThis.__name = fn => fn</script><script>${parent.outputFiles![0]!.text}</script>`,
+          )
+        } else if (req.url === '/') {
+          res.setHeader('Content-Type', 'text/html')
+          res.end(
+            `<script>globalThis.__name = fn => fn</script><script>${parent.outputFiles![0]!.text}</script>`,
+          )
+        } else {
+          requests.push(req.url ?? '')
+          res.end('unexpected remote load')
+        }
+      })
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('No server address')
+      origin = `http://127.0.0.1:${address.port}`
+      browser = await chromium.launch({ executablePath: executablePath! })
+      page = await browser.newPage()
+      await page.goto(origin)
+      await page.evaluate(async () => {
+        const frame = Adapter.createMermaidFrame('graph LR; A[Start] --> B[Finish]', {
+          url: '/frame.html',
+          layoutWidth: 500,
+        })
+        Reflect.set(window, 'frameHandle', frame)
+        document.body.append(frame.element)
+        await frame.ready
+      })
+    })
+    after(async () => {
+      await browser?.close()
+      await new Promise<void>((resolve) => server?.close(() => resolve()))
+    })
+
+    it('renders only inside the opaque frame and denies parent access', async () => {
+      assert.equal(await page.locator('svg').count(), 0)
+      const frame = page.frames().find((frame) => frame.url().endsWith('/frame.html'))!
+      assert.ok(await frame.locator('svg').count())
+      assert.equal(
+        await frame.evaluate(() => {
+          try {
+            return !!parent.document
+          } catch {
+            return false
+          }
+        }),
+        false,
+      )
+      assert.equal(await page.locator('iframe').getAttribute('sandbox'), 'allow-scripts')
+    })
+
+    it('blocks SVG, CSS, font, script, fetch, nested frame and object resource loads', async () => {
+      requests.length = 0
+      const frame = page.frames().find((frame) => frame.url().endsWith('/frame.html'))!
+      const directives = await frame.evaluate(async (origin) => {
+        const violations: string[] = []
+        document.addEventListener('securitypolicyviolation', (event) =>
+          violations.push(event.effectiveDirective),
+        )
+        const svg = document.querySelector('svg')!
+        for (const tag of ['image', 'use', 'feImage']) {
+          const node = document.createElementNS('http://www.w3.org/2000/svg', tag)
+          node.setAttribute('href', `${origin}/probe-${tag}.svg#x`)
+          svg.append(node)
+        }
+        const style = document.createElement('style')
+        style.textContent = `@import url('${origin}/probe.css'); @font-face { font-family: Probe; src: url('${origin}/probe.woff2'); } body { background-image: url('${origin}/probe-bg.png'); font-family: Probe; }`
+        document.head.append(style)
+        const label = document.createElement('p')
+        label.textContent = 'Force font load'
+        document.body.append(label)
+        const img = new Image()
+        img.src = `${origin}/probe.png`
+        document.body.append(img)
+        const script = document.createElement('script')
+        script.src = `${origin}/probe.js`
+        document.body.append(script)
+        const nested = document.createElement('iframe')
+        nested.src = `${origin}/probe-frame`
+        document.body.append(nested)
+        const object = document.createElement('object')
+        object.data = `${origin}/probe-object`
+        document.body.append(object)
+        try {
+          await fetch(`${origin}/probe-fetch`)
+        } catch {
+          /* expected */
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        return violations
+      }, origin)
+      for (const directive of [
+        'img-src',
+        'connect-src',
+        'style-src-elem',
+        'font-src',
+        'script-src-elem',
+        'frame-src',
+        'object-src',
+      ])
+        assert.ok(directives.includes(directive), directive)
+      assert.deepEqual(
+        requests.filter((path) => path.startsWith('/probe')),
+        [],
+      )
+    })
+
+    it('serves the prebuilt document with per-render theme, title and font bytes', async () => {
+      requests.length = 0
+      const font = [...readFileSync('node_modules/katex/dist/fonts/KaTeX_Main-Regular.woff2')]
+      const title = await page.evaluate(async (bytes) => {
+        const frame = Adapter.createMermaidFrame('graph LR; A[Start] --> B[Finish]', {
+          url: '/prebuilt.html',
+          layoutWidth: 500,
+          theme: 'dark',
+          title: 'Diagramme : Start puis Finish',
+          fontFamily: 'Probe Sans, sans-serif',
+          font: { family: 'Probe Sans', data: new Uint8Array(bytes) },
+        })
+        document.body.append(frame.element)
+        await frame.ready
+        Reflect.set(window, 'prebuiltHandle', frame)
+        return frame.element.title
+      }, font)
+      assert.equal(title, 'Diagramme : Start puis Finish')
+      const frame = page.frames().find((frame) => frame.url().endsWith('/prebuilt.html'))!
+      const inside = await frame.evaluate(() => ({
+        svg: !!document.querySelector('svg'),
+        fontLoaded: document.fonts.check('16px "Probe Sans"'),
+        nodeFill: getComputedStyle(document.querySelector('.node rect, .node polygon')!).fill,
+      }))
+      assert.equal(inside.svg, true)
+      assert.equal(inside.fontLoaded, true)
+      // Mermaid's dark theme fills nodes with #1f2020; its default theme with #ECECFF.
+      assert.equal(inside.nodeFill, 'rgb(31, 32, 32)')
+      assert.deepEqual(requests, [])
+      await page.evaluate(() => (Reflect.get(window, 'prebuiltHandle') as Isolated.DiagramFrame).dispose())
+    })
+
+    it('keeps the frame transparent in a dark color-scheme page (no opaque backdrop)', async () => {
+      const dark = await browser.newPage()
+      try {
+        await dark.goto(`${origin}/dark`)
+        const box = await dark.evaluate(async () => {
+          const frame = Adapter.createMermaidFrame('graph LR; A[Start] --> B[Finish]', {
+            url: '/frame.html',
+            layoutWidth: 400,
+          })
+          document.body.append(frame.element)
+          await frame.ready
+          frame.element.style.border = '0'
+          const rect = frame.element.getBoundingClientRect()
+          return { x: rect.x, y: rect.y }
+        })
+        // Top-left corner of the frame: empty diagram background, so it shows whatever is behind
+        // the frame. Chromium's PNG rows start with a filter byte; the first pixel of the first row
+        // is stored raw under every filter, so it can be read without unfiltering.
+        const png = await dark.screenshot({ clip: { x: box.x + 2, y: box.y + 2, width: 1, height: 1 } })
+        let offset = 8
+        const idat: Buffer[] = []
+        while (offset < png.length) {
+          const length = png.readUInt32BE(offset)
+          const type = png.toString('ascii', offset + 4, offset + 8)
+          if (type === 'IDAT') idat.push(png.subarray(offset + 8, offset + 8 + length))
+          offset += 12 + length
+        }
+        const [, r, g, b] = inflateSync(Buffer.concat(idat))
+        assert.deepEqual([r, g, b], [0x12, 0x34, 0x56])
+      } finally {
+        await dark.close()
+      }
+    })
+
+    it('cancels pending work on disposal, removal and abort; rejects oversized source before loading', async () => {
+      const results = await page.evaluate(async () => {
+        const make = () => Adapter.createMermaidFrame('graph LR; A-->B', { url: '/frame.html' })
+        const disposed = make()
+        const d = disposed.ready.catch(() => 'disposed')
+        disposed.dispose()
+        disposed.dispose()
+        const removed = make()
+        const r = removed.ready.catch(() => 'removed')
+        document.body.append(removed.element)
+        removed.element.remove()
+        const controller = new AbortController()
+        const aborted = Adapter.createMermaidFrame('graph LR; A-->B', {
+          url: '/frame.html',
+          signal: controller.signal,
+        })
+        const a = aborted.ready.catch(() => 'aborted')
+        controller.abort()
+        const oversized = Adapter.createMermaidFrame('x'.repeat(50_001), { url: '/frame.html' })
+        const o = oversized.ready.catch(() => 'oversized')
+        frameHandle.dispose()
+        return {
+          statuses: await Promise.all([d, r, a, o]),
+          oversizedUrl: oversized.element.getAttribute('src'),
+          frames: document.querySelectorAll('iframe').length,
+        }
+      })
+      assert.deepEqual(results.statuses, ['disposed', 'removed', 'aborted', 'oversized'])
+      assert.equal(results.oversizedUrl, null)
+      assert.equal(results.frames, 0)
+    })
+  },
+)
