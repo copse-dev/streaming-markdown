@@ -5,6 +5,23 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-09
+
+### Features
+
+- let the highlighter claim fence languages via supports() (#288) (`33dc01b`)
+- mark open fences nested in list items and blockquotes as forming (#289) (`7b59fdd`)
+- finish() commits the final text so the DOM matches at rest (#286) (`5c60758`)
+- opt-in scrollable, focusable wrapper around every table (#285) (`977f7ba`)
+- bundler-resolvable KaTeX and Shiki imports; Shiki light/dark themes (#287) (`52342da`)
+- report viewer changes and leave host controls inside the diagram alone (#284) (`8ff7329`)
+
+### Chores
+
+- raise the main-entry budget to 39,460 B for this batch of features (#290) (`fff80d4`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.5.0...v1.6.0
+
 ## [1.5.0] - 2026-10-09
 
 ### Features
