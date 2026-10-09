@@ -31,19 +31,52 @@ export interface DiagramViewerOptions {
   maxScale?: number
   /** Scale change per button press, wheel notch or `+`/`-` key (default 0.25). */
   step?: number
+  /**
+   * Called after every change to the view, whatever caused it: buttons, wheel, drag, keys or the
+   * handle. Not called on attach (read `viewer.view`), when a request leaves the view as it was,
+   * or after dispose. The same view is the `detail` of a bubbling `mermaid-viewer-change` event
+   * on the diagram.
+   */
+  onChange?: (view: DiagramView) => void
+}
+
+/** A snapshot of the view, for a host toolbar to enable or disable its controls. */
+export interface DiagramView {
+  readonly scale: number
+  /** Pan offset in CSS pixels. */
+  readonly x: number
+  readonly y: number
+  readonly minScale: number
+  readonly maxScale: number
+  /** At the initial zoom with no panning, where reset changes nothing. */
+  readonly atInitial: boolean
 }
 
 export interface DiagramViewer {
   readonly scale: number
+  readonly view: DiagramView
   zoomBy(step: number): void
   panBy(dx: number, dy: number): void
   /** Clear panning and restore 100% zoom, clamped to the configured bounds. */
   reset(): void
-  /** Removes the controls and listeners and restores the diagram's view. Idempotent. */
+  /**
+   * Removes the controls and listeners and restores the diagram's view. Idempotent; the handle's
+   * methods do nothing afterwards.
+   */
   dispose(): void
 }
 
 export const DIAGRAM_VIEWER_CLASS = 'mermaid-viewer'
+export const DIAGRAM_VIEWER_CHANGE_EVENT = 'mermaid-viewer-change'
+
+// A press or wheel that lands on one of these inside the diagram belongs to it, not to the viewer:
+// starting a drag would capture the pointer, so the control would never get its click.
+// `[role=toolbar]` covers the built-in toolbar's gaps; `[data-viewer-ignore]` lets a host exempt
+// any element, such as its own toolbar.
+const IGNORE =
+  'a[href],button,input,select,textarea,label,summary,[contenteditable]:not([contenteditable=false]),' +
+  '[role=button],[role=link],[role=checkbox],[role=switch],[role=slider],[role=tab],[role=menuitem],' +
+  '[role=toolbar],[data-viewer-ignore]'
 
 const DEFAULT_LABELS: DiagramViewerLabels = {
   toolbar: 'Diagram controls',
@@ -93,32 +126,42 @@ export function attachDiagramViewer(diagram: HTMLElement, options: DiagramViewer
   // frame could navigate it.
   target.style.pointerEvents = 'none'
 
+  let disposed = false
   const buttons: Partial<Record<'zoomIn' | 'zoomOut' | 'reset' | 'fullscreen', HTMLButtonElement>> = {}
   const apply = (): void => {
     target.style.transform = `translate(${x}px, ${y}px) scale(${scale})`
     diagram.dataset['viewerScale'] = String(scale)
     if (buttons.zoomIn) buttons.zoomIn.disabled = scale >= maxScale
     if (buttons.zoomOut) buttons.zoomOut.disabled = scale <= minScale
-    if (buttons.reset) buttons.reset.disabled = scale === initialScale && x === 0 && y === 0
+    if (buttons.reset) buttons.reset.disabled = viewer.view.atInitial
+  }
+  // Every input goes through here, so a host hears about each change exactly once and never
+  // about a request that changed nothing (zoom in at the maximum, a drag that has not moved).
+  const set = (nextScale: number, nextX: number, nextY: number): void => {
+    if (disposed || (nextScale === scale && nextX === x && nextY === y)) return
+    scale = nextScale
+    x = nextX
+    y = nextY
+    apply()
+    const view = viewer.view
+    options.onChange?.(view)
+    diagram.dispatchEvent(new CustomEvent(DIAGRAM_VIEWER_CHANGE_EVENT, { bubbles: true, detail: view }))
   }
   const viewer: DiagramViewer = {
     get scale() {
       return scale
     },
+    get view() {
+      return { scale, x, y, minScale, maxScale, atInitial: scale === initialScale && x === 0 && y === 0 }
+    },
     zoomBy(delta) {
-      scale = Math.min(maxScale, Math.max(minScale, Math.round((scale + delta) * 1000) / 1000))
-      apply()
+      set(Math.min(maxScale, Math.max(minScale, Math.round((scale + delta) * 1000) / 1000)), x, y)
     },
     panBy(dx, dy) {
-      x += dx
-      y += dy
-      apply()
+      set(scale, x + dx, y + dy)
     },
     reset() {
-      scale = initialScale
-      x = 0
-      y = 0
-      apply()
+      set(initialScale, 0, 0)
     },
     dispose,
   }
@@ -153,16 +196,24 @@ export function attachDiagramViewer(diagram: HTMLElement, options: DiagramViewer
     diagram.insertBefore(toolbar, target)
   }
 
-  const fromToolbar = (event: Event): boolean =>
-    !!toolbar && event.target instanceof Node && toolbar.contains(event.target)
+  // The composed path reaches into open shadow roots, so a host's custom-element toolbar counts by
+  // its inner button. It stops at the diagram: an editable or clickable ancestor of the diagram
+  // itself does not turn the viewer off.
+  const ignored = (event: Event): boolean => {
+    for (const node of event.composedPath()) {
+      if (node === diagram) return false
+      if ((node as Element).matches?.(IGNORE)) return true
+    }
+    return false
+  }
   const onWheel = (event: WheelEvent): void => {
-    if (fromToolbar(event)) return
+    if (ignored(event)) return
     event.preventDefault()
     viewer.zoomBy(event.deltaY > 0 ? -step : step)
   }
   let drag: { id: number; startX: number; startY: number; x: number; y: number } | null = null
   const onPointerDown = (event: PointerEvent): void => {
-    if (event.button !== 0 || event.isPrimary === false || fromToolbar(event)) return
+    if (event.button !== 0 || event.isPrimary === false || ignored(event)) return
     drag = { id: event.pointerId, startX: event.clientX, startY: event.clientY, x, y }
     diagram.setPointerCapture?.(event.pointerId)
     diagram.dataset['viewerPanning'] = ''
@@ -171,9 +222,7 @@ export function attachDiagramViewer(diagram: HTMLElement, options: DiagramViewer
   const onPointerMove = (event: PointerEvent): void => {
     if (!drag || event.pointerId !== drag.id) return
     event.preventDefault()
-    x = drag.x + event.clientX - drag.startX
-    y = drag.y + event.clientY - drag.startY
-    apply()
+    set(scale, drag.x + event.clientX - drag.startX, drag.y + event.clientY - drag.startY)
   }
   const onPointerUp = (event: PointerEvent): void => {
     if (!drag || event.pointerId !== drag.id) return
@@ -208,7 +257,6 @@ export function attachDiagramViewer(diagram: HTMLElement, options: DiagramViewer
   diagram.addEventListener('keydown', onKeyDown)
   apply()
 
-  let disposed = false
   function dispose(): void {
     if (disposed) return
     disposed = true
