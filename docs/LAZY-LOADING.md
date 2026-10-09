@@ -77,7 +77,10 @@ config field + the `@copse/streaming-markdown/sanitizers/dompurify` subpath):
 and the identical string **after**. That stability matters for streaming: the core
 renders a code fence as plain escaped text with the final class immediately, and a
 later re-render (once the grammar chunk arrives) only swaps the *interior* to token
-spans — the `<pre><code class>` element never churns. `KNOWN_LANGUAGES` in the core
+spans — the `<pre><code class>` element never churns. A backend that implements
+`supports(id)` (Shiki does) can claim more languages; it must answer from what it
+was *asked* to load, not what has *finished* loading, so the class is the same on
+both sides of the swap. `KNOWN_LANGUAGES` in the core
 must stay in sync with the grammars the backend registers.
 
 ## Using it

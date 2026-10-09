@@ -122,8 +122,10 @@ interface ShikiCommonOptions {
   /**
    * Grammar names (or aliases) to register, each a key of shiki's
    * `bundledLanguages` map (`shiki/langs`). Default: grammars covering the core
-   * `KNOWN_LANGUAGES` set. Grammars outside that set still need a matching id
-   * in the core to ever be asked for. An unknown name rejects the load.
+   * `KNOWN_LANGUAGES` set. Every listed name is claimed through the
+   * highlighter's `supports` (and, once loaded, each grammar's shiki aliases),
+   * so ```` ```java ```` or ```` ```tsx ```` fences are highlighted and keep
+   * their own id as the `lang-*` class. An unknown name rejects the load.
    */
   langs?: readonly string[]
   /**
@@ -238,6 +240,13 @@ interface LoadedState {
 
 let loaded: LoadedState | null = null
 let loadPromise: Promise<CodeHighlighter> | null = null
+/**
+ * The grammar names the first {@link loadShiki} asked for, recorded
+ * synchronously so {@link shikiHighlighter}'s `supports` gives the same answer
+ * before the grammars arrive as after (see `supports`). `null` until the first
+ * load call.
+ */
+let requestedLanguages: ReadonlySet<string> | null = null
 
 /**
  * @internal Test seam: drop the loaded shiki instance and the cached load so a
@@ -246,6 +255,7 @@ let loadPromise: Promise<CodeHighlighter> | null = null
 export function __resetShikiForTests(): void {
   loaded = null
   loadPromise = null
+  requestedLanguages = null
 }
 
 /** Append one theme's classes for a token: its color (unless default) and font styles. */
@@ -334,6 +344,22 @@ export const shikiHighlighter: CodeHighlighter = {
     // escaped plain text (hljs guesses here — a documented behavioural mismatch).
     return escapeHtml(code)
   },
+  supports(language: string): boolean {
+    // Claim every grammar the host asked for — so ```java, ```kotlin, ```tsx
+    // reach shiki and ```tsx keeps `lang-tsx` — plus, once loaded, every id
+    // and alias shiki registered (```kt, ```c++, ```cs).
+    //
+    // The class contract: the core turns a `true` here into a different
+    // `lang-*` class only for the ids it would otherwise APPROXIMATE (`tsx`,
+    // `jsx`, `html`, `htm`); for any other id the class is the same either
+    // way. Those ids are shiki grammar NAMES, never another grammar's alias
+    // (a test pins this against shiki's registry), so the answer for them
+    // comes from `requestedLanguages` — set synchronously by the first
+    // loadShiki/installShiki — and is identical before and after the load.
+    // Only the interior upgrades (plain until the grammar arrives), exactly
+    // like a KNOWN_LANGUAGES fence. Before any load call nothing is claimed.
+    return (requestedLanguages?.has(language) ?? false) || (loaded?.loadedLanguages.has(language) ?? false)
+  },
 }
 
 /**
@@ -407,6 +433,7 @@ async function createLoadedState(options?: ShikiOptions): Promise<LoadedState> {
  * `loadHighlightjs`). Rejects when the optional `shiki` peer isn't installed.
  */
 export function loadShiki(options?: ShikiOptions): Promise<CodeHighlighter> {
+  requestedLanguages ??= new Set(options?.langs ?? DEFAULT_GRAMMARS)
   loadPromise ??= createLoadedState(options).then((state) => {
     loaded = state
     return shikiHighlighter

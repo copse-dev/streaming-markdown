@@ -19,19 +19,41 @@ import { escapeHtml } from './escape.ts'
 
 /**
  * Pluggable syntax highlighter. A backend receives already-resolved input from
- * the core: `highlight` is called with a language id the core has confirmed the
- * backend registered, and `highlightAuto` is called only for an empty fence info
- * string. Both return an HTML token string (highlight.js `.value`-shaped).
+ * the core: `highlight` is called with a language id the core resolved (see
+ * {@link CodeHighlighter.supports}), and `highlightAuto` is called only for an
+ * empty fence info string. Both return an HTML token string (highlight.js
+ * `.value`-shaped).
  *
  * Pass one via `MarkdownConfig.codeHighlighter` — obtained lazily from
  * `loadHighlightjs()` / `installHighlightjs()` in
  * `@copse/streaming-markdown/highlighters/highlightjs`.
  */
 export interface CodeHighlighter {
-  /** Highlight `code` as `language` (a resolved id from {@link KNOWN_LANGUAGES}). */
+  /**
+   * Highlight `code` as `language`: an id from {@link KNOWN_LANGUAGES}, or a
+   * fence id this backend claimed through {@link CodeHighlighter.supports}.
+   */
   highlight(code: string, language: string): string
   /** Auto-detect and highlight `code` (used only for an empty fence info string). */
   highlightAuto(code: string): string
+  /**
+   * Optional: does this backend handle the fence language `language` directly?
+   * Called with the fence's lowercased id after the core folds pure synonyms
+   * (`ts` → `typescript`, `sh` → `bash`, …). Returning `true` makes the core
+   * keep that id — `highlight` receives it and the fence's class is
+   * `lang-<id>` — instead of mapping an approximate alias (`tsx` →
+   * `typescript`, `jsx` → `javascript`, `html` → `xml`) or rejecting an id
+   * outside {@link KNOWN_LANGUAGES} (`java`, `kotlin`, …). Omit it and
+   * resolution is exactly the built-in one.
+   *
+   * The answer feeds the fence's class, so it must be STABLE for a given id
+   * for as long as the backend stays configured: a backend that loads
+   * asynchronously should answer from what it has been asked to load, not
+   * from what has finished loading, or a streaming re-render will churn the
+   * `<code>` element's class (`highlight` can still return plain text until the
+   * grammar arrives — that interior swap is the intended upgrade).
+   */
+  supports?(language: string): boolean
 }
 
 /**
@@ -57,12 +79,14 @@ export const KNOWN_LANGUAGES: ReadonlySet<string> = new Set([
   'sql',
 ])
 
-/** Map common fence info strings to highlight.js language ids. */
-const LANG_ALIASES: Record<string, string> = {
+/**
+ * Pure synonyms: another spelling of the same language. Folded BEFORE a
+ * highlighter is consulted, so `ts` is always `lang-typescript` whatever the
+ * backend — the class never depends on which spellings a backend registers.
+ */
+const LANG_SYNONYMS: Record<string, string> = {
   ts: 'typescript',
-  tsx: 'typescript',
   js: 'javascript',
-  jsx: 'javascript',
   mjs: 'javascript',
   cjs: 'javascript',
   sh: 'bash',
@@ -70,19 +94,43 @@ const LANG_ALIASES: Record<string, string> = {
   py: 'python',
   yml: 'yaml',
   md: 'markdown',
-  html: 'xml',
-  htm: 'xml',
   rs: 'rust',
   text: 'plaintext',
   plaintext: 'plaintext',
 }
 
-/** Resolve a fence info string to a known language id, or `null` (plain/auto). */
-function resolveLanguage(lang: string): string | null {
+/**
+ * Approximations: a DIFFERENT language whose nearest {@link KNOWN_LANGUAGES}
+ * grammar is close enough to highlight it (`tsx` as TypeScript, `html` as
+ * XML). Applied only when the highlighter doesn't claim the id itself via
+ * {@link CodeHighlighter.supports}, so a backend with a real `tsx` grammar
+ * gets `tsx` (and the fence keeps `lang-tsx`).
+ */
+const LANG_FALLBACKS: Record<string, string> = {
+  tsx: 'typescript',
+  jsx: 'javascript',
+  html: 'xml',
+  htm: 'xml',
+}
+
+/** Own-key lookup, so an info string like `constructor` can't hit `Object.prototype`. */
+function lookup(table: Record<string, string>, key: string): string | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined
+}
+
+/**
+ * Resolve a fence info string to the language id handed to the highlighter
+ * (and shown as `lang-<id>`), or `null` (plain/auto). Order: fold synonyms;
+ * keep the id if the highlighter claims it; else apply an approximation and
+ * accept only {@link KNOWN_LANGUAGES}.
+ */
+function resolveLanguage(lang: string, highlighter: CodeHighlighter | null | undefined): string | null {
   const key = lang.trim().toLowerCase()
   if (!key) return null
-  const resolved = LANG_ALIASES[key] ?? key
-  if (resolved === 'plaintext') return null
+  const canonical = lookup(LANG_SYNONYMS, key) ?? key
+  if (canonical === 'plaintext') return null
+  if (highlighter?.supports?.(canonical)) return canonical
+  const resolved = lookup(LANG_FALLBACKS, canonical) ?? canonical
   return KNOWN_LANGUAGES.has(resolved) ? resolved : null
 }
 
@@ -115,7 +163,7 @@ export function highlightFenceCode(code: string, lang: string): string {
   if (code.trim() === '') return escapeHtml(code)
 
   const highlighter = activeConfig().codeHighlighter
-  const language = resolveLanguage(lang)
+  const language = resolveLanguage(lang, highlighter)
 
   // No backend yet: plain-text fallback. The `hljs lang-*` class is still applied
   // by `fenceCodeClass`, so a config with a highlighter + re-render upgrades the
@@ -127,8 +175,15 @@ export function highlightFenceCode(code: string, lang: string): string {
   return escapeHtml(code)
 }
 
+/**
+ * The `<code>` class for a fence: `hljs lang-<id>`, where `<id>` is the
+ * resolved language (see `resolveLanguage`: synonyms folded, an id the
+ * configured highlighter `supports` kept as written, else the
+ * {@link KNOWN_LANGUAGES} id), or the lowercased info string when nothing
+ * resolves, or `text` for an empty one. Hosts read it as the language label.
+ */
 export function fenceCodeClass(lang: string): string {
-  const language = resolveLanguage(lang)
+  const language = resolveLanguage(lang, activeConfig().codeHighlighter)
   const label = language ?? (lang.trim() ? lang.trim().toLowerCase() : 'text')
   // The info string is entity-decoded, so an unrecognized language falls back to
   // attacker-controlled text. Escape it before it lands in a `class="…"` context
