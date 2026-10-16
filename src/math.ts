@@ -1,4 +1,7 @@
 import { setHostTrustedHtml, type TrustedHTMLValue } from './html-sink.ts'
+import { injectFilteredMarkup } from './url-filter-markup.ts'
+import { withConfig } from './config.ts'
+import type { UrlPolicy } from './url-policy.ts'
 
 // The math-renderer registry (#70): the KaTeX analogue of the pluggable diagram
 // renderer. Like mermaid, the KaTeX *library* is never bundled by this package —
@@ -65,6 +68,12 @@ export interface HydrateMathOptions {
    * will be rejected by the page's CSP.
    */
   transformHtml?: (html: string) => string | TrustedHTMLValue
+  /**
+   * {@link UrlPolicy} to enforce over the backend's HTML before it is injected.
+   * Passed explicitly for the same reason as {@link HydrateDiagramsOptions.urlPolicy}:
+   * hydration runs after the synchronous render scope has been restored.
+   */
+  urlPolicy?: UrlPolicy | null
 }
 
 /** Read a pending element's TeX source (block scaffolding wraps it in `pre.math`). */
@@ -116,7 +125,13 @@ export async function hydratePendingMath(
     // the escaped-source error state; the sink throws before mutating, so the
     // inert source stays visible.
     try {
-      setHostTrustedHtml(el, options.transformHtml ? options.transformHtml(html) : html)
+      const markup = options.transformHtml ? options.transformHtml(html) : html
+      const inject = (): void => {
+        // Filtered node path first — see the note in mermaid.ts markRendered.
+        if (!injectFilteredMarkup(el, markup, 'math')) setHostTrustedHtml(el, markup)
+      }
+      if (options.urlPolicy === undefined) inject()
+      else withConfig({ urlPolicy: options.urlPolicy }, inject)
     } catch {
       markError(el, kind)
       continue
