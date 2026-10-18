@@ -987,6 +987,68 @@
       margin-bottom: 0.25rem;
     }
 
+    /* Keep the same outer height from the first fence token through the SVG
+       swap. Source and failures scroll within it; expansion is reader-controlled. */
+    .compare-panel-body .mermaid-diagram {
+      height: 180px;
+      position: relative;
+      min-height: 180px;
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      justify-content: flex-start;
+    }
+    .compare-panel-body .mermaid-diagram > pre.mermaid {
+      min-height: 0;
+      overflow: auto;
+      margin: 0;
+    }
+    .compare-panel-body .diagram-preview-ready > pre.mermaid { display: none; }
+    .compare-panel-body .diagram-preview-ready { background: #f6f8fa; }
+    .diagram-preview-output {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: auto;
+    }
+    .compare-panel-body .diagram-preview-output svg { max-height: 126px; }
+    .diagram-preview-toggle {
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      color: #57606a;
+      background: transparent;
+      border: 0;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .diagram-preview-toggle:hover { background: #e4e8ed; color: #0969da; }
+    .diagram-preview-toggle:focus-visible { outline: 2px solid #0969da; outline-offset: 2px; }
+    .compare-panel-body .diagram-preview-toggle svg { width: 16px; height: 16px; margin: 0; }
+    .compare-panel-body .diagram-preview-expanded { height: 70vh; }
+    .compare-panel-body .diagram-preview-expanded svg {
+      max-height: none;
+      max-width: none;
+      flex-shrink: 0;
+    }
+    .diagram-preview-error > pre { border-color: var(--danger); }
+
+    /* Reference resolution can rebuild committed wrappers; string updates
+       always do. Never restart the settle fade on a diagram or its ancestors. */
+    .compare-panel-body .mermaid-diagram,
+    .stream-complete > :has(.mermaid-diagram),
+    .stream-complete li:has(.mermaid-diagram) {
+      animation: none;
+    }
+
     /* ── Math (KaTeX) ────────────────────────────────────────
        Same two-phase contract as mermaid: while pending (backend not loaded /
        stream still going) the generator emits inert escaped source in a
@@ -1547,6 +1609,8 @@ import {
   isBrowserSanitizerSupported,
   dompurifyBackend,
   sanitizeDiagramSvg,
+  createDiagramPreviews,
+  removeDiagramPreviews,
   hydratePendingDiagrams,
   hydratePendingMath,
   loadHighlightBackend,
@@ -1579,7 +1643,7 @@ if (!isBrowserSanitizerSupported()) {
 // Backends captured as they load, then injected via config: the math/diagram
 // renderers flow to hydrate() calls, the highlighters to renderConfig.
 let katexRenderer = null;
-let mermaidRenderer = null;
+let diagramPreviews = null;
 let hljsHighlighter = null;
 let shikiHighlighter = null;
 
@@ -1651,10 +1715,11 @@ function ensureMermaid() {
   extras.mermaid.promise = loadDiagramBackend()
     // Capture the DiagramRenderer to pass via config, then warm the actual
     // library now (the backend would otherwise defer the import-map fetch to the
-    // first render) so the chip times the real network cost and hydration at
-    // stream end is instant.
+    // first render) so loading overlaps the stream and closed fences can upgrade.
     .then((renderer) => {
-      mermaidRenderer = renderer;
+      diagramPreviews = createDiagramPreviews({
+        hydrate: hydratePendingDiagrams, renderer, transformSvg: sanitizeDiagramSvg,
+      });
       // Warm the selected backend, rather than requiring the Mermaid CDN in Pele mode.
       if (usePele) return renderer.render('flowchart LR\nA --> B');
       return import('mermaid');
@@ -1662,14 +1727,9 @@ function ensureMermaid() {
     .then(() => {
       extras.mermaid.loaded = true;
       setChips('mermaid', 'loaded', `${usePele ? 'Pele ' : ''}loaded in ${Math.round(performance.now() - t0)} ms`);
-      // If a stream already finished while mermaid was in flight, hydrate now.
-      // Streams still running hydrate at their own completion instead —
-      // hydrating mid-stream would race the incremental DOM morph.
-      if (!heroStreaming) hydrateDiagrams(heroOutput);
-      if (!compareStreaming) {
-        hydrateDiagrams(stringOutput);
-        hydrateDiagrams(domOutput);
-      }
+      hydrateDiagrams(heroOutput);
+      hydrateDiagrams(stringOutput);
+      hydrateDiagrams(domOutput);
     })
     .catch(() => {
       setChips('mermaid', 'error', 'failed to load');
@@ -1772,15 +1832,11 @@ function hydrateMath(root) {
   hydratePendingMath(root, { renderer: katexRenderer }).catch(() => {});
 }
 
-// Hydrate settled ```mermaid scaffolding under `root` into SVG. No-op until
-// the backend is registered; safe to call repeatedly. Only ever called on a
-// root whose stream has ended, so no container is still forming.
+// Upgrade closed fences during streaming. The preview controller excludes
+// forming blocks and attaches detached, sanitized results inside a stable box.
 function hydrateDiagrams(root) {
   if (!extras.mermaid.loaded || !root) return;
-  hydratePendingDiagrams(root, {
-    renderer: mermaidRenderer,
-    transformSvg: sanitizeDiagramSvg,
-  }).catch(() => {});
+  diagramPreviews.update(root);
 }
 
 // ── Install badge: click to select the command (and copy it) ────────────────
@@ -1945,8 +2001,8 @@ After that it becomes a normal \`<pre><code>\` block.`,
   diagrams: `## Mermaid diagrams
 
 A \`\`\`\` \`\`\`mermaid \`\`\`\` fence streams in as **inert, escaped source** — the diagram
-backend loads only when the first diagram fence appears. Once the
-stream settles, \`hydratePendingDiagrams()\` swaps the source for SVG.
+backend loads when diagrams are needed. Once a fence closes, its preview
+appears in a stable box while the rest of the document continues streaming.
 
 \`\`\`mermaid
 flowchart TD
@@ -1968,7 +2024,7 @@ sequenceDiagram
     LLM->>Renderer: update(partial)
     Renderer->>DOM: commit settled blocks
     Renderer->>DOM: restyle pending tail
-    Note over Renderer,DOM: mermaid hydrates after the stream settles
+    Note over Renderer,DOM: diagrams render when their fence closes
 \`\`\`
 
 > Pele is the default backend for Mermaid syntax and loads only when needed.
@@ -2372,6 +2428,7 @@ function heroFinish() {
 
 // Records one revealed frame and reports the measured (real) throughput.
 function heroFrame() {
+  hydrateDiagrams(heroOutput);
   ensureSnapAnchor(heroOutput);
   heroUpdates++;
   // Cumulative average (chars ÷ elapsed) — the true end-to-end rate, smooth by
@@ -2511,6 +2568,8 @@ function startCompare() {
   comparePos = 0;
   compareUpdates = 0;
   compareStart = performance.now();
+  // The selected input is already known: overlap backend loading with prose.
+  detectExtras(text);
 
   const fast = speedCheck.checked;
   const step = fast ? 6 : 2;
@@ -2560,6 +2619,8 @@ function startCompare() {
     const t1 = performance.now();
     domRenderer.update(partial);
     const domMs = performance.now() - t1;
+    hydrateDiagrams(stringOutput);
+    hydrateDiagrams(domOutput);
 
     // Keep the newest content in view; each panel is its own scroll container,
     // so this never moves the page.
@@ -2582,7 +2643,9 @@ function startCompare() {
 // the `rerender()` step from docs/LAZY-LOADING.md. Fence classes are final
 // from the first paint, so the upgrade only swaps text for token spans.
 function rerenderAfterHighlight() {
-  if (heroText && heroPos > 0) {
+  // A backend can arrive before the first tick. Refresh even an empty renderer:
+  // it snapshots config at construction and would otherwise keep plain fences.
+  if (heroText && heroRenderer) {
     // Every node in the pane is about to be recreated with identical layout —
     // suppress the settle animation until the next reset, or the whole pane
     // re-fades as one subtle blink. (Blocks committed during the remainder of
@@ -2594,7 +2657,7 @@ function rerenderAfterHighlight() {
     heroOutput.scrollTop = heroOutput.scrollHeight;
     if (!heroStreaming) { hydrateDiagrams(heroOutput); hydrateMath(heroOutput); }
   }
-  if (compareText && comparePos > 0) {
+  if (compareText && domRenderer) {
     const streamed = compareText.slice(0, comparePos);
     const partial = compareStreaming ? streamed : sealDoc(streamed);
     stringOutput.innerHTML = renderStreamingMarkdown(partial, renderConfig);
@@ -2647,6 +2710,7 @@ hlToggleGroup.addEventListener('click', (e) => {
 function normalizeStreamOutput(html) {
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
+  removeDiagramPreviews(tmp);
   tmp.querySelectorAll('.stream-complete, .stream-forming').forEach((el) => {
     if (el.hasChildNodes()) el.replaceWith(...el.childNodes);
     else el.remove();

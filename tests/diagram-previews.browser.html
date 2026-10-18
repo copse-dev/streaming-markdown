@@ -1,0 +1,69 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Diagram preview geometry checks</title></head><body>
+<h1>Diagram preview browser checks</h1><div class="compare-panel-body" id="root"></div><pre id="result">Running…</pre>
+<script type="module">
+import {createDiagramPreviews} from '../docs/diagram-previews.mjs';
+const source = await (await fetch('../docs/index.html')).text();
+const style = document.createElement('style');
+style.textContent = source.match(/<style>([\s\S]*?)<\/style>/)[1];
+document.head.append(style);
+const root = document.getElementById('root');
+root.style.width = '420px';
+const result = document.getElementById('result');
+const checks = [];
+function check(condition, message) {
+  checks.push((condition ? 'PASS ' : 'FAIL ') + message);
+}
+// Controlled renderer fixture: tests preview geometry, not Pele or Markdown parsing.
+let complete;
+let calls = 0;
+const controller = createDiagramPreviews({
+  renderer: {},
+  transformSvg: s => s,
+  hydrate: async el => {
+    calls++;
+    await new Promise(resolve => complete = resolve);
+    el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 1000"><text x="1" y="30">Tall diagram</text></svg>';
+  },
+});
+const scaffold = forming => '<div class="mermaid-diagram mermaid-diagram--pending ' + (forming ? 'stream-fence-forming' : '') + '"><pre class="mermaid">' + 'A --> B\n'.repeat(100) + '</pre></div><p id="after">Text that follows the diagram</p>';
+root.innerHTML = scaffold(true);
+controller.update(root);
+await new Promise(resolve => setTimeout(resolve, 0));
+check(calls === 0, 'Open fence does not render');
+const formingHeight = root.firstElementChild.getBoundingClientRect().height;
+root.innerHTML = scaffold(false);
+const top = root.querySelector('#after').getBoundingClientRect().top;
+controller.update(root);
+await new Promise(resolve => setTimeout(resolve, 0));
+check(calls === 1 && !root.querySelector('svg'), 'Render stays detached while pending');
+complete();
+await new Promise(resolve => setTimeout(resolve, 0));
+check(root.querySelector('svg'), 'Closed fence renders while following text remains');
+check(root.querySelector('#after').getBoundingClientRect().top === top, 'Following text does not move during SVG swap');
+check(root.firstElementChild.getBoundingClientRect().height === formingHeight, 'Forming, pending, and rendered boxes have equal height');
+root.querySelector('button').click();
+check(root.querySelector('button').getAttribute('aria-expanded') === 'true', 'Reader can expand the diagram');
+root.innerHTML = scaffold(false);
+controller.update(root);
+check(root.querySelector('svg') && calls === 1, 'String pane restores cached preview synchronously');
+check(root.querySelector('.diagram-preview-expanded'), 'Expansion survives streaming replacement');
+root.querySelector('button').click();
+check(root.querySelector('#after').getBoundingClientRect().top === top, 'Collapsing restores the original box height');
+const preview = root.querySelector('svg');
+const control = root.querySelector('button');
+for (const nested of [false, true]) {
+  const content = nested ? '<ul><li>' + scaffold(false) + '</li></ul>' : scaffold(false);
+  root.innerHTML = '<div class="stream-complete">' + content + '</div>';
+  controller.update(root);
+  check(root.querySelector('svg') === preview && root.querySelector('button') === control,
+    'Wrapper replacement reuses SVG and controls' + (nested ? ' inside a list' : ''));
+  const diagram = root.querySelector('.mermaid-diagram');
+  let fades = false;
+  for (let el = diagram; el && el !== root; el = el.parentElement) {
+    if (getComputedStyle(el).animationName.split(',').some(name => name.trim() !== 'none')) fades = true;
+  }
+  check(!fades, 'Diagram and ancestors do not replay the settle fade' + (nested ? ' inside a list' : ''));
+}
+result.textContent = checks.join('\n');
+</script></body></html>

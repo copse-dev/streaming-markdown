@@ -44,6 +44,28 @@ with the explicit Mermaid.js backend. The build also copies KaTeX JavaScript,
 CSS and fonts locally so math renders in static
 previews that block third-party requests.
 
+The demo starts diagram previews as soon as a fence is committed, while the rest
+of the document continues streaming. Open fences and the forming tail stay as
+inert source. Previews render and sanitize outside the visible document, then
+appear inside the same 180px box used for pending source. Tall source scrolls
+inside that box; the expand icon in the bottom-right corner opens a larger view
+on request (with an accessible label and tooltip). This keeps the SVG swap from
+moving the text below it. Each pane caches previews across
+updates, including the string pane's full DOM replacements; late results from
+a replaced document are ignored. The fidelity badge compares the retained
+Markdown source independently of preview completion.
+
+Cached previews reuse their SVG and controls when a wrapper is replaced, including
+when late reference definitions update earlier content. Diagram blocks and their
+containing list items skip the demo's settle fade so updates do not repeatedly
+fade an already-rendered diagram.
+
+Preview-controller regression tests run with `npm test`. For a browser geometry
+check without a build, preview `tests/diagram-previews.browser.html`. That fixture
+uses a controlled renderer and the real demo stylesheet to check stable height,
+atomic insertion, cached replacements, and expansion. It does not exercise the
+Markdown parser or the Pele runtime; verify those through the built demo.
+
 ## Colors
 
 Set Pele variables on the diagram container. For example, map these to the host's
