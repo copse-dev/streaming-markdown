@@ -23,7 +23,7 @@ different config coexist with no process-wide state to reset.
 | --- | --- | --- |
 | HTML sanitizer | `sanitizerBackend` | `…/sanitizers/dompurify` |
 | Syntax highlighter | `codeHighlighter` | `…/highlighters/highlightjs`, `…/highlighters/shiki` |
-| Diagram renderer | `diagramRenderer` (async — via `hydrate()`) | `…/diagrams/mermaid` |
+| Diagram renderer | `diagramRenderer` (async — via `hydrate()`) | `…/diagrams` (Pele default), `…/diagrams/mermaid` |
 | Math renderer | `mathRenderer` (async — via `hydrate()`) | `…/math/katex` |
 | Math prose syntax | `mathSyntax` | — |
 | Custom fenced blocks | `fenceHandlers` | — (you supply the handler) |

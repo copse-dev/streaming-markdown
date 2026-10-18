@@ -26,7 +26,8 @@ export interface DiagramRenderResult {
  * retries with the aggressive source candidate before giving up. Rendering is async
  * because the mermaid library is (`mermaid.render` returns a promise).
  *
- * Obtain one from `loadMermaid()` (`@copse/streaming-markdown/diagrams/mermaid`)
+ * Obtain the default Pele backend from `loadDiagramRenderer()`
+ * (`@copse/streaming-markdown/diagrams`), or opt into `loadMermaid()`
  * and pass it via `MarkdownConfig.diagramRenderer` (streaming `hydrate()`) or the
  * {@link HydrateDiagramsOptions.renderer} option.
  */
@@ -40,8 +41,9 @@ export const PENDING_DIAGRAM_SELECTOR = '.mermaid-diagram.mermaid-diagram--pendi
 /** Options for {@link hydratePendingDiagrams}. */
 export interface HydrateDiagramsOptions {
   /**
-   * The {@link DiagramRenderer} to hydrate with — obtain one from `loadMermaid()`
-   * (`@copse/streaming-markdown/diagrams/mermaid`) and pass it per hydration call.
+   * The {@link DiagramRenderer} to hydrate with — obtain the default Pele backend
+   * from `loadDiagramRenderer()` (`@copse/streaming-markdown/diagrams`) and pass it
+   * per hydration call. Mermaid.js is available through `diagrams/mermaid`.
    * When omitted (or `null`), hydration is a no-op returning 0.
    */
   renderer?: DiagramRenderer | null

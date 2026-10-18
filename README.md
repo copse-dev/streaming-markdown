@@ -209,7 +209,7 @@ The package follows [semver](https://semver.org). The contract covers:
   pre-1.0 `@experimental` tier (ambient-config introspection getters and
   low-level renderer internals) was removed from the entry at 1.0.
 - **The subpath entries** (`/sanitizers/*`, `/highlighters/*`, `/math/katex`,
-  `/diagrams/mermaid`, `/inline/emoji`, `/cjk`, `/entities/full`, `/smoothing`,
+  `/diagrams`, `/diagrams/mermaid`, `/inline/emoji`, `/cjk`, `/entities/full`, `/smoothing`,
   `/react`, `/host/workspace`) and the CSS entry points.
 - **Default output stability.** The CommonMark/GFM conformance baselines and
   the "byte-identical until you opt in" property (math syntax, link/image
@@ -234,6 +234,14 @@ npm run build       # emit dist/ (ESM JS + .d.ts)
 npm run test:e2e    # Trusted Types enforcement e2e in real Chromium (skips without a browser)
 npm run bench:browser  # sink-path throughput in real Chromium, incl. a TT-enforced page
 ```
+
+### Diagram rendering
+
+[Pele is the default diagram backend](docs/DIAGRAMS.md), available through
+`diagrams` (also `diagrams/pele`). It renders Mermaid syntax and loads only on
+the first hydration. Pass an SVG sanitizer through `transformSvg`; the demo uses
+DOMPurify. Mermaid.js remains available through the explicit `diagrams/mermaid`
+adapter. The core emits inert diagram source until a host configures a backend.
 
 ### Isolated Mermaid rendering
 

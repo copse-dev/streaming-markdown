@@ -1,5 +1,10 @@
 # Lazy-loading the generator's heavy dependencies (prototype)
 
+Pele is now the default diagram backend at `@copse/streaming-markdown/diagrams`.
+Diagram hydration remains opt-in; pass an SVG sanitizer with `transformSvg`.
+See [Diagram rendering](DIAGRAMS.md). The Mermaid.js examples below describe the
+explicit `diagrams/mermaid` alternative.
+
 > Status: **prototype**. Wired for `highlight.js` today; sketches the same shape
 > for Mermaid. See `src/highlight.ts`, `src/highlight-hljs.ts`, and
 > `src/highlight-lazy.test.ts`.
