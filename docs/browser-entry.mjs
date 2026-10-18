@@ -19,6 +19,7 @@ export {
 } from '../dist/index.js'
 
 export { dompurifyBackend, sanitizeDiagramSvg } from '../dist/sanitize-dompurify.js'
+export { createDiagramPreviews, removeDiagramPreviews } from './diagram-previews.mjs'
 
 // The OPTIONAL input smoother (#84). It ships behind the
 // '@copse/streaming-markdown/smoothing' subpath and is never in the main entry,
