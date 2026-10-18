@@ -18,7 +18,7 @@ export {
   setDefaultConfig,
 } from '../dist/index.js'
 
-export { dompurifyBackend } from '../dist/sanitize-dompurify.js'
+export { dompurifyBackend, sanitizeDiagramSvg } from '../dist/sanitize-dompurify.js'
 
 // The OPTIONAL input smoother (#84). It ships behind the
 // '@copse/streaming-markdown/smoothing' subpath and is never in the main entry,
@@ -37,16 +37,17 @@ export function loadHighlightBackend() {
   return import('../dist/highlight-hljs.js').then((m) => m.loadHighlightjs())
 }
 
-// Returns the mermaid `DiagramRenderer` (the demo passes it as
-// `MarkdownConfig.diagramRenderer` to `hydrate()` / `hydratePendingDiagrams()`);
-// the mermaid library itself is resolved via the page's import map (it is an
-// optional peer, never bundled) on first render.
-export function loadMermaidBackend() {
-  return import('../dist/mermaid-mermaidjs.js').then((m) => m.loadMermaid())
+// Pele is the default DiagramRenderer. Mermaid.js remains an explicit opt-in
+// through ?diagrams=mermaid. Both backends load lazily.
+export function loadDiagramBackend() {
+  if (new URLSearchParams(location.search).get('diagrams') === 'mermaid') {
+    return import('../dist/mermaid-mermaidjs.js').then((m) => m.loadMermaid())
+  }
+  return import('../dist/diagrams.js').then((m) => m.loadDiagramRenderer())
 }
 
 // Returns the KaTeX `MathRenderer`; katex itself is resolved via the page's
-// import map (optional peer, never bundled) the first time an expression
+// import map (a local copy of the optional peer) the first time an expression
 // renders. The demo captures the returned renderer and passes it as
 // `MarkdownConfig.mathRenderer` to `hydrate()` / `hydratePendingMath()`. Turning
 // the prose `$…$` grammar on is the separate, explicit `{ mathSyntax: true }`

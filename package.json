@@ -43,6 +43,16 @@
       "import": "./dist/mermaid-mermaidjs.js",
       "default": "./dist/mermaid-mermaidjs.js"
     },
+    "./diagrams": {
+      "types": "./dist/diagrams.d.ts",
+      "import": "./dist/diagrams.js",
+      "default": "./dist/diagrams.js"
+    },
+    "./diagrams/pele": {
+      "types": "./dist/mermaid-pele.d.ts",
+      "import": "./dist/mermaid-pele.js",
+      "default": "./dist/mermaid-pele.js"
+    },
     "./math/katex": {
       "types": "./dist/math-katex.d.ts",
       "import": "./dist/math-katex.js",
@@ -126,7 +136,7 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc -p tsconfig.build.json && tsx scripts/build-mermaid-frame.mts",
-    "build:demo": "npm run build && rm -f docs/streaming-markdown.*.mjs && esbuild docs/browser-entry.mjs --bundle --splitting --external:katex --external:shiki --external:mermaid --format=esm --platform=browser --outdir=docs --out-extension:.js=.mjs --entry-names=streaming-markdown.browser --chunk-names=streaming-markdown.[name]-[hash]",
+    "build:demo": "npm run build && rm -f docs/streaming-markdown.*.mjs && esbuild docs/browser-entry.mjs --bundle --splitting --external:katex --external:shiki --external:mermaid --format=esm --platform=browser --outdir=docs --out-extension:.js=.mjs --entry-names=streaming-markdown.browser --chunk-names=streaming-markdown.[name]-[hash] && tsx scripts/build-demo-assets.mts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
     "test:e2e": "node --import tsx --test tests/trusted-types.e2e.test.ts tests/mermaid-isolated.e2e.test.ts tests/mermaid-viewer.e2e.test.ts",
@@ -160,6 +170,7 @@
     "highlight.js": "^11.11.1",
     "katex": "^0.16.0 || ^0.17.0",
     "mermaid": "^11.0.0",
+    "pele": "^1.6.0",
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0",
     "shiki": "^4.3.1"
@@ -178,6 +189,9 @@
       "optional": true
     },
     "mermaid": {
+      "optional": true
+    },
+    "pele": {
       "optional": true
     },
     "react": {
@@ -204,6 +218,7 @@
     "jsdom": "^30.0.1",
     "katex": "^0.18.1",
     "mermaid": "^12.1.0",
+    "pele": "1.6.0",
     "playwright-core": "^1.61.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

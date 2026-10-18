@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify'
 import type { SanitizerBackend, SanitizerConfig } from './sanitize.ts'
+import type { TrustedHTMLValue } from './html-sink.ts'
 
 // DOMPurify sanitizer backend. This is the only module that imports `dompurify`,
 // so hosts that use the native Sanitizer API (or their own backend) never pull it
@@ -39,6 +40,22 @@ function withGate<T>(config: SanitizerConfig, run: () => T): T {
   } finally {
     activeOnElement = undefined
   }
+}
+
+/**
+ * Sanitize diagram SVG before hydration inserts it into the host document.
+ * Pass as hydratePendingDiagrams / StreamingMarkdownRenderer.hydrate's
+ * transformSvg hook. The SVG profile preserves shapes, markers and labels,
+ * while stripping scripts, event handlers, HTML and unsafe URLs.
+ *
+ * Returns TrustedHTML when Trusted Types is available (the host CSP must permit
+ * DOMPurify's policy), otherwise a sanitized string.
+ */
+export function sanitizeDiagramSvg(svg: string): string | TrustedHTMLValue {
+  return DOMPurify.sanitize(svg, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    RETURN_TRUSTED_TYPE: true,
+  })
 }
 
 export const dompurifyBackend: SanitizerBackend = {

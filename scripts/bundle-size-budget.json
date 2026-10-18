@@ -6,6 +6,7 @@
     "highlight.js",
     "katex",
     "mermaid",
+    "pele",
     "react",
     "react-dom",
     "shiki"
@@ -39,6 +40,14 @@
       "file": "dist/mermaid-mermaidjs.js",
       "gzipBudget": 500
     },
+    "./diagrams": {
+      "file": "dist/diagrams.js",
+      "gzipBudget": 500
+    },
+    "./diagrams/pele": {
+      "file": "dist/mermaid-pele.js",
+      "gzipBudget": 500
+    },
     "./math/katex": {
       "file": "dist/math-katex.js",
       "gzipBudget": 490
@@ -49,7 +58,7 @@
     },
     "./sanitizers/dompurify": {
       "file": "dist/sanitize-dompurify.js",
-      "gzipBudget": 390
+      "gzipBudget": 460
     },
     "./cjk": {
       "file": "dist/cjk.js",
