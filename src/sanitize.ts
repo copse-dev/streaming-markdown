@@ -95,9 +95,8 @@ const ALLOWED_ATTR = [
   'checked',
   'disabled',
   // GFM footnote anchors (#72): `id="fn-…"`/`id="fnref-…"` jump targets, plus the
-  // section's `id="footnote-label"` heading. The element gate below strips any id
-  // outside that renderer-emitted shape, so sanitized fragments can never mint
-  // arbitrary page-global names.
+  // section's `id="footnote-label"` heading. The element gate strips other IDs
+  // and isolates accepted IDs and their references in `user-content-`.
   'id',
   // GFM footnote / task-list accessibility hooks (#216/#217): `aria-label` on
   // task checkboxes and backrefs, `aria-describedby` linking a ref to the
@@ -193,6 +192,9 @@ export function getSanitizerBackend(): SanitizerBackend | null {
  * task-list `<input>`), letting the host drop or lock down its own tags (e.g.
  * remove any non-artifact `<img>` and strip its `src`). Set it per render via
  * `MarkdownConfig.sanitizeExtension`.
+ * `name` is always removed, and accepted footnote IDs and their fragment/ARIA
+ * references are isolated with `user-content-`, even when set by `onElement`.
+ * Reserve that namespace for untrusted content; use `data-*` for host metadata.
  *
  * **`data-*` caveat.** Custom data attributes pass generically (see
  * `DATA_ATTR_NAME_SOURCE`), so no host needs an `allowedAttr` entry for one.
@@ -222,17 +224,50 @@ export interface SanitizeExtension {
 // the native Sanitizer API.
 // The only ids the renderer emits: footnote jump targets (`fn-…`/`fnref-…`, each
 // optionally carrying a per-render `footnoteIdPrefix`) and the section's
-// `footnote-label` heading (#72/#216). Anything else is stripped so allowlisting
-// `id` cannot enable DOM clobbering of arbitrary page-global names.
+// `footnote-label` heading (#72/#216). Raw HTML can forge this shape, so reserve
+// a user-content namespace rather than exposing these as application names.
 const FOOTNOTE_ID_RE = /^(?:fn(?:ref)?-[A-Za-z0-9_-]+|[A-Za-z0-9_-]*footnote-label)$/
+const CONTENT_ID_PREFIX = 'user-content-'
+
+function isolatedFootnoteId(value: string): string | null {
+  // Idempotent: already-sanitized fragments can pass through the sink again.
+  const bare = value.startsWith(CONTENT_ID_PREFIX) ? value.slice(CONTENT_ID_PREFIX.length) : value
+  return FOOTNOTE_ID_RE.test(bare) ? CONTENT_ID_PREFIX + bare : null
+}
+
+function isolateNamedProperties(node: Element): void {
+  // Never allow a host's attribute extension to reopen document/window names.
+  // Hosts needing application metadata should use data-* instead of name.
+  node.removeAttribute('name')
+  const id = node.getAttribute('id')
+  if (id !== null) {
+    const isolated = isolatedFootnoteId(id)
+    if (isolated === null) node.removeAttribute('id')
+    else node.setAttribute('id', isolated)
+  }
+  const href = node.getAttribute('href')
+  if (href?.startsWith('#')) {
+    // URL fragments can encode the target ID (e.g. #fn%2Dnote).
+    let fragment = href.slice(1)
+    try {
+      fragment = decodeURIComponent(fragment)
+    } catch {
+      // Leave malformed URLs unchanged.
+    }
+    const isolated = isolatedFootnoteId(fragment)
+    if (isolated !== null) node.setAttribute('href', '#' + isolated)
+  }
+  for (const attr of ['aria-describedby', 'aria-labelledby']) {
+    const value = node.getAttribute(attr)
+    if (value !== null) {
+      node.setAttribute(attr, value.replace(/[^\t\n\f\r ]+/g, (token) => isolatedFootnoteId(token) ?? token))
+    }
+  }
+}
 
 function gateElement(node: Element, tagName: string): void {
-  // The DOMPurify backend's hook also fires for text/comment nodes, which
-  // carry no attributes — only real elements have an id to gate.
-  if (typeof node.getAttribute === 'function') {
-    const id = node.getAttribute('id')
-    if (id !== null && !FOOTNOTE_ID_RE.test(id)) node.removeAttribute('id')
-  }
+  // DOMPurify's hook also fires for text/comment nodes.
+  if (typeof node.getAttribute !== 'function') return
   if (tagName === 'input') {
     // Only the renderer's read-only task-list checkbox is allowed; drop any
     // other `<input>` (text fields, buttons, image inputs) entirely and force
@@ -242,6 +277,7 @@ function gateElement(node: Element, tagName: string): void {
       return
     }
     node.setAttribute('disabled', '')
+    isolateNamedProperties(node)
     return
   }
   // Core link/image origin policy (opt-in, off by default) — a no-op unless a
@@ -250,6 +286,9 @@ function gateElement(node: Element, tagName: string): void {
   applyLinkImagePolicy(node, tagName)
   // Host-specific gating (e.g. a remote-artifact `<img>` policy) runs here.
   activeConfig().sanitizeExtension?.onElement?.(node, tagName)
+  // Run after the host hook as well, so it cannot accidentally restore an
+  // unisolated id/name. The same gate runs on both string and node paths.
+  isolateNamedProperties(node)
 }
 
 function resolveBackend(): SanitizerBackend {

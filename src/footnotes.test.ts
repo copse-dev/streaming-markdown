@@ -208,19 +208,19 @@ describe('collectFootnoteDefinitions (#72)', () => {
 describe('footnote sanitizer surface (#72)', () => {
   it('footnote output survives sanitizeRenderedMarkdown', () => {
     const sanitized = sanitizeRenderedMarkdown(renderMarkdownUnsafe('A[^n].\n\n[^n]: body'))
-    assert.match(sanitized, /<sup class="footnote-ref"><a href="#fn-n" id="fnref-n"[^>]*>1<\/a><\/sup>/)
+    assert.match(sanitized, /<sup class="footnote-ref"><a href="#user-content-fn-n" id="user-content-fnref-n"[^>]*>1<\/a><\/sup>/)
     assert.match(sanitized, /<section class="footnotes"[^>]*>/)
-    assert.match(sanitized, /<li id="fn-n">/)
-    assert.match(sanitized, /<a href="#fnref-n" class="footnote-backref"[^>]*>↩<\/a>/)
+    assert.match(sanitized, /<li id="user-content-fn-n">/)
+    assert.match(sanitized, /<a href="#user-content-fnref-n" class="footnote-backref"[^>]*>↩<\/a>/)
   })
 
   it('retains the a11y hooks (aria/data/sr-only heading) through the sanitizer (#216)', () => {
     const sanitized = sanitizeRenderedMarkdown(renderMarkdownUnsafe('A[^n].\n\n[^n]: body'))
     // The visually-hidden heading and its id (aria-describedby target) survive.
-    assert.match(sanitized, /<h2 id="footnote-label" class="sr-only">Footnotes<\/h2>/)
+    assert.match(sanitized, /<h2 id="user-content-footnote-label" class="sr-only">Footnotes<\/h2>/)
     assert.match(sanitized, /data-footnotes/)
     // Ref link keeps its describedby + data hook.
-    assert.match(sanitized, /aria-describedby="footnote-label"/)
+    assert.match(sanitized, /aria-describedby="user-content-footnote-label"/)
     assert.match(sanitized, /data-footnote-ref/)
     // Backref keeps its label + data hook.
     assert.match(sanitized, /aria-label="Back to reference 1"/)
@@ -230,7 +230,7 @@ describe('footnote sanitizer surface (#72)', () => {
   it('strips ids outside the renderer-emitted footnote shape', () => {
     const sanitized = sanitizeRenderedMarkdown('<p id="body">x</p><li id="fn-ok">y</li>')
     assert.doesNotMatch(sanitized, /id="body"/)
-    assert.match(sanitized, /id="fn-ok"/)
+    assert.match(sanitized, /id="user-content-fn-ok"/)
   })
 })
 
