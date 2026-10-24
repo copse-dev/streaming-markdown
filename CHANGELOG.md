@@ -5,6 +5,22 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-10-24
+
+### Bug Fixes
+
+- isolate footnote IDs from application DOM names (#296) (`80d2d81`)
+
+### Chores
+
+- Bump the npm-minor-patch group across 1 directory with 5 updates (#293) (`340681b`)
+
+### Other Changes
+
+- Speed up demo diagram previews and prevent streaming flicker (#295) (`1e7e334`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.7.0...v1.8.0
+
 ## [1.7.0] - 2026-10-18
 
 ### Chores
