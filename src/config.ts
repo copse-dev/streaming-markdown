@@ -100,7 +100,8 @@ export interface MarkdownConfig {
    * (`id="fn-1"` / `id="fnref-1"`); single-render consumers need not set it.
    *
    * With a prefix the ids become `fn-<prefix><label>` / `fnref-<prefix><label>`
-   * (and the `href` jump targets track them), so two messages that both use
+   * in raw output; sanitized output additionally prepends `user-content-` to
+   * IDs and matching fragment/ARIA references. Two messages that both use
    * `[^1]` no longer both emit `id="fn-1"` and cross-link. Pass a **distinct,
    * attribute-safe** token per rendered message (e.g. `` `${messageId}-` ``,
    * characters in `[A-Za-z0-9_-]`). The value must be deterministic and stable

