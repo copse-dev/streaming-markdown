@@ -2,6 +2,7 @@ import { escapeHtml } from './escape.ts'
 import { INLINE_HTML_SHIELD_RE } from './inline-emphasis.ts'
 import { isAllowedHref } from './inline-links.ts'
 import { encodeHrefForOutput } from './link-references.ts'
+import { applyUrlPolicy, urlPolicyMarkerAttr } from './url-policy.ts'
 
 /**
  * CommonMark URI autolink: `<scheme:...>`. Scheme is an ASCII letter followed by
@@ -37,7 +38,9 @@ function autolinkHref(raw: string): string | null {
 function renderedAutolink(label: string, href: string): string {
   // Label stays raw so the outer `escapeHtmlTextNodes` pass escapes it exactly
   // once; pre-escaping here would double-encode `&` in URLs (`&amp;amp;`, #595).
-  return `<a href="${escapeHtml(href)}">${label}</a>`
+  const decided = applyUrlPolicy(href, 'navigation', 'markdown', 'a', 'href')
+  const hrefAttr = decided === null ? '' : ` href="${escapeHtml(decided)}"`
+  return `<a${hrefAttr}${urlPolicyMarkerAttr()}>${label}</a>`
 }
 
 /**
