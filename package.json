@@ -166,7 +166,7 @@
   },
   "peerDependencies": {
     "dompurify": "^3.4.11",
-    "entities": "^8.0.0",
+    "entities": "^9.0.0",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.0 || ^0.17.0",
     "mermaid": "^11.0.0",
@@ -212,7 +212,7 @@
     "c8": "^12.0.0",
     "commonmark-spec": "0.31.2",
     "dompurify": "^3.4.11",
-    "entities": "^8.0.0",
+    "entities": "^9.0.0",
     "esbuild": "^0.28.1",
     "highlight.js": "^11.11.1",
     "jsdom": "^30.0.1",
