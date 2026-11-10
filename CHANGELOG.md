@@ -5,6 +5,20 @@ generated at release time from the commits since the previous tag. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-11-10
+
+### Chores
+
+- Bump the npm-minor-patch group with 2 updates (#304) (`98db22e`)
+- Bump entities from 8.1.0 to 9.0.0 (#305) (`b20aa24`)
+- Bump the npm-minor-patch group across 1 directory with 7 updates (#303) (`5e7c630`)
+- Bump undici from 7.30.0 to 7.30.1 in /bench/competitors (#300) (`942f57c`)
+- Bump dompurify from 3.4.16 to 3.4.17 (#298) (`ee32fdc`)
+- Bump undici from 8.11.2 to 8.12.3 (#299) (`258e8c9`)
+- Bump dompurify from 3.4.16 to 3.4.17 in /bench/competitors (#297) (`7917686`)
+
+**Full Changelog**: https://github.com/copse-dev/streaming-markdown/compare/v1.8.0...v1.8.1
+
 ## [1.8.0] - 2026-10-24
 
 ### Bug Fixes
