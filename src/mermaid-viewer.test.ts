@@ -12,6 +12,14 @@ function diagramWithFrame(): { diagram: HTMLElement; frame: HTMLIFrameElement } 
   return { diagram, frame }
 }
 
+/**
+ * The frame's inline transform with a one-argument `translate(x)` spelled out
+ * as `translate(x, 0px)`. CSSOM serializers may drop a zero y (jsdom 31's
+ * cssstyle does, older ones and browsers keep it); both mean the same offset.
+ */
+const transformOf = (frame: HTMLElement): string =>
+  frame.style.transform.replace(/translate\(([^,()]+)\)/, 'translate($1, 0px)')
+
 const pointer = (type: string, init: PointerEventInit): PointerEvent =>
   new window.PointerEvent(type, { bubbles: true, button: 0, isPrimary: true, pointerId: 1, ...init })
 
@@ -44,7 +52,7 @@ describe('attachDiagramViewer', () => {
     zoomIn!.click()
     assert.equal(viewer.scale, 1.5)
     assert.equal(zoomIn!.disabled, true)
-    assert.equal(frame.style.transform, 'translate(0px, 0px) scale(1.5)')
+    assert.equal(transformOf(frame), 'translate(0px, 0px) scale(1.5)')
     for (let i = 0; i < 10; i++) zoomOut!.click()
     assert.equal(viewer.scale, 0.5)
     assert.equal(zoomOut!.disabled, true)
@@ -73,11 +81,11 @@ describe('attachDiagramViewer', () => {
       assert.equal(reset.disabled, false)
       reset.click()
       assert.equal(viewer.scale, bounds.initialScale)
-      assert.equal(frame.style.transform, `translate(0px, 0px) scale(${bounds.initialScale})`)
+      assert.equal(transformOf(frame), `translate(0px, 0px) scale(${bounds.initialScale})`)
       assert.equal(reset.disabled, true)
       viewer.panBy(10, 10)
       diagram.dispatchEvent(new window.KeyboardEvent('keydown', { key: '0', bubbles: true }))
-      assert.equal(frame.style.transform, `translate(0px, 0px) scale(${bounds.initialScale})`)
+      assert.equal(transformOf(frame), `translate(0px, 0px) scale(${bounds.initialScale})`)
       viewer.dispose()
       diagram.remove()
     })
@@ -112,20 +120,20 @@ describe('attachDiagramViewer', () => {
     assert.ok('viewerPanning' in diagram.dataset)
     diagram.dispatchEvent(pointer('pointermove', { clientX: 90, clientY: 50 }))
     diagram.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 50 }))
-    assert.equal(frame.style.transform, 'translate(80px, 40px) scale(1)')
+    assert.equal(transformOf(frame), 'translate(80px, 40px) scale(1)')
     assert.ok(!('viewerPanning' in diagram.dataset))
     // A press on a control is not a drag.
     toolbar.dispatchEvent(pointer('pointerdown', { clientX: 0, clientY: 0 }))
     diagram.dispatchEvent(pointer('pointermove', { clientX: 500, clientY: 500 }))
-    assert.equal(frame.style.transform, 'translate(80px, 40px) scale(1)')
+    assert.equal(transformOf(frame), 'translate(80px, 40px) scale(1)')
 
     const key = (k: string) =>
       diagram.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }))
     key('+')
     key('ArrowLeft')
-    assert.equal(frame.style.transform, 'translate(120px, 40px) scale(1.25)')
+    assert.equal(transformOf(frame), 'translate(120px, 40px) scale(1.25)')
     key('0')
-    assert.equal(frame.style.transform, 'translate(0px, 0px) scale(1)')
+    assert.equal(transformOf(frame), 'translate(0px, 0px) scale(1)')
     viewer.dispose()
     diagram.remove()
   })
@@ -140,12 +148,12 @@ describe('attachDiagramViewer', () => {
     assert.equal(viewer.scale, 1)
     viewer.zoomBy(0.5)
     viewer.panBy(5, 6)
-    assert.equal(frame.style.transform, 'translate(5px, 6px) scale(1.5)')
+    assert.equal(transformOf(frame), 'translate(5px, 6px) scale(1.5)')
     viewer.dispose()
     viewer.dispose()
     assert.ok(!diagram.classList.contains(DIAGRAM_VIEWER_CLASS))
     assert.equal(diagram.getAttribute('tabindex'), '-1')
-    assert.equal(frame.style.transform, '')
+    assert.equal(transformOf(frame), '')
     assert.equal(frame.style.pointerEvents, 'auto')
     assert.equal(diagram.style.overflow, '')
     assert.throws(() => attachDiagramViewer(document.createElement('div')), /no rendered diagram/)
@@ -202,7 +210,7 @@ describe('attachDiagramViewer', () => {
     viewer.reset()
     assert.equal(seen.length, count, 'nothing after dispose')
     assert.equal(events.length, count)
-    assert.equal(frame.style.transform, '', 'the handle no longer touches the diagram')
+    assert.equal(transformOf(frame), '', 'the handle no longer touches the diagram')
     document.body.removeEventListener(DIAGRAM_VIEWER_CHANGE_EVENT, onEvent)
     diagram.remove()
   })
@@ -235,7 +243,7 @@ describe('attachDiagramViewer', () => {
       diagram.dispatchEvent(pointer('pointerup', { clientX: 50, clientY: 50 }))
       el.dispatchEvent(new window.KeyboardEvent('keydown', { key: '+', bubbles: true, composed: true }))
     }
-    assert.equal(frame.style.transform, 'translate(0px, 0px) scale(1)')
+    assert.equal(transformOf(frame), 'translate(0px, 0px) scale(1)')
 
     for (const el of [plain, notEditable]) {
       el.dispatchEvent(pointer('pointerdown', { clientX: 0, clientY: 0 }))
@@ -259,7 +267,7 @@ describe('attachDiagramViewer', () => {
     diagram.dispatchEvent(pointer('pointerdown', { clientX: 0, clientY: 0 }))
     diagram.dispatchEvent(pointer('pointermove', { clientX: 7, clientY: 8 }))
     diagram.dispatchEvent(pointer('pointerup', { clientX: 7, clientY: 8 }))
-    assert.equal(frame.style.transform, 'translate(7px, 8px) scale(1)')
+    assert.equal(transformOf(frame), 'translate(7px, 8px) scale(1)')
     viewer.dispose()
     editor.remove()
   })

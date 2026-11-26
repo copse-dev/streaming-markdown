@@ -67,8 +67,12 @@ describe('tableWrapper: at-rest output', () => {
     const html = renderMarkdown(TABLE, {
       tableWrapper: { className: 'Tbl_wrap__x1 extra', label: 'Tableau "<b>" & co' },
     })
+    // The output is re-serialized by the DOM sanitizer, and serializers differ
+    // on `<`/`>` inside attribute values: newer ones (jsdom 31, current
+    // browsers) escape them, older ones leave them bare. Both are safe inside a
+    // quoted attribute, so accept either spelling and pin everything else.
     assert.equal(
-      html,
+      html.replace('&lt;b&gt;', '<b>'),
       '<div class="Tbl_wrap__x1 extra" role="region" aria-label="Tableau &quot;<b>&quot; &amp; co" tabindex="0">' +
         `${TABLE_HTML}</div>`,
     )
