@@ -708,11 +708,23 @@ function runSectionInChild(name: string, forwarded: string[]): Promise<ChildResu
       stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
     })
     let memory: SectionMemory | null = null
+    let settled = false
+    const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
+      if (settled) return
+      settled = true
+      resolveResult({ name, code, signal, ms: performance.now() - start, memory })
+    }
     child.on('message', (message: unknown) => {
       memory = message as SectionMemory
     })
-    child.on('exit', (code, signal) => {
-      resolveResult({ name, code, signal, ms: performance.now() - start, memory })
+    // 'close' (not 'exit'): it fires only once stdio AND the IPC channel have
+    // closed, so the child's last memory message has always been delivered.
+    child.on('close', settle)
+    // A failed spawn emits 'error' and may never emit 'close'; record it as a
+    // failed section instead of leaving the runner hanging.
+    child.on('error', (error) => {
+      console.error(`\nbench section '${name}' failed to start: ${error.message}`)
+      settle(1, null)
     })
   })
 }
@@ -787,7 +799,8 @@ async function main(): Promise<void> {
   }
   const failed = results.filter((r) => r.code !== 0)
   if (failed.length > 0) {
-    // Exit code 134 is a V8 heap OOM (SIGABRT); anything else is a thrown guard.
+    // A V8 heap OOM aborts the child, so it shows as `killed SIGABRT` (signal,
+    // no exit code); `exit 1` is a thrown guard or a section that failed to start.
     console.error(`\nbench failed in section(s): ${failed.map((r) => r.name).join(', ')}`)
     process.exitCode = 1
   }
