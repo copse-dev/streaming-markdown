@@ -86,6 +86,14 @@ can hold different policies without bleed (see [#137 / ADR 0003](decisions/0003-
   Never write raw `renderMarkdownUnsafe` output to `innerHTML`.
 - Provide a sanitizer backend where the native Sanitizer API is absent (Node,
   older browsers): the DOMPurify backend. Without one, `renderMarkdown` throws.
+  Under **jsdom** specifically, each string-path DOMPurify `sanitize` call
+  leaves memory behind that forced GC does not reclaim (roughly proportional to
+  the input size; about 1 MB per call at 4 KB inputs). A long-running jsdom SSR
+  loop should prefer the DOM emitter (`StreamingMarkdownRenderer`, which
+  sanitizes through the backend's `sanitizeInto` fragment path and barely
+  retains) or recycle its worker processes. Real browsers and the native
+  Sanitizer API are unaffected. See
+  [#231](https://github.com/copse-dev/streaming-markdown/issues/231).
 - If you register a mermaid/KaTeX/highlighter backend, you accept its output as
   trusted (post-sink). Pin and review those dependencies.
 

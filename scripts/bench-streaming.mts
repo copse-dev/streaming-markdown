@@ -12,18 +12,51 @@
  * The incremental DOM path should stay at or below the string path, and neither
  * should scale super-linearly with input size — a large jump for a modest input
  * growth is the O(n²) regression this harness exists to catch.
+ *
+ * Process isolation (#231): jsdom permanently retains the DOMPurify string
+ * path's per-call `DOMParser` document (~1 MB per sanitize at bench-sized
+ * inputs, surviving forced GC). Run in one process, that retention accumulates
+ * across every section until the job sits at a heap cliff. So by default this
+ * script is a thin runner: it spawns ONE CHILD PROCESS PER SECTION (sequentially,
+ * so timings don't contend), each with a fresh jsdom, and prints a per-section
+ * peak-memory summary at the end. A section that OOMs or trips its guard fails
+ * on its own and is named in the summary; the remaining sections still run.
+ *
+ *   npm run bench                          # all sections, one child each
+ *   npm run bench -- --section scaling     # just one section, in-process
+ *   npm run bench -- --in-process          # legacy: every section in one process
+ *
+ * Every section prints its own `memory:` line (rss / heap / peak RSS), so
+ * retention growth is visible in the CI artifact instead of surfacing as
+ * timing noise.
  */
-import '../tests/setup-dom-jsdom.ts'
 import { performance } from 'node:perf_hooks'
+import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { renderStreamingMarkdown, StreamingMarkdownRenderer } from '../src/streaming.ts'
-import { IncrementalSourceScanner } from '../src/incremental-scan.ts'
-import { tokenizeBlocks } from '../src/block-tokenizer.ts'
-import { setDefaultConfig } from '../src/config.ts'
-import { highlightjsHighlighter } from '../src/highlight-hljs.ts'
-import { loadBaselinePassingExamples } from '../tests/commonmark/baseline-examples.ts'
+import type { StreamingMarkdownRenderer as StreamingMarkdownRendererType } from '../src/streaming.ts'
+
+// The library + jsdom are loaded lazily by `loadBenchModules()` so the runner
+// process (which only spawns children) never creates a jsdom window itself.
+let renderStreamingMarkdown: typeof import('../src/streaming.ts').renderStreamingMarkdown
+let StreamingMarkdownRenderer: typeof import('../src/streaming.ts').StreamingMarkdownRenderer
+let IncrementalSourceScanner: typeof import('../src/incremental-scan.ts').IncrementalSourceScanner
+let tokenizeBlocks: typeof import('../src/block-tokenizer.ts').tokenizeBlocks
+let setDefaultConfig: typeof import('../src/config.ts').setDefaultConfig
+let highlightjsHighlighter: typeof import('../src/highlight-hljs.ts').highlightjsHighlighter
+let loadBaselinePassingExamples: typeof import('../tests/commonmark/baseline-examples.ts').loadBaselinePassingExamples
+
+async function loadBenchModules(): Promise<void> {
+  // Installs jsdom globals + the DOMPurify backend; must precede the library imports.
+  await import('../tests/setup-dom-jsdom.ts')
+  ;({ renderStreamingMarkdown, StreamingMarkdownRenderer } = await import('../src/streaming.ts'))
+  ;({ IncrementalSourceScanner } = await import('../src/incremental-scan.ts'))
+  ;({ tokenizeBlocks } = await import('../src/block-tokenizer.ts'))
+  ;({ setDefaultConfig } = await import('../src/config.ts'))
+  ;({ highlightjsHighlighter } = await import('../src/highlight-hljs.ts'))
+  ;({ loadBaselinePassingExamples } = await import('../tests/commonmark/baseline-examples.ts'))
+}
 
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -36,16 +69,23 @@ interface Args {
   iters: number
   warmup: number
   chunk: number
+  /** Run only this section, in this process (also how the runner invokes children). */
+  section: string | null
+  /** Run every section in this one process (the pre-#231 behaviour). */
+  inProcess: boolean
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { iters: 5, warmup: 2, chunk: 8 }
+  const args: Args = { iters: 5, warmup: 2, chunk: 8, section: null, inProcess: false }
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]
-    const value = Number(argv[i + 1])
+    const raw = argv[i + 1]
+    const value = Number(raw)
     if (flag === '--iters' && Number.isFinite(value)) args.iters = value
     if (flag === '--warmup' && Number.isFinite(value)) args.warmup = value
     if (flag === '--chunk' && Number.isFinite(value)) args.chunk = Math.max(1, value)
+    if (flag === '--section' && raw !== undefined) args.section = raw
+    if (flag === '--in-process') args.inProcess = true
   }
   return args
 }
@@ -183,411 +223,574 @@ function padLeft(text: string, width: number): string {
   return text.length >= width ? text : ' '.repeat(width - text.length) + text
 }
 
-const args = parseArgs(process.argv.slice(2))
-const fixtures: { name: string; text: string }[] = [
-  { name: 'commonmark-mixed', text: commonMarkMixed() },
-  { name: 'terms-of-service', text: termsOfService() },
-  { name: 'synthetic-table+list', text: syntheticTableAndList() },
-  { name: 'footnotes-heavy', text: footnoteDoc(80) },
-]
-
-console.log(
-  `streaming-markdown bench — iters=${String(args.iters)} warmup=${String(args.warmup)} chunk=${String(args.chunk)} (node ${process.version})\n`,
-)
-const cols = [
-  pad('fixture', 22),
-  padLeft('bytes', 8),
-  padLeft('updates', 9),
-  padLeft('string ms', 11),
-  padLeft('dom ms', 9),
-  padLeft('dom/str', 9),
-]
-console.log(cols.join('  '))
-console.log('-'.repeat(cols.join('  ').length))
-
-for (const { name, text } of fixtures) {
-  const chunk = effectiveChunk(text.length, args.chunk)
-  const updates = chunkBoundaries(text.length, chunk).length
-  const stringMs = measure(() => benchStringPath(text, chunk), args.iters, args.warmup)
-  const domMs = measure(() => benchDomPath(text, chunk), args.iters, args.warmup)
-  const ratio = stringMs > 0 ? domMs / stringMs : 0
-  console.log(
-    [
-      pad(name, 22),
-      padLeft(String(text.length), 8),
-      padLeft(String(updates), 9),
-      padLeft(stringMs.toFixed(2), 11),
-      padLeft(domMs.toFixed(2), 9),
-      padLeft(ratio.toFixed(2) + '×', 9),
-    ].join('  '),
-  )
+/** The concatenated real-document corpus (#154), shared by real-document and work-shape. */
+function corpusUnitDoc(): string {
+  return CORPUS_FILES.map(corpusDoc).join('\n\n')
 }
 
-// Scaling section (#21): stream a plain-prose document at a FIXED chunk size so
-// the number of updates grows with the input. Doubling the paragraph count shows
-// how the DOM path scales. With the frozen/tail split (Layer 2) plus tail-scoped
-// pending queries, per-commit work is O(tail) and per-frame DOM work is O(1), so
-// this grows ~1.7×/doubling across the range (down from ~4× for the unoptimized
-// full-re-render path). The residual super-linearity is the per-update tokenize
-// + link-ref string scans (limitation K), ~1% of wall-clock here.
-function prose(paras: number): string {
-  return (
-    Array.from(
-      { length: paras },
-      (_, i) =>
-        `Paragraph ${String(i)} has some **bold**, \`code\`, *emphasis* and a [link](https://example.com/${String(i)}) plus a few trailing words.`,
-    ).join('\n\n') + '\n'
-  )
-}
+function sectionFixtures(args: Args): void {
+  const fixtures: { name: string; text: string }[] = [
+    { name: 'commonmark-mixed', text: commonMarkMixed() },
+    { name: 'terms-of-service', text: termsOfService() },
+    { name: 'synthetic-table+list', text: syntheticTableAndList() },
+    { name: 'footnotes-heavy', text: footnoteDoc(80) },
+  ]
 
-console.log('\nscaling — DOM path, fixed 32-byte chunk (updates grow with size)\n')
-const scaleCols = [pad('paras', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
-console.log(scaleCols.join('  '))
-console.log('-'.repeat(scaleCols.join('  ').length))
-let prevScaleMs = 0
-const growthFactors: number[] = []
-for (const paras of [25, 50, 100]) {
-  const text = prose(paras)
-  const updates = chunkBoundaries(text.length, 32).length
-  const domMs = measure(() => benchDomPath(text, 32), args.iters, args.warmup)
-  const factor = prevScaleMs > 0 ? domMs / prevScaleMs : 0
-  if (factor > 0) growthFactors.push(factor)
-  console.log(
-    [
-      pad(String(paras), 8),
-      padLeft(String(text.length), 8),
-      padLeft(String(updates), 9),
-      padLeft(domMs.toFixed(2), 10),
-      padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
-    ].join('  '),
-  )
-  prevScaleMs = domMs
-}
+  const cols = [
+    pad('fixture', 22),
+    padLeft('bytes', 8),
+    padLeft('updates', 9),
+    padLeft('string ms', 11),
+    padLeft('dom ms', 9),
+    padLeft('dom/str', 9),
+  ]
+  console.log(cols.join('  '))
+  console.log('-'.repeat(cols.join('  ').length))
 
-// Regression guard (#21 acceptance criterion). Doubling the input roughly
-// doubles the DOM streaming time once the committed prefix is frozen; the
-// unoptimized full-re-render path grew ~4×/doubling. Assert the mean stays well
-// under that. Generous (< 3×) so ordinary jsdom timing noise never trips it; a
-// return to O(prefix)-per-commit committed rendering would push it back toward
-// 4× and fail here. Bench is a manual script, so this gates local regressions,
-// not CI.
-const meanGrowth = growthFactors.reduce((a, x) => a + x, 0) / growthFactors.length
-console.log(`\nmean growth per doubling: ${meanGrowth.toFixed(2)}× (regression guard: < 3.0×)`)
-if (meanGrowth >= 3.0) {
-  throw new Error(
-    `DOM streaming scaled ${meanGrowth.toFixed(2)}×/doubling — expected sub-quadratic (< 3×). ` +
-      `A committed-prefix re-render regression (#21) is the likely cause.`,
-  )
-}
-
-// Footnote scaling (#110): stream a footnote-heavy document at a FIXED chunk so
-// updates grow with size. The old path full-re-morphed on every commit once `[^`
-// was present, so this grew ~4×/doubling (100 paras ≈ 3.5s, 200 ≈ 15s). With the
-// incremental footnote path — re-morphing only the reference blocks a definition
-// changed plus the new section items — it grows sub-quadratically.
-console.log('\nfootnote scaling — DOM path, fixed 48-byte chunk (updates grow with size)\n')
-console.log(scaleCols.join('  '))
-console.log('-'.repeat(scaleCols.join('  ').length))
-let prevFnMs = 0
-const fnGrowthFactors: number[] = []
-for (const paras of [50, 100, 200]) {
-  const text = footnoteDoc(paras)
-  const updates = chunkBoundaries(text.length, 48).length
-  const domMs = measure(() => benchDomPath(text, 48), args.iters, args.warmup)
-  const factor = prevFnMs > 0 ? domMs / prevFnMs : 0
-  if (factor > 0) fnGrowthFactors.push(factor)
-  console.log(
-    [
-      pad(String(paras), 8),
-      padLeft(String(text.length), 8),
-      padLeft(String(updates), 9),
-      padLeft(domMs.toFixed(2), 10),
-      padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
-    ].join('  '),
-  )
-  prevFnMs = domMs
-}
-
-const meanFnGrowth = fnGrowthFactors.reduce((a, x) => a + x, 0) / fnGrowthFactors.length
-// The incremental footnote path (#110) now re-renders only the newly-resolved
-// reference block and appends only the new section item per commit, and skips the
-// O(items) pending-sweep over the committed footnotes section (#133) — so it
-// scales ~O(n) (~2.2×/doubling here, flat across the range), down from the rising
-// ~2.6–3.3× curve before #133 and far from the pre-#110 full-re-morph (~4.3×).
-// The guard (re-tightened from the interim < 3.8× once #133 landed) catches a
-// regression back toward per-commit full re-render.
-console.log(`\nfootnote mean growth per doubling: ${meanFnGrowth.toFixed(2)}× (regression guard: < 3.0×)`)
-if (meanFnGrowth >= 3.0) {
-  throw new Error(
-    `Footnote DOM streaming scaled ${meanFnGrowth.toFixed(2)}×/doubling — expected ~O(n) ` +
-      `(< 3.0×; see #133). A regression to per-commit full re-render on '[^' (#110) is the likely cause.`,
-  )
-}
-
-// Incremental-scan section (#111): the string scan (`tokenizeBlocks` over the
-// stream) is the residual super-linear cost (limitation K). `scannedChars` is
-// the deterministic, timing-free count of characters actually re-tokenized over
-// a whole append-only stream. The #30 resume keeps it O(n) for prose, but before
-// #111 a loose LIST or a BLOCKQUOTE re-tokenized from its container top on every
-// update — ~40-140× the prose baseline — because no safe boundary was ever
-// established inside the container. These fixtures guard both shapes: the list-
-// and quote-shaped `scan/prose` ratios should stay a small multiple of 1×, not
-// balloon back toward two orders of magnitude.
-function scannedChars(text: string): number {
-  const scanner = new IncrementalSourceScanner()
-  const cuts = chunkBoundaries(text.length, 1)
-  for (const cut of cuts) scanner.tokenize(text.slice(0, cut))
-  return scanner.scannedChars
-}
-
-/** N items joined by blank lines — the loose-list / blockquote LLM answer shape. */
-function shaped(kind: 'prose' | 'ordered' | 'unordered' | 'quote', items: number): string {
-  const body = (i: number): string =>
-    `Point ${String(i)} with **bold**, \`code_${String(i)}\`, *emphasis* and a [link](https://example.com/${String(i)}) of prose.`
-  const line = (i: number): string => {
-    if (kind === 'ordered') return `${String(i + 1)}. ${body(i)}`
-    if (kind === 'unordered') return `- ${body(i)}`
-    if (kind === 'quote') return `> ${body(i)}`
-    return body(i)
-  }
-  return Array.from({ length: items }, (_, i) => line(i)).join('\n\n') + '\n'
-}
-
-/** A single blockquote continued by many unmarked lazy lines (the O(n³) shape). */
-function lazyQuote(lines: number): string {
-  return (
-    '> quote start of a long lazily-continued blockquote paragraph\n' +
-    Array.from({ length: lines }, (_, i) => `lazy continuation line ${String(i)} of the same quote paragraph`).join('\n') +
-    '\n'
-  )
-}
-
-console.log('\nincremental scan — scannedChars over an append-only stream (char-by-char)\n')
-const scanCols = [pad('shape', 22), padLeft('bytes', 8), padLeft('scanned', 12), padLeft('scan/prose', 12)]
-console.log(scanCols.join('  '))
-console.log('-'.repeat(scanCols.join('  ').length))
-const SCAN_ITEMS = 40
-const proseScanned = scannedChars(shaped('prose', SCAN_ITEMS))
-const scanShapes: { name: string; text: string }[] = [
-  { name: 'prose (baseline)', text: shaped('prose', SCAN_ITEMS) },
-  { name: 'list-loose-ordered', text: shaped('ordered', SCAN_ITEMS) },
-  { name: 'list-loose-unordered', text: shaped('unordered', SCAN_ITEMS) },
-  { name: 'blockquote-paras', text: shaped('quote', SCAN_ITEMS) },
-  { name: 'blockquote-lazy', text: lazyQuote(SCAN_ITEMS) },
-]
-let worstScanRatio = 0
-for (const { name, text } of scanShapes) {
-  const chars = scannedChars(text)
-  const ratio = proseScanned > 0 ? chars / proseScanned : 0
-  if (name !== 'prose (baseline)') worstScanRatio = Math.max(worstScanRatio, ratio)
-  console.log(
-    [pad(name, 22), padLeft(String(text.length), 8), padLeft(String(chars), 12), padLeft(ratio.toFixed(1) + '×', 12)].join(
-      '  ',
-    ),
-  )
-}
-console.log(
-  `\nworst list-/quote-shaped scan ratio: ${worstScanRatio.toFixed(1)}× prose (regression guard: < 20×; pre-#111 was ~40-140×)`,
-)
-if (worstScanRatio >= 20) {
-  throw new Error(
-    `A list-/blockquote-shaped stream re-tokenized ${worstScanRatio.toFixed(1)}× the prose baseline — expected a small ` +
-      `multiple. The incremental-scan safe boundary stopped advancing inside an extendable container (#111).`,
-  )
-}
-
-// A single lazily-continued blockquote has no interior boundary, so it re-scans
-// per update either way — but each `tokenizeBlocks` used to be O(lines²) because
-// `endsInOpenParagraph` re-tokenized the whole stripped prefix per candidate
-// line, making the stream O(n³). #111 memoises that to O(1)/line, so one full
-// tokenize is now O(lines). Measure the per-tokenize growth per doubling: it
-// should be ~linear (~2×), not quadratic (~4×).
-console.log('\nblockquote lazy continuation — tokenizeBlocks growth per doubling (endsInOpenParagraph, #111)\n')
-const lazyCols = [pad('lines', 8), padLeft('bytes', 8), padLeft('tokenize ms', 13), padLeft('vs prev', 9)]
-console.log(lazyCols.join('  '))
-console.log('-'.repeat(lazyCols.join('  ').length))
-let prevLazyMs = 0
-const lazyGrowth: number[] = []
-for (const lines of [200, 400, 800]) {
-  const text = lazyQuote(lines)
-  const ms = measure(
-    () => {
-      const start = performance.now()
-      tokenizeBlocks(text)
-      return performance.now() - start
-    },
-    Math.max(3, args.iters),
-    args.warmup,
-  )
-  const factor = prevLazyMs > 0 ? ms / prevLazyMs : 0
-  if (factor > 0) lazyGrowth.push(factor)
-  console.log(
-    [pad(String(lines), 8), padLeft(String(text.length), 8), padLeft(ms.toFixed(3), 13), padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9)].join('  '),
-  )
-  prevLazyMs = ms
-}
-const meanLazyGrowth = lazyGrowth.reduce((a, x) => a + x, 0) / lazyGrowth.length
-console.log(`\nmean tokenize growth per doubling: ${meanLazyGrowth.toFixed(2)}× (regression guard: < 3.0×; quadratic ≈ 4×)`)
-if (meanLazyGrowth >= 3.0) {
-  throw new Error(
-    `Lazy-blockquote tokenize scaled ${meanLazyGrowth.toFixed(2)}×/doubling — expected ~linear (< 3×). ` +
-      `A per-candidate re-tokenize of the stripped quote prefix (#111) is the likely cause.`,
-  )
-}
-
-// Code-block scaling (#155): stream a document of many fenced code blocks at a
-// FIXED chunk so the number of *closed* (frozen) blocks grows with the input.
-// Each closed fence is frozen once, so it is highlighted a single time — doubling
-// the block count should ~double the work, not square it. A regression that stops
-// freezing closed code blocks (re-highlighting the whole growing prefix on every
-// update) is the super-linear cost this guards. Measured WITH a highlighter
-// registered because re-highlight cost is what dominates real code-heavy traces,
-// and it produces the number the eventual published benchmark reports for
-// code-heavy content. Kept deliberately light (few blocks, coarse chunk, DOM path
-// only) since it runs last in an already memory-heavy process — the string-path
-// O(n²) re-render over code blocks is intentionally NOT measured here (it
-// dominates peak heap and isn't what the frozen-tail guard is about).
-console.log('\ncode-block scaling — DOM path + highlight.js, fixed 64-byte chunk (closed blocks grow with size)\n')
-const codeScaleCols = [pad('blocks', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
-console.log(codeScaleCols.join('  '))
-console.log('-'.repeat(codeScaleCols.join('  ').length))
-setDefaultConfig({ codeHighlighter: highlightjsHighlighter })
-const codeIters = Math.min(args.iters, 3)
-let prevCodeMs = 0
-const codeGrowth: number[] = []
-for (const blocks of [10, 20, 40]) {
-  const text = codeBlocksDoc(blocks)
-  const updates = chunkBoundaries(text.length, 64).length
-  const domMs = measure(() => benchDomPath(text, 64), codeIters, args.warmup)
-  const factor = prevCodeMs > 0 ? domMs / prevCodeMs : 0
-  if (factor > 0) codeGrowth.push(factor)
-  console.log(
-    [
-      pad(String(blocks), 8),
-      padLeft(String(text.length), 8),
-      padLeft(String(updates), 9),
-      padLeft(domMs.toFixed(2), 10),
-      padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
-    ].join('  '),
-  )
-  prevCodeMs = domMs
-}
-setDefaultConfig({ codeHighlighter: null })
-
-const meanCodeGrowth = codeGrowth.reduce((a, x) => a + x, 0) / codeGrowth.length
-console.log(
-  `\ncode-block mean growth per doubling (highlighter on): ${meanCodeGrowth.toFixed(2)}× (regression guard: < 3.0×; re-highlight-all ≈ 4×)`,
-)
-if (meanCodeGrowth >= 3.0) {
-  throw new Error(
-    `Code-block DOM streaming scaled ${meanCodeGrowth.toFixed(2)}×/doubling with a highlighter — expected ~O(n) ` +
-      `(< 3×; see #155). A regression to re-highlighting closed/frozen code blocks per update is the likely cause.`,
-  )
-}
-
-// Real-document scaling (#154): make the per-doubling growth guard representative
-// of REAL content, not only synthetic prose. Concatenate the hand-collected
-// corpus (mixed prose/code/tables/task-lists/footnotes/blockquotes) and stream it
-// at growing repetitions through the DOM path at a fixed chunk, so the update
-// count grows with size. Frozen-tail commit is O(tail), so doubling the document
-// should ~double the work; a regression to O(prefix)-per-commit re-render pushes
-// this toward 4×. DOM path only (the string path's O(n²) is guarded elsewhere and
-// would dominate the CI bench heap on a large concatenation).
-const corpusUnit = CORPUS_FILES.map(corpusDoc).join('\n\n')
-console.log('\nreal-document scaling — DOM path, fixed 64-byte chunk (corpus repeated, updates grow with size)\n')
-const realScaleCols = [pad('×corpus', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
-console.log(realScaleCols.join('  '))
-console.log('-'.repeat(realScaleCols.join('  ').length))
-let prevRealMs = 0
-const realGrowth: number[] = []
-for (const reps of [1, 2, 4]) {
-  const text = Array.from({ length: reps }, () => corpusUnit).join('\n\n')
-  const updates = chunkBoundaries(text.length, 64).length
-  const domMs = measure(() => benchDomPath(text, 64), Math.min(args.iters, 3), args.warmup)
-  const factor = prevRealMs > 0 ? domMs / prevRealMs : 0
-  if (factor > 0) realGrowth.push(factor)
-  console.log(
-    [
-      pad(`${String(reps)}×`, 8),
-      padLeft(String(text.length), 8),
-      padLeft(String(updates), 9),
-      padLeft(domMs.toFixed(2), 10),
-      padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
-    ].join('  '),
-  )
-  prevRealMs = domMs
-}
-const meanRealGrowth = realGrowth.reduce((a, x) => a + x, 0) / realGrowth.length
-console.log(`\nreal-document mean growth per doubling: ${meanRealGrowth.toFixed(2)}× (regression guard: < 3.0×)`)
-if (meanRealGrowth >= 3.0) {
-  throw new Error(
-    `Real-document DOM streaming scaled ${meanRealGrowth.toFixed(2)}×/doubling — expected ~O(n) (< 3×; see #154). ` +
-      `An O(prefix)-per-commit committed-re-render regression is the likely cause.`,
-  )
-}
-
-// Work-shape guard (ADR 0004 Phase 3): the wall-clock doubling guards above are
-// generous (< 3×) because jsdom timing is noisy; these op-count assertions are
-// EXACT, so a shape regression fails deterministically even when noise hides it.
-// Stream the corpus doubling series again reading the renderer's timing-free
-// diagnostics: per-update scan/render/parse work must stay O(new bytes)
-// (~2×/doubling), and the O(prefix) rewrite-guard memcmp must run at most once
-// per scanner call — its count is the tripwire for the measured super-linear
-// long-document terms (a second memcmp per update, or per-update token-array
-// copying, both found by Chromium doubling probes at 200-400 kB).
-console.log('\nwork-shape scaling — timing-free diagnostics over the corpus doubling series (ADR 0004 Phase 3)\n')
-const shapeCols = [pad('×corpus', 8), padLeft('updates', 9), padLeft('scanned', 10), padLeft('sufTokens', 10), padLeft('rendered', 10), padLeft('parsed', 10), padLeft('pfxChecks', 10)]
-console.log(shapeCols.join('  '))
-console.log('-'.repeat(shapeCols.join('  ').length))
-interface ShapePoint {
-  updates: number
-  diag: ReturnType<StreamingMarkdownRenderer['diagnostics']>
-}
-const shapePoints: ShapePoint[] = []
-for (const reps of [1, 2, 4]) {
-  const text = Array.from({ length: reps }, () => corpusUnit).join('\n\n')
-  const host = document.createElement('div')
-  const renderer = new StreamingMarkdownRenderer(host)
-  const cuts = chunkBoundaries(text.length, 64)
-  for (const cut of cuts) renderer.update(text.slice(0, cut))
-  const diag = renderer.diagnostics()
-  shapePoints.push({ updates: cuts.length, diag })
-  console.log(
-    [
-      pad(`${String(reps)}×`, 8),
-      padLeft(String(cuts.length), 9),
-      padLeft(String(diag.scannedChars), 10),
-      padLeft(String(diag.suffixTokensScanned), 10),
-      padLeft(String(diag.renderedChars), 10),
-      padLeft(String(diag.parsedChars), 10),
-      padLeft(String(diag.prefixChecks), 10),
-    ].join('  '),
-  )
-}
-const LINEAR_KEYS = ['scannedChars', 'suffixTokensScanned', 'renderedChars', 'parsedChars'] as const
-for (let i = 1; i < shapePoints.length; i++) {
-  const prev = shapePoints[i - 1]
-  const cur = shapePoints[i]
-  if (!prev || !cur) continue
-  for (const key of LINEAR_KEYS) {
-    const factor: number = cur.diag[key] / Math.max(1, prev.diag[key])
-    if (factor >= 2.6) {
-      throw new Error(
-        `work-shape: ${key} grew ${factor.toFixed(2)}× on a 2× larger corpus ` +
-          `(${String(prev.diag[key])} → ${String(cur.diag[key])}) — per-update work is no longer O(new bytes) (ADR 0004 Phase 3).`,
-      )
-    }
-  }
-}
-for (const point of shapePoints) {
-  // One advance on the content scanner per update + one on the complete
-  // scanner per commit (commits ≤ updates), and NOTHING else — the definition
-  // views must ride the advance's verification via their identity fast path.
-  if (point.diag.prefixChecks > 2 * point.updates + 4) {
-    throw new Error(
-      `work-shape: ${String(point.diag.prefixChecks)} rewrite-guard comparisons for ` +
-        `${String(point.updates)} updates — a per-update caller is re-running the O(prefix) memcmp (ADR 0004 Phase 3).`,
+  for (const { name, text } of fixtures) {
+    const chunk = effectiveChunk(text.length, args.chunk)
+    const updates = chunkBoundaries(text.length, chunk).length
+    const stringMs = measure(() => benchStringPath(text, chunk), args.iters, args.warmup)
+    const domMs = measure(() => benchDomPath(text, chunk), args.iters, args.warmup)
+    const ratio = stringMs > 0 ? domMs / stringMs : 0
+    console.log(
+      [
+        pad(name, 22),
+        padLeft(String(text.length), 8),
+        padLeft(String(updates), 9),
+        padLeft(stringMs.toFixed(2), 11),
+        padLeft(domMs.toFixed(2), 9),
+        padLeft(ratio.toFixed(2) + '×', 9),
+      ].join('  '),
     )
   }
 }
-console.log('\nwork-shape growth per doubling within bounds (linear counters < 2.6×; prefix checks ≤ 2/update)')
+
+function sectionScaling(args: Args): void {
+  // Scaling section (#21): stream a plain-prose document at a FIXED chunk size so
+  // the number of updates grows with the input. Doubling the paragraph count shows
+  // how the DOM path scales. With the frozen/tail split (Layer 2) plus tail-scoped
+  // pending queries, per-commit work is O(tail) and per-frame DOM work is O(1), so
+  // this grows ~1.7×/doubling across the range (down from ~4× for the unoptimized
+  // full-re-render path). The residual super-linearity is the per-update tokenize
+  // + link-ref string scans (limitation K), ~1% of wall-clock here.
+  function prose(paras: number): string {
+    return (
+      Array.from(
+        { length: paras },
+        (_, i) =>
+          `Paragraph ${String(i)} has some **bold**, \`code\`, *emphasis* and a [link](https://example.com/${String(i)}) plus a few trailing words.`,
+      ).join('\n\n') + '\n'
+    )
+  }
+
+  console.log('\nscaling — DOM path, fixed 32-byte chunk (updates grow with size)\n')
+  const scaleCols = [pad('paras', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
+  console.log(scaleCols.join('  '))
+  console.log('-'.repeat(scaleCols.join('  ').length))
+  let prevScaleMs = 0
+  const growthFactors: number[] = []
+  for (const paras of [25, 50, 100]) {
+    const text = prose(paras)
+    const updates = chunkBoundaries(text.length, 32).length
+    const domMs = measure(() => benchDomPath(text, 32), args.iters, args.warmup)
+    const factor = prevScaleMs > 0 ? domMs / prevScaleMs : 0
+    if (factor > 0) growthFactors.push(factor)
+    console.log(
+      [
+        pad(String(paras), 8),
+        padLeft(String(text.length), 8),
+        padLeft(String(updates), 9),
+        padLeft(domMs.toFixed(2), 10),
+        padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
+      ].join('  '),
+    )
+    prevScaleMs = domMs
+  }
+
+  // Regression guard (#21 acceptance criterion). Doubling the input roughly
+  // doubles the DOM streaming time once the committed prefix is frozen; the
+  // unoptimized full-re-render path grew ~4×/doubling. Assert the mean stays well
+  // under that. Generous (< 3×) so ordinary jsdom timing noise never trips it; a
+  // return to O(prefix)-per-commit committed rendering would push it back toward
+  // 4× and fail here. Bench is a manual script, so this gates local regressions,
+  // not CI.
+  const meanGrowth = growthFactors.reduce((a, x) => a + x, 0) / growthFactors.length
+  console.log(`\nmean growth per doubling: ${meanGrowth.toFixed(2)}× (regression guard: < 3.0×)`)
+  if (meanGrowth >= 3.0) {
+    throw new Error(
+      `DOM streaming scaled ${meanGrowth.toFixed(2)}×/doubling — expected sub-quadratic (< 3×). ` +
+        `A committed-prefix re-render regression (#21) is the likely cause.`,
+    )
+  }
+}
+
+function sectionFootnoteScaling(args: Args): void {
+  // Footnote scaling (#110): stream a footnote-heavy document at a FIXED chunk so
+  // updates grow with size. The old path full-re-morphed on every commit once `[^`
+  // was present, so this grew ~4×/doubling (100 paras ≈ 3.5s, 200 ≈ 15s). With the
+  // incremental footnote path — re-morphing only the reference blocks a definition
+  // changed plus the new section items — it grows sub-quadratically.
+  console.log('\nfootnote scaling — DOM path, fixed 48-byte chunk (updates grow with size)\n')
+  const scaleCols = [pad('paras', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
+  console.log(scaleCols.join('  '))
+  console.log('-'.repeat(scaleCols.join('  ').length))
+  let prevFnMs = 0
+  const fnGrowthFactors: number[] = []
+  for (const paras of [50, 100, 200]) {
+    const text = footnoteDoc(paras)
+    const updates = chunkBoundaries(text.length, 48).length
+    const domMs = measure(() => benchDomPath(text, 48), args.iters, args.warmup)
+    const factor = prevFnMs > 0 ? domMs / prevFnMs : 0
+    if (factor > 0) fnGrowthFactors.push(factor)
+    console.log(
+      [
+        pad(String(paras), 8),
+        padLeft(String(text.length), 8),
+        padLeft(String(updates), 9),
+        padLeft(domMs.toFixed(2), 10),
+        padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
+      ].join('  '),
+    )
+    prevFnMs = domMs
+  }
+
+  const meanFnGrowth = fnGrowthFactors.reduce((a, x) => a + x, 0) / fnGrowthFactors.length
+  // The incremental footnote path (#110) now re-renders only the newly-resolved
+  // reference block and appends only the new section item per commit, and skips the
+  // O(items) pending-sweep over the committed footnotes section (#133) — so it
+  // scales ~O(n) (~2.2×/doubling here, flat across the range), down from the rising
+  // ~2.6–3.3× curve before #133 and far from the pre-#110 full-re-morph (~4.3×).
+  // The guard (re-tightened from the interim < 3.8× once #133 landed) catches a
+  // regression back toward per-commit full re-render.
+  console.log(`\nfootnote mean growth per doubling: ${meanFnGrowth.toFixed(2)}× (regression guard: < 3.0×)`)
+  if (meanFnGrowth >= 3.0) {
+    throw new Error(
+      `Footnote DOM streaming scaled ${meanFnGrowth.toFixed(2)}×/doubling — expected ~O(n) ` +
+        `(< 3.0×; see #133). A regression to per-commit full re-render on '[^' (#110) is the likely cause.`,
+    )
+  }
+}
+
+function sectionIncrementalScan(args: Args): void {
+  // Incremental-scan section (#111): the string scan (`tokenizeBlocks` over the
+  // stream) is the residual super-linear cost (limitation K). `scannedChars` is
+  // the deterministic, timing-free count of characters actually re-tokenized over
+  // a whole append-only stream. The #30 resume keeps it O(n) for prose, but before
+  // #111 a loose LIST or a BLOCKQUOTE re-tokenized from its container top on every
+  // update — ~40-140× the prose baseline — because no safe boundary was ever
+  // established inside the container. These fixtures guard both shapes: the list-
+  // and quote-shaped `scan/prose` ratios should stay a small multiple of 1×, not
+  // balloon back toward two orders of magnitude.
+  function scannedChars(text: string): number {
+    const scanner = new IncrementalSourceScanner()
+    const cuts = chunkBoundaries(text.length, 1)
+    for (const cut of cuts) scanner.tokenize(text.slice(0, cut))
+    return scanner.scannedChars
+  }
+
+  /** N items joined by blank lines — the loose-list / blockquote LLM answer shape. */
+  function shaped(kind: 'prose' | 'ordered' | 'unordered' | 'quote', items: number): string {
+    const body = (i: number): string =>
+      `Point ${String(i)} with **bold**, \`code_${String(i)}\`, *emphasis* and a [link](https://example.com/${String(i)}) of prose.`
+    const line = (i: number): string => {
+      if (kind === 'ordered') return `${String(i + 1)}. ${body(i)}`
+      if (kind === 'unordered') return `- ${body(i)}`
+      if (kind === 'quote') return `> ${body(i)}`
+      return body(i)
+    }
+    return Array.from({ length: items }, (_, i) => line(i)).join('\n\n') + '\n'
+  }
+
+  /** A single blockquote continued by many unmarked lazy lines (the O(n³) shape). */
+  function lazyQuote(lines: number): string {
+    return (
+      '> quote start of a long lazily-continued blockquote paragraph\n' +
+      Array.from({ length: lines }, (_, i) => `lazy continuation line ${String(i)} of the same quote paragraph`).join('\n') +
+      '\n'
+    )
+  }
+
+  console.log('\nincremental scan — scannedChars over an append-only stream (char-by-char)\n')
+  const scanCols = [pad('shape', 22), padLeft('bytes', 8), padLeft('scanned', 12), padLeft('scan/prose', 12)]
+  console.log(scanCols.join('  '))
+  console.log('-'.repeat(scanCols.join('  ').length))
+  const SCAN_ITEMS = 40
+  const proseScanned = scannedChars(shaped('prose', SCAN_ITEMS))
+  const scanShapes: { name: string; text: string }[] = [
+    { name: 'prose (baseline)', text: shaped('prose', SCAN_ITEMS) },
+    { name: 'list-loose-ordered', text: shaped('ordered', SCAN_ITEMS) },
+    { name: 'list-loose-unordered', text: shaped('unordered', SCAN_ITEMS) },
+    { name: 'blockquote-paras', text: shaped('quote', SCAN_ITEMS) },
+    { name: 'blockquote-lazy', text: lazyQuote(SCAN_ITEMS) },
+  ]
+  let worstScanRatio = 0
+  for (const { name, text } of scanShapes) {
+    const chars = scannedChars(text)
+    const ratio = proseScanned > 0 ? chars / proseScanned : 0
+    if (name !== 'prose (baseline)') worstScanRatio = Math.max(worstScanRatio, ratio)
+    console.log(
+      [pad(name, 22), padLeft(String(text.length), 8), padLeft(String(chars), 12), padLeft(ratio.toFixed(1) + '×', 12)].join(
+        '  ',
+      ),
+    )
+  }
+  console.log(
+    `\nworst list-/quote-shaped scan ratio: ${worstScanRatio.toFixed(1)}× prose (regression guard: < 20×; pre-#111 was ~40-140×)`,
+  )
+  if (worstScanRatio >= 20) {
+    throw new Error(
+      `A list-/blockquote-shaped stream re-tokenized ${worstScanRatio.toFixed(1)}× the prose baseline — expected a small ` +
+        `multiple. The incremental-scan safe boundary stopped advancing inside an extendable container (#111).`,
+    )
+  }
+
+  // A single lazily-continued blockquote has no interior boundary, so it re-scans
+  // per update either way — but each `tokenizeBlocks` used to be O(lines²) because
+  // `endsInOpenParagraph` re-tokenized the whole stripped prefix per candidate
+  // line, making the stream O(n³). #111 memoises that to O(1)/line, so one full
+  // tokenize is now O(lines). Measure the per-tokenize growth per doubling: it
+  // should be ~linear (~2×), not quadratic (~4×).
+  console.log('\nblockquote lazy continuation — tokenizeBlocks growth per doubling (endsInOpenParagraph, #111)\n')
+  const lazyCols = [pad('lines', 8), padLeft('bytes', 8), padLeft('tokenize ms', 13), padLeft('vs prev', 9)]
+  console.log(lazyCols.join('  '))
+  console.log('-'.repeat(lazyCols.join('  ').length))
+  let prevLazyMs = 0
+  const lazyGrowth: number[] = []
+  for (const lines of [200, 400, 800]) {
+    const text = lazyQuote(lines)
+    const ms = measure(
+      () => {
+        const start = performance.now()
+        tokenizeBlocks(text)
+        return performance.now() - start
+      },
+      Math.max(3, args.iters),
+      args.warmup,
+    )
+    const factor = prevLazyMs > 0 ? ms / prevLazyMs : 0
+    if (factor > 0) lazyGrowth.push(factor)
+    console.log(
+      [pad(String(lines), 8), padLeft(String(text.length), 8), padLeft(ms.toFixed(3), 13), padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9)].join('  '),
+    )
+    prevLazyMs = ms
+  }
+  const meanLazyGrowth = lazyGrowth.reduce((a, x) => a + x, 0) / lazyGrowth.length
+  console.log(`\nmean tokenize growth per doubling: ${meanLazyGrowth.toFixed(2)}× (regression guard: < 3.0×; quadratic ≈ 4×)`)
+  if (meanLazyGrowth >= 3.0) {
+    throw new Error(
+      `Lazy-blockquote tokenize scaled ${meanLazyGrowth.toFixed(2)}×/doubling — expected ~linear (< 3×). ` +
+        `A per-candidate re-tokenize of the stripped quote prefix (#111) is the likely cause.`,
+    )
+  }
+}
+
+function sectionCodeBlock(args: Args): void {
+  // Code-block scaling (#155): stream a document of many fenced code blocks at a
+  // FIXED chunk so the number of *closed* (frozen) blocks grows with the input.
+  // Each closed fence is frozen once, so it is highlighted a single time — doubling
+  // the block count should ~double the work, not square it. A regression that stops
+  // freezing closed code blocks (re-highlighting the whole growing prefix on every
+  // update) is the super-linear cost this guards. Measured WITH a highlighter
+  // registered because re-highlight cost is what dominates real code-heavy traces,
+  // and it produces the number the eventual published benchmark reports for
+  // code-heavy content. Kept deliberately light (few blocks, coarse chunk, DOM path
+  // only) since it runs last in an already memory-heavy process — the string-path
+  // O(n²) re-render over code blocks is intentionally NOT measured here (it
+  // dominates peak heap and isn't what the frozen-tail guard is about).
+  console.log('\ncode-block scaling — DOM path + highlight.js, fixed 64-byte chunk (closed blocks grow with size)\n')
+  const codeScaleCols = [pad('blocks', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
+  console.log(codeScaleCols.join('  '))
+  console.log('-'.repeat(codeScaleCols.join('  ').length))
+  setDefaultConfig({ codeHighlighter: highlightjsHighlighter })
+  const codeIters = Math.min(args.iters, 3)
+  let prevCodeMs = 0
+  const codeGrowth: number[] = []
+  for (const blocks of [10, 20, 40]) {
+    const text = codeBlocksDoc(blocks)
+    const updates = chunkBoundaries(text.length, 64).length
+    const domMs = measure(() => benchDomPath(text, 64), codeIters, args.warmup)
+    const factor = prevCodeMs > 0 ? domMs / prevCodeMs : 0
+    if (factor > 0) codeGrowth.push(factor)
+    console.log(
+      [
+        pad(String(blocks), 8),
+        padLeft(String(text.length), 8),
+        padLeft(String(updates), 9),
+        padLeft(domMs.toFixed(2), 10),
+        padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
+      ].join('  '),
+    )
+    prevCodeMs = domMs
+  }
+  setDefaultConfig({ codeHighlighter: null })
+
+  const meanCodeGrowth = codeGrowth.reduce((a, x) => a + x, 0) / codeGrowth.length
+  console.log(
+    `\ncode-block mean growth per doubling (highlighter on): ${meanCodeGrowth.toFixed(2)}× (regression guard: < 3.0×; re-highlight-all ≈ 4×)`,
+  )
+  if (meanCodeGrowth >= 3.0) {
+    throw new Error(
+      `Code-block DOM streaming scaled ${meanCodeGrowth.toFixed(2)}×/doubling with a highlighter — expected ~O(n) ` +
+        `(< 3×; see #155). A regression to re-highlighting closed/frozen code blocks per update is the likely cause.`,
+    )
+  }
+}
+
+function sectionRealDocument(args: Args): void {
+  // Real-document scaling (#154): make the per-doubling growth guard representative
+  // of REAL content, not only synthetic prose. Concatenate the hand-collected
+  // corpus (mixed prose/code/tables/task-lists/footnotes/blockquotes) and stream it
+  // at growing repetitions through the DOM path at a fixed chunk, so the update
+  // count grows with size. Frozen-tail commit is O(tail), so doubling the document
+  // should ~double the work; a regression to O(prefix)-per-commit re-render pushes
+  // this toward 4×. DOM path only (the string path's O(n²) is guarded elsewhere and
+  // would dominate the CI bench heap on a large concatenation).
+  const corpusUnit = corpusUnitDoc()
+  console.log('\nreal-document scaling — DOM path, fixed 64-byte chunk (corpus repeated, updates grow with size)\n')
+  const realScaleCols = [pad('×corpus', 8), padLeft('bytes', 8), padLeft('updates', 9), padLeft('dom ms', 10), padLeft('vs prev', 9)]
+  console.log(realScaleCols.join('  '))
+  console.log('-'.repeat(realScaleCols.join('  ').length))
+  let prevRealMs = 0
+  const realGrowth: number[] = []
+  for (const reps of [1, 2, 4]) {
+    const text = Array.from({ length: reps }, () => corpusUnit).join('\n\n')
+    const updates = chunkBoundaries(text.length, 64).length
+    const domMs = measure(() => benchDomPath(text, 64), Math.min(args.iters, 3), args.warmup)
+    const factor = prevRealMs > 0 ? domMs / prevRealMs : 0
+    if (factor > 0) realGrowth.push(factor)
+    console.log(
+      [
+        pad(`${String(reps)}×`, 8),
+        padLeft(String(text.length), 8),
+        padLeft(String(updates), 9),
+        padLeft(domMs.toFixed(2), 10),
+        padLeft(factor > 0 ? `${factor.toFixed(2)}×` : '—', 9),
+      ].join('  '),
+    )
+    prevRealMs = domMs
+  }
+  const meanRealGrowth = realGrowth.reduce((a, x) => a + x, 0) / realGrowth.length
+  console.log(`\nreal-document mean growth per doubling: ${meanRealGrowth.toFixed(2)}× (regression guard: < 3.0×)`)
+  if (meanRealGrowth >= 3.0) {
+    throw new Error(
+      `Real-document DOM streaming scaled ${meanRealGrowth.toFixed(2)}×/doubling — expected ~O(n) (< 3×; see #154). ` +
+        `An O(prefix)-per-commit committed-re-render regression is the likely cause.`,
+    )
+  }
+}
+
+function sectionWorkShape(_args: Args): void {
+  // Work-shape guard (ADR 0004 Phase 3): the wall-clock doubling guards above are
+  // generous (< 3×) because jsdom timing is noisy; these op-count assertions are
+  // EXACT, so a shape regression fails deterministically even when noise hides it.
+  // Stream the corpus doubling series again reading the renderer's timing-free
+  // diagnostics: per-update scan/render/parse work must stay O(new bytes)
+  // (~2×/doubling), and the O(prefix) rewrite-guard memcmp must run at most once
+  // per scanner call — its count is the tripwire for the measured super-linear
+  // long-document terms (a second memcmp per update, or per-update token-array
+  // copying, both found by Chromium doubling probes at 200-400 kB).
+  console.log('\nwork-shape scaling — timing-free diagnostics over the corpus doubling series (ADR 0004 Phase 3)\n')
+  const shapeCols = [pad('×corpus', 8), padLeft('updates', 9), padLeft('scanned', 10), padLeft('sufTokens', 10), padLeft('rendered', 10), padLeft('parsed', 10), padLeft('pfxChecks', 10)]
+  console.log(shapeCols.join('  '))
+  console.log('-'.repeat(shapeCols.join('  ').length))
+  interface ShapePoint {
+    updates: number
+    diag: ReturnType<StreamingMarkdownRendererType['diagnostics']>
+  }
+  const shapePoints: ShapePoint[] = []
+  const corpusUnit = corpusUnitDoc()
+  for (const reps of [1, 2, 4]) {
+    const text = Array.from({ length: reps }, () => corpusUnit).join('\n\n')
+    const host = document.createElement('div')
+    const renderer = new StreamingMarkdownRenderer(host)
+    const cuts = chunkBoundaries(text.length, 64)
+    for (const cut of cuts) renderer.update(text.slice(0, cut))
+    const diag = renderer.diagnostics()
+    shapePoints.push({ updates: cuts.length, diag })
+    console.log(
+      [
+        pad(`${String(reps)}×`, 8),
+        padLeft(String(cuts.length), 9),
+        padLeft(String(diag.scannedChars), 10),
+        padLeft(String(diag.suffixTokensScanned), 10),
+        padLeft(String(diag.renderedChars), 10),
+        padLeft(String(diag.parsedChars), 10),
+        padLeft(String(diag.prefixChecks), 10),
+      ].join('  '),
+    )
+  }
+  const LINEAR_KEYS = ['scannedChars', 'suffixTokensScanned', 'renderedChars', 'parsedChars'] as const
+  for (let i = 1; i < shapePoints.length; i++) {
+    const prev = shapePoints[i - 1]
+    const cur = shapePoints[i]
+    if (!prev || !cur) continue
+    for (const key of LINEAR_KEYS) {
+      const factor: number = cur.diag[key] / Math.max(1, prev.diag[key])
+      if (factor >= 2.6) {
+        throw new Error(
+          `work-shape: ${key} grew ${factor.toFixed(2)}× on a 2× larger corpus ` +
+            `(${String(prev.diag[key])} → ${String(cur.diag[key])}) — per-update work is no longer O(new bytes) (ADR 0004 Phase 3).`,
+        )
+      }
+    }
+  }
+  for (const point of shapePoints) {
+    // One advance on the content scanner per update + one on the complete
+    // scanner per commit (commits ≤ updates), and NOTHING else — the definition
+    // views must ride the advance's verification via their identity fast path.
+    if (point.diag.prefixChecks > 2 * point.updates + 4) {
+      throw new Error(
+        `work-shape: ${String(point.diag.prefixChecks)} rewrite-guard comparisons for ` +
+          `${String(point.updates)} updates — a per-update caller is re-running the O(prefix) memcmp (ADR 0004 Phase 3).`,
+      )
+    }
+  }
+  console.log('\nwork-shape growth per doubling within bounds (linear counters < 2.6×; prefix checks ≤ 2/update)')
+}
+
+// ---------------------------------------------------------------------------
+// Section dispatch + per-section process isolation (#231)
+// ---------------------------------------------------------------------------
+
+const SECTIONS: { name: string; run: (args: Args) => void }[] = [
+  { name: 'fixtures', run: sectionFixtures },
+  { name: 'scaling', run: sectionScaling },
+  { name: 'footnote-scaling', run: sectionFootnoteScaling },
+  { name: 'incremental-scan', run: sectionIncrementalScan },
+  { name: 'code-block', run: sectionCodeBlock },
+  { name: 'real-document', run: sectionRealDocument },
+  { name: 'work-shape', run: sectionWorkShape },
+]
+
+interface SectionMemory {
+  rssMb: number
+  heapUsedMb: number
+  peakRssMb: number
+}
+
+const mb = (bytes: number): number => Math.round(bytes / (1024 * 1024))
+
+function memorySnapshot(): SectionMemory {
+  const usage = process.memoryUsage()
+  // resourceUsage().maxRSS is in kilobytes: the process's peak resident set so far.
+  return { rssMb: mb(usage.rss), heapUsedMb: mb(usage.heapUsed), peakRssMb: Math.round(process.resourceUsage().maxRSS / 1024) }
+}
+
+function printMemory(label: string, memory: SectionMemory): void {
+  console.log(
+    `\nmemory [${label}]: rss ${String(memory.rssMb)} MB, heapUsed ${String(memory.heapUsedMb)} MB, ` +
+      `peak rss ${String(memory.peakRssMb)} MB`,
+  )
+}
+
+function banner(args: Args, mode: string): void {
+  console.log(
+    `streaming-markdown bench — iters=${String(args.iters)} warmup=${String(args.warmup)} chunk=${String(args.chunk)} ` +
+      `(node ${process.version}, ${mode})\n`,
+  )
+}
+
+interface ChildResult {
+  name: string
+  code: number | null
+  signal: NodeJS.Signals | null
+  ms: number
+  memory: SectionMemory | null
+}
+
+/** Run one section in a fresh child process, inheriting stdio, and collect its memory report over IPC. */
+function runSectionInChild(name: string, forwarded: string[]): Promise<ChildResult> {
+  const start = performance.now()
+  return new Promise((resolveResult) => {
+    // execArgv carries tsx's loader flags; NODE_OPTIONS (the CI heap cap) is inherited via env.
+    const child = spawn(process.execPath, [...process.execArgv, fileURLToPath(import.meta.url), '--section', name, ...forwarded], {
+      stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+    })
+    let memory: SectionMemory | null = null
+    child.on('message', (message: unknown) => {
+      memory = message as SectionMemory
+    })
+    child.on('exit', (code, signal) => {
+      resolveResult({ name, code, signal, ms: performance.now() - start, memory })
+    })
+  })
+}
+
+/** argv minus the runner-only flags, forwarded verbatim to each child. */
+function forwardedArgs(argv: string[]): string[] {
+  const out: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i] ?? ''
+    if (flag === '--in-process') continue
+    if (flag === '--section') {
+      i++
+      continue
+    }
+    out.push(flag)
+  }
+  return out
+}
+
+async function main(): Promise<void> {
+  const argv = process.argv.slice(2)
+  const args = parseArgs(argv)
+
+  if (args.section !== null) {
+    const section = SECTIONS.find((s) => s.name === args.section)
+    if (!section) {
+      throw new Error(`unknown bench section '${args.section}' — expected one of: ${SECTIONS.map((s) => s.name).join(', ')}`)
+    }
+    // A child spawned by the runner has an IPC channel; a direct `--section` run prints its own banner.
+    if (!process.send) banner(args, `section ${section.name}, in-process`)
+    else console.log(`\n=== section: ${section.name} ===`)
+    await loadBenchModules()
+    section.run(args)
+    const memory = memorySnapshot()
+    printMemory(section.name, memory)
+    process.send?.(memory)
+    return
+  }
+
+  if (args.inProcess) {
+    banner(args, 'all sections in one process')
+    await loadBenchModules()
+    for (const section of SECTIONS) {
+      section.run(args)
+      // Cumulative within one process: growth between lines is retention carried across sections.
+      printMemory(`after ${section.name}`, memorySnapshot())
+    }
+    return
+  }
+
+  banner(args, 'one child process per section')
+  const forwarded = forwardedArgs(argv)
+  const results: ChildResult[] = []
+  // Sequential on purpose: concurrent children would contend for CPU and skew the timings.
+  for (const section of SECTIONS) results.push(await runSectionInChild(section.name, forwarded))
+
+  console.log('\nsection summary — each section ran in its own process (#231)\n')
+  const summaryCols = [pad('section', 18), padLeft('result', 14), padLeft('wall s', 8), padLeft('heapUsed MB', 12), padLeft('peak rss MB', 12)]
+  console.log(summaryCols.join('  '))
+  console.log('-'.repeat(summaryCols.join('  ').length))
+  for (const r of results) {
+    const result = r.code === 0 ? 'ok' : r.signal ? `killed ${r.signal}` : `exit ${String(r.code)}`
+    console.log(
+      [
+        pad(r.name, 18),
+        padLeft(result, 14),
+        padLeft((r.ms / 1000).toFixed(1), 8),
+        padLeft(r.memory ? String(r.memory.heapUsedMb) : '—', 12),
+        padLeft(r.memory ? String(r.memory.peakRssMb) : '—', 12),
+      ].join('  '),
+    )
+  }
+  const failed = results.filter((r) => r.code !== 0)
+  if (failed.length > 0) {
+    // Exit code 134 is a V8 heap OOM (SIGABRT); anything else is a thrown guard.
+    console.error(`\nbench failed in section(s): ${failed.map((r) => r.name).join(', ')}`)
+    process.exitCode = 1
+  }
+}
+
+await main()
