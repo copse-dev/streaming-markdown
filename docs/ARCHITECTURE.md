@@ -673,7 +673,19 @@ each to completion:
 ```
 npm run bench              # defaults: iters=5 warmup=2 chunk=8
 npm run bench -- --iters 9 --chunk 4
+npm run bench -- --section real-document   # one section, in this process
+npm run bench -- --in-process              # every section in one process
 ```
+
+By default each section (`fixtures`, `scaling`, `footnote-scaling`,
+`incremental-scan`, `code-block`, `real-document`, `work-shape`) runs in its own
+child process, one after another. jsdom permanently retains memory on every
+string-path DOMPurify `sanitize` call ([#231](https://github.com/copse-dev/streaming-markdown/issues/231)),
+so in a single process that retention from the string-path `fixtures` table
+(about 3.5 GB) carries into every later section. Each section prints a
+`memory [...]` line, and the runner ends with a summary of per-section wall
+time, exit status and peak RSS, so a section that OOMs or trips its guard is
+named and the rest still run.
 
 | Column      | Meaning                                                           |
 | ----------- | ----------------------------------------------------------------- |
