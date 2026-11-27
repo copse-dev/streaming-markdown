@@ -1,5 +1,19 @@
 import { decodeEscapedPunctuationRaw } from './backslash-escapes.ts'
 import { activeConfig } from './config.ts'
+import {
+  applyUrlPolicy,
+  DEFAULT_SAFE_HREF_SCHEMES,
+  getSafeHrefSchemes,
+  isAllowedHref,
+  urlPolicyMarkerAttr,
+  withUrlPolicySuppressed,
+} from './url-policy.ts'
+
+// The scheme allowlist moved to url-policy.ts so the floor can be enforced on
+// every URL path — including the ones that never reach this module (post-sink
+// diagram/math markup) and the value a host policy hands back. Re-exported here
+// because this is where the package's surface has always named it.
+export { DEFAULT_SAFE_HREF_SCHEMES, getSafeHrefSchemes, isAllowedHref }
 import { decodeEscapedHref, escapeHtml } from './escape.ts'
 import { isWorkspaceMarkdownLinkHref } from './workspace-link-href.ts'
 import {
@@ -57,65 +71,18 @@ function lookupWithRenderedLabels(
 }
 
 /**
- * Default URL schemes permitted on a link/image destination. Anything carrying
- * a scheme outside the active set — `javascript:`, `data:`, `vbscript:`,
- * `file:`, and every unknown scheme — is rejected. An allowlist fails *closed*:
- * a new dangerous scheme is blocked by default, unlike a denylist that only
- * knows the three it was told about. Relative/absolute paths, fragments, and
- * query-only destinations carry no scheme and are always allowed.
- */
-export const DEFAULT_SAFE_HREF_SCHEMES: readonly string[] = [
-  'http',
-  'https',
-  'mailto',
-  'tel',
-  'sms',
-  'ftp',
-  'ftps',
-]
-
-const HREF_SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):/
-
-const DEFAULT_SAFE_HREF_SCHEMES_SET: ReadonlySet<string> = new Set(DEFAULT_SAFE_HREF_SCHEMES)
-
-// `config.safeHrefSchemes` is an arbitrary iterable of possibly-mixed-case scheme
-// names; resolve it to a lowercased Set once per distinct config value (the read
-// runs per link/image destination).
-let cachedSchemesSource: Iterable<string> | null | undefined
-let cachedSchemes: ReadonlySet<string> = DEFAULT_SAFE_HREF_SCHEMES_SET
-function activeSafeHrefSchemes(): ReadonlySet<string> {
-  const source = activeConfig().safeHrefSchemes
-  if (source == null) return DEFAULT_SAFE_HREF_SCHEMES_SET
-  if (source !== cachedSchemesSource) {
-    cachedSchemesSource = source
-    cachedSchemes = new Set(Array.from(source, (scheme) => scheme.toLowerCase()))
-  }
-  return cachedSchemes
-}
-
-/**
- * The scheme allowlist currently enforced by {@link safeLinkHref}.
+ * Allowed link destinations: http(s), mailto, and relative/path forms. Rejects
+ * dangerous schemes.
  *
- * @internal Introspection getter that reads the ambient render config; outside
- * a render it returns {@link DEFAULT_SAFE_HREF_SCHEMES}. Not part of the stable v1
- * surface (#147) — scope behaviour via `MarkdownConfig.safeHrefSchemes` instead
- * (the default constant stays stable). Not exported from the package entry since 1.0.
+ * This is a *parse* gate — whether the construct renders as a link at all — and
+ * deliberately does NOT consult the host {@link UrlPolicy}. `linkOrImageEndAt`
+ * calls it to probe link boundaries for the emphasis pass and throws the result
+ * away, so a policy consulted here would see every link twice and would make a
+ * host's decision change how emphasis pairs. The policy applies at the emitters
+ * instead ({@link renderAnchor} / `renderedImage`), where a blocked destination
+ * drops the attribute and keeps the element — the same neutralization the sink's
+ * origin policy performs.
  */
-export function getSafeHrefSchemes(): string[] {
-  return [...activeSafeHrefSchemes()]
-}
-
-/**
- * True when `href` is a relative destination or carries an allowlisted scheme.
- * Exported so angle autolinks share the exact allowlist markdown links use
- * (#139) — autolink destinations are verbatim (no escapes to decode first).
- */
-export function isAllowedHref(href: string): boolean {
-  const scheme = HREF_SCHEME_RE.exec(href)?.[1]
-  return scheme === undefined || activeSafeHrefSchemes().has(scheme.toLowerCase())
-}
-
-/** Allowed link destinations: http(s), mailto, and relative/path forms. Rejects dangerous schemes. */
 export function safeLinkHref(raw: string): string | null {
   // Resolve to the exact string the browser will act on *before* validating:
   // undo source HTML-escaping and PUA-escaped punctuation, then decode HTML
@@ -184,7 +151,12 @@ export function renderAnchor(label: string, href: string, title?: string): strin
   }
   const decorator = activeConfig().linkDecorator ?? neutralLinkDecorator
   const attrs = decorator(decoration)
-  return `<a href="${escapeHtml(href)}"${attrs}>${label}</a>`
+  // A blocked destination leaves the anchor in place without an `href`: the
+  // label stays readable and nothing is navigable, matching how the sink's
+  // origin policy neutralizes an off-origin link.
+  const decided = applyUrlPolicy(href, 'navigation', 'markdown', 'a', 'href')
+  const hrefAttr = decided === null ? '' : ` href="${escapeHtml(decided)}"`
+  return `<a${hrefAttr}${attrs}${urlPolicyMarkerAttr()}>${label}</a>`
 }
 
 function renderedLink(label: string, href: string, title?: string): string {
@@ -207,7 +179,10 @@ function imageAltText(renderedLabel: string): string {
 
 function renderedImage(alt: string, src: string, title?: string): string {
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
-  return `<img src="${escapeHtml(src)}" alt="${escapeHtml(imageAltText(alt))}"${titleAttr} data-md-rendered="1" />`
+  // Blocked: drop the `src` so nothing loads and the `alt` still shows.
+  const decided = applyUrlPolicy(src, 'image', 'markdown', 'img', 'src')
+  const srcAttr = decided === null ? '' : ` src="${escapeHtml(decided)}"`
+  return `<img${srcAttr} alt="${escapeHtml(imageAltText(alt))}"${titleAttr} data-md-rendered="1"${urlPolicyMarkerAttr()} />`
 }
 
 function renderLinkLabel(
@@ -265,7 +240,11 @@ export function linkOrImageEndAt(
   start: number,
   refs: LinkReferenceMap = new Map(),
 ): number | null {
-  return tryParseLinkOrImage(text, start, refs, (label) => label)?.end ?? null
+  // The rendered HTML is discarded here — only the offset matters — so the host
+  // URL policy must not see these destinations (url-policy.ts).
+  return withUrlPolicySuppressed(
+    () => tryParseLinkOrImage(text, start, refs, (label) => label)?.end ?? null,
+  )
 }
 
 /**

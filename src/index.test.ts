@@ -28,6 +28,9 @@ const EXPECTED_FUNCTIONS = [
   'hydratePendingDiagrams',
   'hydratePendingMath',
   'renderAnchor',
+  // PROTOTYPE (#url-policy): lets a host run the URL policy over post-sink
+  // markup by hand, through `transformSvg` / `transformHtml`.
+  'filterMarkupUrlsString',
 ] as const
 
 describe('public API barrel (index.ts)', () => {
